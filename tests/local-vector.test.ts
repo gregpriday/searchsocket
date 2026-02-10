@@ -37,7 +37,7 @@ function record(id: string, vector: number[], url: string, tags: string[]): Vect
 describe("LocalVectorStore", () => {
   it("supports query filtering by pathPrefix and tags", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "searchsocket-local-"));
-    const dbPath = path.join(dir, "local-vectors.sqlite");
+    const dbPath = path.join(dir, "local-vectors.json");
 
     const store = new LocalVectorStore(dbPath);
 

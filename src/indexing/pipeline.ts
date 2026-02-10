@@ -12,7 +12,6 @@ import { createEmbeddingsProvider } from "../embeddings";
 import { SearchSocketError } from "../errors";
 import { createVectorStore } from "../vector";
 import { chunkMirrorPage } from "./chunker";
-import { EmbeddingCache } from "./embedding-cache";
 import { extractFromHtml, extractFromMarkdown } from "./extractor";
 import { cleanMirrorForScope, writeMirrorPage } from "./mirror";
 import { buildRoutePatterns, mapUrlToRoute } from "./route-mapper";
@@ -77,7 +76,7 @@ export class IndexPipeline {
     const cwd = path.resolve(options.cwd ?? process.cwd());
     const config = options.config ?? (await loadConfig({ cwd, configPath: options.configPath }));
     const embeddings = options.embeddingsProvider ?? createEmbeddingsProvider(config);
-    const vectorStore = options.vectorStore ?? createVectorStore(config, cwd);
+    const vectorStore = options.vectorStore ?? await createVectorStore(config, cwd);
 
     return new IndexPipeline({
       cwd,
@@ -197,11 +196,17 @@ export class IndexPipeline {
     for (const page of extractedPages) {
       const routeMatch = mapUrlToRoute(page.url, routePatterns);
 
-      if (this.config.source.strictRouteMapping && routeMatch.routeResolution === "best-effort") {
-        throw new SearchSocketError(
-          "INVALID_REQUEST",
-          `Strict route mapping enabled: no exact route match for ${page.url} (resolved to ${routeMatch.routeFile}). ` +
-            "Disable source.strictRouteMapping or add the missing route file."
+      if (routeMatch.routeResolution === "best-effort") {
+        if (this.config.source.strictRouteMapping) {
+          throw new SearchSocketError(
+            "INVALID_REQUEST",
+            `Strict route mapping enabled: no exact route match for ${page.url} (resolved to ${routeMatch.routeFile}). ` +
+              "Disable source.strictRouteMapping or add the missing route file."
+          );
+        }
+
+        this.logger.warn(
+          `No exact route match for ${page.url}, falling back to ${routeMatch.routeFile}.`
         );
       }
 
@@ -265,8 +270,7 @@ export class IndexPipeline {
 
     const deletes = Object.keys(scopeManifest.chunks).filter((chunkKey) => !currentChunkMap.has(chunkKey));
 
-    const cacheStart = stageStart();
-    const cache = new EmbeddingCache(path.join(statePath, "embeddings-cache.sqlite"));
+    const embedStart = stageStart();
 
     const chunkTokenEstimates = new Map<string, number>();
     for (const chunk of changedChunks) {
@@ -284,49 +288,28 @@ export class IndexPipeline {
         EMBEDDING_PRICE_PER_1K_TOKENS_USD["text-embedding-3-small"] ??
         DEFAULT_EMBEDDING_PRICE_PER_1K);
 
-    let cachedEmbeddings = 0;
     let newEmbeddings = 0;
     const vectorsByChunk = new Map<string, number[]>();
-    const missing: Chunk[] = [];
 
-    for (const chunk of changedChunks) {
-      const cached = cache.get(chunk.contentHash, this.config.embeddings.model);
-      if (cached) {
-        vectorsByChunk.set(chunk.chunkKey, cached.embedding);
-        cachedEmbeddings += 1;
-        this.logger.event("embedded_cached", { chunkKey: chunk.chunkKey });
-      } else {
-        missing.push(chunk);
-      }
-    }
-
-    if (!options.dryRun && missing.length > 0) {
+    if (!options.dryRun && changedChunks.length > 0) {
       const embeddings = await this.embeddings.embedTexts(
-        missing.map((chunk) => chunk.chunkText),
+        changedChunks.map((chunk) => chunk.chunkText),
         this.config.embeddings.model
       );
 
-      for (let i = 0; i < missing.length; i += 1) {
-        const chunk = missing[i];
+      for (let i = 0; i < changedChunks.length; i += 1) {
+        const chunk = changedChunks[i];
         const embedding = embeddings[i];
         if (!chunk || !embedding) {
           continue;
         }
         vectorsByChunk.set(chunk.chunkKey, embedding);
         newEmbeddings += 1;
-
-        cache.put(
-          chunk.contentHash,
-          this.config.embeddings.model,
-          embedding,
-          chunkTokenEstimates.get(chunk.chunkKey) ?? this.embeddings.estimateTokens(chunk.chunkText)
-        );
-
         this.logger.event("embedded_new", { chunkKey: chunk.chunkKey });
       }
     }
 
-    stageEnd("embedding", cacheStart);
+    stageEnd("embedding", embedStart);
 
     const syncStart = stageStart();
     if (!options.dryRun) {
@@ -413,14 +396,12 @@ export class IndexPipeline {
       });
     }
 
-    cache.close();
     stageEnd("finalize", finalizeStart);
 
     return {
       pagesProcessed: mirrorPages.length,
       chunksTotal: chunks.length,
       chunksChanged: changedChunks.length,
-      cachedEmbeddings,
       newEmbeddings,
       deletes: deletes.length,
       estimatedTokens,

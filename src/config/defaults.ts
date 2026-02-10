@@ -66,7 +66,7 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
         collection: `${projectId}_chunks`
       },
       local: {
-        path: ".searchsocket/local-vectors.sqlite"
+        path: ".searchsocket/local-vectors.json"
       }
     },
     rerank: {

@@ -80,7 +80,7 @@ export default {
 ### Local
 
 - `vector.provider = "local"`
-- `vector.local.path` (default `.searchsocket/local-vectors.sqlite`)
+- `vector.local.path` (default `.searchsocket/local-vectors.json`)
 
 ## Reranking
 

@@ -54,7 +54,7 @@ afterEach(async () => {
 describe("LocalVectorStore contract", () => {
   it("upserts and queries records", async () => {
     const dir = await makeTempDir();
-    const store = new LocalVectorStore(path.join(dir, "test.sqlite"));
+    const store = new LocalVectorStore(path.join(dir, "test.json"));
 
     await store.upsert(
       [
@@ -73,7 +73,7 @@ describe("LocalVectorStore contract", () => {
 
   it("filters by pathPrefix", async () => {
     const dir = await makeTempDir();
-    const store = new LocalVectorStore(path.join(dir, "test.sqlite"));
+    const store = new LocalVectorStore(path.join(dir, "test.json"));
 
     await store.upsert(
       [
@@ -90,7 +90,7 @@ describe("LocalVectorStore contract", () => {
 
   it("filters by tags", async () => {
     const dir = await makeTempDir();
-    const store = new LocalVectorStore(path.join(dir, "test.sqlite"));
+    const store = new LocalVectorStore(path.join(dir, "test.json"));
 
     await store.upsert(
       [
@@ -107,7 +107,7 @@ describe("LocalVectorStore contract", () => {
 
   it("isolates scopes", async () => {
     const dir = await makeTempDir();
-    const store = new LocalVectorStore(path.join(dir, "test.sqlite"));
+    const store = new LocalVectorStore(path.join(dir, "test.json"));
 
     await store.upsert([record("a", [1, 0, 0], "/a")], scope);
     await store.upsert(
@@ -127,7 +127,7 @@ describe("LocalVectorStore contract", () => {
 
   it("deletes by ids", async () => {
     const dir = await makeTempDir();
-    const store = new LocalVectorStore(path.join(dir, "test.sqlite"));
+    const store = new LocalVectorStore(path.join(dir, "test.json"));
 
     await store.upsert(
       [record("a", [1, 0, 0], "/a"), record("b", [0, 1, 0], "/b")],
@@ -143,7 +143,7 @@ describe("LocalVectorStore contract", () => {
 
   it("deletes entire scope", async () => {
     const dir = await makeTempDir();
-    const store = new LocalVectorStore(path.join(dir, "test.sqlite"));
+    const store = new LocalVectorStore(path.join(dir, "test.json"));
 
     await store.upsert([record("a", [1, 0, 0], "/a")], scope);
     await store.deleteScope(scope);
@@ -154,7 +154,7 @@ describe("LocalVectorStore contract", () => {
 
   it("records and lists scopes via registry", async () => {
     const dir = await makeTempDir();
-    const store = new LocalVectorStore(path.join(dir, "test.sqlite"));
+    const store = new LocalVectorStore(path.join(dir, "test.json"));
 
     const info: ScopeInfo = {
       projectId: "test-proj",
@@ -173,7 +173,7 @@ describe("LocalVectorStore contract", () => {
 
   it("deleteScope removes registry entry", async () => {
     const dir = await makeTempDir();
-    const store = new LocalVectorStore(path.join(dir, "test.sqlite"));
+    const store = new LocalVectorStore(path.join(dir, "test.json"));
 
     await store.recordScope({
       projectId: "test-proj",
@@ -190,14 +190,14 @@ describe("LocalVectorStore contract", () => {
 
   it("health returns ok", async () => {
     const dir = await makeTempDir();
-    const store = new LocalVectorStore(path.join(dir, "test.sqlite"));
+    const store = new LocalVectorStore(path.join(dir, "test.json"));
     const health = await store.health();
     expect(health.ok).toBe(true);
   });
 
   it("upserts update existing records", async () => {
     const dir = await makeTempDir();
-    const store = new LocalVectorStore(path.join(dir, "test.sqlite"));
+    const store = new LocalVectorStore(path.join(dir, "test.json"));
 
     await store.upsert([record("a", [1, 0, 0], "/old")], scope);
     await store.upsert([record("a", [0, 1, 0], "/new")], scope);

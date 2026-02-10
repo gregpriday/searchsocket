@@ -3,15 +3,19 @@ import type { JsonLogEntry } from "../types";
 export interface LoggerOptions {
   json?: boolean;
   verbose?: boolean;
+  /** When true, all output (including info/event) is written to stderr instead of stdout. */
+  stderrOnly?: boolean;
 }
 
 export class Logger {
   private readonly json: boolean;
   private readonly verbose: boolean;
+  private readonly stderrOnly: boolean;
 
   constructor(opts: LoggerOptions = {}) {
     this.json = opts.json ?? false;
     this.verbose = opts.verbose ?? false;
+    this.stderrOnly = opts.stderrOnly ?? false;
   }
 
   info(message: string): void {
@@ -19,7 +23,7 @@ export class Logger {
       return;
     }
 
-    process.stdout.write(`${message}\n`);
+    this.writeOut(`${message}\n`);
   }
 
   debug(message: string): void {
@@ -32,7 +36,7 @@ export class Logger {
       return;
     }
 
-    process.stdout.write(`${message}\n`);
+    this.writeOut(`${message}\n`);
   }
 
   warn(message: string): void {
@@ -63,7 +67,15 @@ export class Logger {
       return;
     }
 
-    process.stdout.write(`[${event}] ${data ? JSON.stringify(data) : ""}\n`);
+    this.writeOut(`[${event}] ${data ? JSON.stringify(data) : ""}\n`);
+  }
+
+  private writeOut(text: string): void {
+    if (this.stderrOnly) {
+      process.stderr.write(text);
+    } else {
+      process.stdout.write(text);
+    }
   }
 
   private logJson(event: string, data?: Record<string, unknown>): void {
@@ -73,6 +85,6 @@ export class Logger {
       data
     };
 
-    process.stdout.write(`${JSON.stringify(entry)}\n`);
+    this.writeOut(`${JSON.stringify(entry)}\n`);
   }
 }

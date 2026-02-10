@@ -210,7 +210,7 @@ export default {
     };
 
     local?: {
-      path?: string;                // default ".searchsocket/local-vectors.sqlite"
+      path?: string;                // default ".searchsocket/local-vectors.json"
     };
   },
 
@@ -414,7 +414,7 @@ Maintain a local cache mapping `contentHash + modelId → embeddingVector`.
 
 Storage:
 
-* `.searchsocket/embeddings-cache.sqlite` (preferred)
+* `.searchsocket/embeddings-cache.json` (preferred)
 * Must support:
 
   * lookup by `contentHash` and `modelId`
@@ -541,7 +541,7 @@ Scope isolation:
 
 ### 12.4 Local adapter (offline dev)
 
-* SQLite file: `.searchsocket/local-vectors.sqlite`
+* SQLite file: `.searchsocket/local-vectors.json`
 * Stores vectors + metadata
 * Query uses brute-force cosine similarity
 * Supports `pathPrefix` and `tags` filtering locally

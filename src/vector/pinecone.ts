@@ -17,6 +17,13 @@ const REGISTRY_NAMESPACE = "_searchsocket_registry";
 const MAX_DIR_SEGMENTS = 8;
 
 /**
+ * Maximum bytes for the snippet metadata field. Pinecone enforces a 40KB per-record
+ * metadata limit. With other fields (tags, headingPath, dir filters), keeping the
+ * snippet under 8KB leaves ample room for everything else.
+ */
+const MAX_SNIPPET_BYTES = 8_000;
+
+/**
  * Fallback dimensions used when describeIndexStats fails (e.g. on Starter pods).
  * If using a model not listed here, the actual vector length from the first
  * upsert/query call takes precedence. This map only affects zero-vector
@@ -149,6 +156,9 @@ export class PineconeVectorStore implements VectorStore {
 
     const formatted = records.map((record) => {
       const dirFilters = toDirFilters(record.metadata.path);
+      const snippet = Buffer.byteLength(record.metadata.snippet, "utf8") > MAX_SNIPPET_BYTES
+        ? record.metadata.snippet.slice(0, MAX_SNIPPET_BYTES)
+        : record.metadata.snippet;
 
       return {
         id: record.id,
@@ -161,7 +171,7 @@ export class PineconeVectorStore implements VectorStore {
           title: record.metadata.title,
           sectionTitle: record.metadata.sectionTitle,
           headingPath: record.metadata.headingPath,
-          snippet: record.metadata.snippet,
+          snippet,
           contentHash: record.metadata.contentHash,
           modelId: record.metadata.modelId,
           depth: record.metadata.depth,

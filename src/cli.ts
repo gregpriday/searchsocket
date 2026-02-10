@@ -20,7 +20,7 @@ import { runMcpServer } from "./mcp/server";
 import { SearchEngine } from "./search/engine";
 import { createVectorStore } from "./vector";
 import { sanitizeScopeName } from "./utils/text";
-import type { IndexStats, ResolvedSearchSocketConfig, Scope } from "./types";
+import type { IndexStats, ResolvedSearchSocketConfig, Scope, VectorStore } from "./types";
 
 interface RootCommandOptions {
   cwd?: string;
@@ -72,8 +72,7 @@ function printIndexSummary(stats: IndexStats): void {
   process.stdout.write(`pages processed: ${stats.pagesProcessed}\n`);
   process.stdout.write(`chunks total: ${stats.chunksTotal}\n`);
   process.stdout.write(`chunks changed: ${stats.chunksChanged}\n`);
-  process.stdout.write(`embeddings reused from cache: ${stats.cachedEmbeddings}\n`);
-  process.stdout.write(`embeddings newly created: ${stats.newEmbeddings}\n`);
+  process.stdout.write(`embeddings created: ${stats.newEmbeddings}\n`);
   process.stdout.write(`deletes: ${stats.deletes}\n`);
   process.stdout.write(`estimated tokens: ${stats.estimatedTokens}\n`);
   process.stdout.write(`estimated cost (USD): ${formatUsd(stats.estimatedCostUSD)}\n`);
@@ -113,8 +112,7 @@ function ensureStateDir(cwd: string): string {
 function ensureGitignore(cwd: string): void {
   const gitignorePath = path.join(cwd, ".gitignore");
   const entries = [
-    ".searchsocket/embeddings-cache.sqlite",
-    ".searchsocket/local-vectors.sqlite",
+    ".searchsocket/local-vectors.json",
     ".searchsocket/manifest.json",
     ".searchsocket/registry.json"
   ];
@@ -324,7 +322,7 @@ program
 
     let health: { ok: boolean; details?: string } = { ok: false, details: "not checked" };
     try {
-      const vector = createVectorStore(config, cwd);
+      const vector = await createVectorStore(config, cwd);
       health = await vector.health();
     } catch (error) {
       health = {
@@ -463,7 +461,7 @@ program
     process.stdout.write(`deleted local state directory: ${statePath}\n`);
 
     if (opts.remote) {
-      const vectorStore = createVectorStore(config, cwd);
+      const vectorStore = await createVectorStore(config, cwd);
       await vectorStore.deleteScope(scope);
       process.stdout.write(`deleted remote vectors for scope ${scope.scopeName}\n`);
     }
@@ -481,7 +479,7 @@ program
 
     const config = await loadConfig({ cwd, configPath: rootOpts?.config });
     const baseScope = resolveScope(config);
-    const vectorStore = createVectorStore(config, cwd);
+    const vectorStore = await createVectorStore(config, cwd);
     let scopes = [] as Array<{
       projectId: string;
       scopeName: string;
@@ -657,9 +655,9 @@ program
         });
       }
 
-      let store: ReturnType<typeof createVectorStore> | null = null;
+      let store: VectorStore | null = null;
       try {
-        store = createVectorStore(config, cwd);
+        store = await createVectorStore(config, cwd);
         const health = await store.health();
         checks.push({
           name: "vector backend connectivity",

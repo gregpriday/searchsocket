@@ -1,16 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
-import Database from "better-sqlite3";
+import { randomUUID } from "node:crypto";
 import type { QueryOpts, Scope, ScopeInfo, VectorHit, VectorRecord, VectorStore } from "../types";
-import { safeJsonParse } from "../utils/text";
 
-function toBuffer(vector: number[]): Buffer {
+function vectorToBase64(vector: number[]): string {
   const typed = Float32Array.from(vector);
-  return Buffer.from(typed.buffer);
+  return Buffer.from(typed.buffer).toString("base64");
 }
 
-function fromBuffer(buffer: Buffer): number[] {
-  const copied = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+function base64ToVector(b64: string): number[] {
+  const buf = Buffer.from(b64, "base64");
+  const copied = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
   return Array.from(new Float32Array(copied));
 }
 
@@ -35,48 +35,44 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+interface StoredVector {
+  projectId: string;
+  scopeName: string;
+  url: string;
+  path: string;
+  title: string;
+  sectionTitle: string;
+  headingPath: string[];
+  snippet: string;
+  contentHash: string;
+  modelId: string;
+  depth: number;
+  incomingLinks: number;
+  routeFile: string;
+  tags: string[];
+  /** base64-encoded Float32Array */
+  vector: string;
+}
+
+interface StoreData {
+  version: 1;
+  vectors: Record<string, StoredVector>;
+  registry: Record<string, ScopeInfo>;
+}
+
 export class LocalVectorStore implements VectorStore {
-  private readonly db: Database.Database;
+  private readonly filePath: string;
+  private data: StoreData;
 
   constructor(filePath: string) {
-    const resolved = path.resolve(filePath);
-    fs.mkdirSync(path.dirname(resolved), { recursive: true });
-    this.db = new Database(resolved);
-    this.db.pragma("journal_mode = WAL");
+    this.filePath = path.resolve(filePath);
+    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
 
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS vectors (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        scope_name TEXT NOT NULL,
-        url TEXT NOT NULL,
-        path TEXT NOT NULL,
-        title TEXT NOT NULL,
-        section_title TEXT NOT NULL,
-        heading_path TEXT NOT NULL,
-        snippet TEXT NOT NULL,
-        content_hash TEXT NOT NULL,
-        model_id TEXT NOT NULL,
-        depth INTEGER NOT NULL,
-        incoming_links INTEGER NOT NULL,
-        route_file TEXT NOT NULL,
-        tags TEXT NOT NULL,
-        vector BLOB NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_vectors_scope ON vectors(project_id, scope_name);
-      CREATE INDEX IF NOT EXISTS idx_vectors_path ON vectors(path);
-
-      CREATE TABLE IF NOT EXISTS registry (
-        project_id TEXT NOT NULL,
-        scope_name TEXT NOT NULL,
-        model_id TEXT NOT NULL,
-        last_indexed_at TEXT NOT NULL,
-        vector_count INTEGER,
-        PRIMARY KEY (project_id, scope_name)
-      );
-    `);
+    if (fs.existsSync(this.filePath)) {
+      this.data = JSON.parse(fs.readFileSync(this.filePath, "utf8")) as StoreData;
+    } else {
+      this.data = { version: 1, vectors: {}, registry: {} };
+    }
   }
 
   async upsert(records: VectorRecord[], scope: Scope): Promise<void> {
@@ -84,133 +80,81 @@ export class LocalVectorStore implements VectorStore {
       return;
     }
 
-    const statement = this.db.prepare(`
-      INSERT INTO vectors (
-        id, project_id, scope_name, url, path, title, section_title, heading_path,
-        snippet, content_hash, model_id, depth, incoming_links, route_file, tags,
-        vector, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      ON CONFLICT(id) DO UPDATE SET
-        project_id = excluded.project_id,
-        scope_name = excluded.scope_name,
-        url = excluded.url,
-        path = excluded.path,
-        title = excluded.title,
-        section_title = excluded.section_title,
-        heading_path = excluded.heading_path,
-        snippet = excluded.snippet,
-        content_hash = excluded.content_hash,
-        model_id = excluded.model_id,
-        depth = excluded.depth,
-        incoming_links = excluded.incoming_links,
-        route_file = excluded.route_file,
-        tags = excluded.tags,
-        vector = excluded.vector,
-        updated_at = excluded.updated_at
-    `);
+    for (const item of records) {
+      this.data.vectors[item.id] = {
+        projectId: item.metadata.projectId,
+        scopeName: scope.scopeName,
+        url: item.metadata.url,
+        path: item.metadata.path,
+        title: item.metadata.title,
+        sectionTitle: item.metadata.sectionTitle,
+        headingPath: item.metadata.headingPath,
+        snippet: item.metadata.snippet,
+        contentHash: item.metadata.contentHash,
+        modelId: item.metadata.modelId,
+        depth: item.metadata.depth,
+        incomingLinks: item.metadata.incomingLinks,
+        routeFile: item.metadata.routeFile,
+        tags: item.metadata.tags,
+        vector: vectorToBase64(item.vector)
+      };
+    }
 
-    const transaction = this.db.transaction((items: VectorRecord[]) => {
-      for (const item of items) {
-        statement.run(
-          item.id,
-          item.metadata.projectId,
-          scope.scopeName,
-          item.metadata.url,
-          item.metadata.path,
-          item.metadata.title,
-          item.metadata.sectionTitle,
-          JSON.stringify(item.metadata.headingPath),
-          item.metadata.snippet,
-          item.metadata.contentHash,
-          item.metadata.modelId,
-          item.metadata.depth,
-          item.metadata.incomingLinks,
-          item.metadata.routeFile,
-          JSON.stringify(item.metadata.tags),
-          toBuffer(item.vector)
-        );
-      }
-    });
-
-    transaction(records);
+    this.save();
   }
 
   async query(queryVector: number[], opts: QueryOpts, scope: Scope): Promise<VectorHit[]> {
-    const clauses: string[] = ["project_id = ?", "scope_name = ?"];
-    const values: unknown[] = [scope.projectId, scope.scopeName];
-
-    if (opts.pathPrefix) {
-      const prefix = opts.pathPrefix.endsWith("/") ? opts.pathPrefix : `${opts.pathPrefix}/`;
-      clauses.push("(path = ? OR path LIKE ?)");
-      values.push(opts.pathPrefix.replace(/\/$/, ""), `${prefix}%`);
-    }
-
-    const rows = this.db
-      .prepare(
-        `SELECT id, url, path, title, section_title, heading_path, snippet, content_hash,
-                model_id, depth, incoming_links, route_file, tags, vector
-         FROM vectors
-         WHERE ${clauses.join(" AND ")}`
-      )
-      .all(...values) as Array<{
-      id: string;
-      url: string;
-      path: string;
-      title: string;
-      section_title: string;
-      heading_path: string;
-      snippet: string;
-      content_hash: string;
-      model_id: string;
-      depth: number;
-      incoming_links: number;
-      route_file: string;
-      tags: string;
-      vector: Buffer;
-    }>;
-
     const tagSet = new Set(opts.tags ?? []);
 
-    const hits = rows
-      .filter((row) => {
-        if (tagSet.size === 0) {
-          return true;
+    const hits: VectorHit[] = [];
+
+    for (const [id, stored] of Object.entries(this.data.vectors)) {
+      if (stored.projectId !== scope.projectId || stored.scopeName !== scope.scopeName) {
+        continue;
+      }
+
+      if (opts.pathPrefix) {
+        const prefix = opts.pathPrefix.endsWith("/") ? opts.pathPrefix : `${opts.pathPrefix}/`;
+        const normalizedPath = stored.path.replace(/\/$/, "");
+        const normalizedPrefix = opts.pathPrefix.replace(/\/$/, "");
+        if (normalizedPath !== normalizedPrefix && !stored.path.startsWith(prefix)) {
+          continue;
         }
+      }
 
-        const tags = safeJsonParse<string[]>(row.tags, []);
-        return [...tagSet].every((tag) => tags.includes(tag));
-      })
-      .map((row) => {
-        const vector = fromBuffer(row.vector);
-        const score = cosineSimilarity(queryVector, vector);
-        const tags = safeJsonParse<string[]>(row.tags, []);
-        const headingPath = safeJsonParse<string[]>(row.heading_path, []);
+      if (tagSet.size > 0) {
+        if (![...tagSet].every((tag) => stored.tags.includes(tag))) {
+          continue;
+        }
+      }
 
-        return {
-          id: row.id,
-          score,
-          metadata: {
-            projectId: scope.projectId,
-            scopeName: scope.scopeName,
-            url: row.url,
-            path: row.path,
-            title: row.title,
-            sectionTitle: row.section_title,
-            headingPath,
-            snippet: row.snippet,
-            contentHash: row.content_hash,
-            modelId: row.model_id,
-            depth: row.depth,
-            incomingLinks: row.incoming_links,
-            routeFile: row.route_file,
-            tags
-          }
-        } satisfies VectorHit;
-      })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, opts.topK);
+      const vector = base64ToVector(stored.vector);
+      const score = cosineSimilarity(queryVector, vector);
 
-    return hits;
+      hits.push({
+        id,
+        score,
+        metadata: {
+          projectId: stored.projectId,
+          scopeName: stored.scopeName,
+          url: stored.url,
+          path: stored.path,
+          title: stored.title,
+          sectionTitle: stored.sectionTitle,
+          headingPath: stored.headingPath,
+          snippet: stored.snippet,
+          contentHash: stored.contentHash,
+          modelId: stored.modelId,
+          depth: stored.depth,
+          incomingLinks: stored.incomingLinks,
+          routeFile: stored.routeFile,
+          tags: stored.tags
+        }
+      });
+    }
+
+    hits.sort((a, b) => b.score - a.score);
+    return hits.slice(0, opts.topK);
   }
 
   async deleteByIds(ids: string[], scope: Scope): Promise<void> {
@@ -218,70 +162,47 @@ export class LocalVectorStore implements VectorStore {
       return;
     }
 
-    const placeholders = ids.map(() => "?").join(", ");
-    this.db
-      .prepare(
-        `DELETE FROM vectors WHERE project_id = ? AND scope_name = ? AND id IN (${placeholders})`
-      )
-      .run(scope.projectId, scope.scopeName, ...ids);
+    const idSet = new Set(ids);
+    for (const id of idSet) {
+      const stored = this.data.vectors[id];
+      if (stored && stored.projectId === scope.projectId && stored.scopeName === scope.scopeName) {
+        delete this.data.vectors[id];
+      }
+    }
+
+    this.save();
   }
 
   async deleteScope(scope: Scope): Promise<void> {
-    this.db
-      .prepare("DELETE FROM vectors WHERE project_id = ? AND scope_name = ?")
-      .run(scope.projectId, scope.scopeName);
+    for (const [id, stored] of Object.entries(this.data.vectors)) {
+      if (stored.projectId === scope.projectId && stored.scopeName === scope.scopeName) {
+        delete this.data.vectors[id];
+      }
+    }
 
-    this.db
-      .prepare("DELETE FROM registry WHERE project_id = ? AND scope_name = ?")
-      .run(scope.projectId, scope.scopeName);
+    const registryKey = `${scope.projectId}:${scope.scopeName}`;
+    delete this.data.registry[registryKey];
+
+    this.save();
   }
 
   async listScopes(scopeProjectId: string): Promise<ScopeInfo[]> {
-    const rows = this.db
-      .prepare(
-        `SELECT project_id, scope_name, model_id, last_indexed_at, vector_count
-         FROM registry
-         WHERE project_id = ?`
-      )
-      .all(scopeProjectId) as Array<{
-      project_id: string;
-      scope_name: string;
-      model_id: string;
-      last_indexed_at: string;
-      vector_count: number | null;
-    }>;
-
-    return rows.map((row) => ({
-      projectId: row.project_id,
-      scopeName: row.scope_name,
-      modelId: row.model_id,
-      lastIndexedAt: row.last_indexed_at,
-      vectorCount: row.vector_count ?? undefined
-    }));
+    return Object.values(this.data.registry).filter((info) => info.projectId === scopeProjectId);
   }
 
   async recordScope(info: ScopeInfo): Promise<void> {
-    this.db
-      .prepare(
-        `INSERT INTO registry (project_id, scope_name, model_id, last_indexed_at, vector_count)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(project_id, scope_name) DO UPDATE SET
-           model_id = excluded.model_id,
-           last_indexed_at = excluded.last_indexed_at,
-           vector_count = excluded.vector_count`
-      )
-      .run(info.projectId, info.scopeName, info.modelId, info.lastIndexedAt, info.vectorCount ?? null);
+    const key = `${info.projectId}:${info.scopeName}`;
+    this.data.registry[key] = info;
+    this.save();
   }
 
   async health(): Promise<{ ok: boolean; details?: string }> {
-    try {
-      this.db.prepare("SELECT 1").get();
-      return { ok: true };
-    } catch (error) {
-      return {
-        ok: false,
-        details: error instanceof Error ? error.message : "Unknown sqlite error"
-      };
-    }
+    return { ok: true };
+  }
+
+  private save(): void {
+    const tmpPath = `${this.filePath}.${randomUUID()}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(this.data), "utf8");
+    fs.renameSync(tmpPath, this.filePath);
   }
 }

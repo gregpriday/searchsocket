@@ -415,7 +415,6 @@ export interface IndexStats {
   pagesProcessed: number;
   chunksTotal: number;
   chunksChanged: number;
-  cachedEmbeddings: number;
   newEmbeddings: number;
   deletes: number;
   estimatedTokens: number;

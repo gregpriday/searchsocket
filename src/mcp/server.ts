@@ -153,7 +153,7 @@ async function startHttpServer(serverFactory: () => McpServer, config: ResolvedS
 
   await new Promise<void>((resolve, reject) => {
     const instance = app.listen(port, "127.0.0.1", () => {
-      process.stdout.write(`SearchSocket MCP HTTP server listening on http://127.0.0.1:${port}${endpointPath}\n`);
+      process.stderr.write(`SearchSocket MCP HTTP server listening on http://127.0.0.1:${port}${endpointPath}\n`);
       resolve();
     });
     instance.once("error", reject);
@@ -166,20 +166,26 @@ async function startHttpServer(serverFactory: () => McpServer, config: ResolvedS
 }
 
 export async function runMcpServer(options: McpServerOptions = {}): Promise<void> {
+  const transport = options.transport ?? "stdio";
+
+  // For stdio transport, redirect ALL output to stderr before any initialization
+  // to prevent corrupting the JSON-RPC stream on stdout.
+  if (transport === "stdio") {
+    redirectConsoleToStderr();
+  }
+
   const engine = await SearchEngine.create({
     cwd: options.cwd,
     configPath: options.configPath
   });
   const config = engine.getConfig();
+  const resolvedTransport = options.transport ?? config.mcp.transport;
 
-  const transport = options.transport ?? config.mcp.transport;
-
-  if (transport === "http") {
+  if (resolvedTransport === "http") {
     await startHttpServer(() => createServer(engine), config, options);
     return;
   }
 
-  redirectConsoleToStderr();
   const server = createServer(engine);
   const stdioTransport = new StdioServerTransport();
   await server.connect(stdioTransport);

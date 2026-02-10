@@ -138,5 +138,5 @@ Disable temporarily:
 If you want deterministic indexed content tracked in git:
 
 - keep `.searchsocket/pages/**` committed
-- ensure `.searchsocket/*.sqlite` remains ignored (recommended)
+- ensure `.searchsocket/*.json` remains ignored (recommended)
 - review markdown mirror diffs in PRs to validate indexing input changes

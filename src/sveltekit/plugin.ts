@@ -90,7 +90,7 @@ export function searchsocketVitePlugin(options: SearchSocketAutoIndexOptions = {
       });
 
       logger.info(
-        `[searchsocket] indexed pages=${stats.pagesProcessed} chunks=${stats.chunksTotal} changed=${stats.chunksChanged} cached=${stats.cachedEmbeddings} new=${stats.newEmbeddings}`
+        `[searchsocket] indexed pages=${stats.pagesProcessed} chunks=${stats.chunksTotal} changed=${stats.chunksChanged} embedded=${stats.newEmbeddings}`
       );
       logger.info("[searchsocket] markdown mirror written under .searchsocket/pages/<scope> (safe to commit for content workflows).");
     }

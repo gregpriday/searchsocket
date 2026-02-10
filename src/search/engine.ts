@@ -10,7 +10,7 @@ import { readManifest } from "../core/state";
 import { createReranker } from "../rerank";
 import { hrTimeMs } from "../utils/time";
 import { normalizeUrlPath, urlPathToMirrorRelative } from "../utils/path";
-import { createVectorStore } from "../vector";
+import { createVectorStore } from "../vector/factory";
 import { rankHits } from "./ranking";
 import type { RankedHit } from "./ranking";
 import type {
@@ -66,7 +66,7 @@ export class SearchEngine {
     const config = options.config ?? (await loadConfig({ cwd, configPath: options.configPath }));
 
     const embeddings = options.embeddingsProvider ?? createEmbeddingsProvider(config);
-    const vectorStore = options.vectorStore ?? createVectorStore(config, cwd);
+    const vectorStore = options.vectorStore ?? await createVectorStore(config, cwd);
     const reranker = options.reranker ?? createReranker(config);
 
     return new SearchEngine({

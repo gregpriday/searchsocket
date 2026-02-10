@@ -1,11 +1,11 @@
 import path from "node:path";
 import type { ResolvedSearchSocketConfig, VectorStore } from "../types";
 import { SearchSocketError } from "../errors";
-import { LocalVectorStore } from "./local";
-import { MilvusVectorStore } from "./milvus";
 import { PineconeVectorStore } from "./pinecone";
+import { MilvusVectorStore } from "./milvus";
+import { LocalVectorStore } from "./local";
 
-export function createVectorStore(config: ResolvedSearchSocketConfig, cwd: string): VectorStore {
+export async function createVectorStore(config: ResolvedSearchSocketConfig, cwd: string): Promise<VectorStore> {
   if (config.vector.provider === "pinecone") {
     const apiKey = process.env[config.vector.pinecone.apiKeyEnv];
 

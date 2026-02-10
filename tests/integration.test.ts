@@ -79,7 +79,7 @@ async function createProjectFixture(): Promise<{ cwd: string; config: ResolvedSe
   config.source.mode = "static-output";
   config.source.staticOutputDir = "build";
   config.vector.provider = "local";
-  config.vector.local.path = ".searchsocket/local-vectors.sqlite";
+  config.vector.local.path = ".searchsocket/local-vectors.json";
   config.state.dir = ".searchsocket";
 
   return { cwd, config };
@@ -98,7 +98,7 @@ describe("integration: index -> search", () => {
       cwd,
       config,
       embeddingsProvider: embeddings,
-      vectorStore: createVectorStore(config, cwd)
+      vectorStore: await createVectorStore(config, cwd)
     });
 
     const stats = await pipeline.run({ changedOnly: true });
@@ -109,7 +109,7 @@ describe("integration: index -> search", () => {
       cwd,
       config,
       embeddingsProvider: embeddings,
-      vectorStore: createVectorStore(config, cwd)
+      vectorStore: await createVectorStore(config, cwd)
     });
 
     const result = await engine.search({

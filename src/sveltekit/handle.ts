@@ -46,6 +46,8 @@ export interface SearchSocketHandleOptions {
   cwd?: string;
   path?: string;
   maxBodyBytes?: number;
+  /** Pass a pre-resolved config object to avoid filesystem loading at runtime. */
+  config?: ResolvedSearchSocketConfig;
 }
 
 export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
@@ -56,10 +58,14 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
   const getConfig = async (): Promise<ResolvedSearchSocketConfig> => {
     if (!configPromise) {
-      configPromise = loadConfig({
-        cwd: options.cwd,
-        configPath: options.configPath
-      }).then((config) => {
+      const configP = options.config
+        ? Promise.resolve(options.config)
+        : loadConfig({
+            cwd: options.cwd,
+            configPath: options.configPath
+          });
+
+      configPromise = configP.then((config) => {
         apiPath = apiPath ?? config.api.path;
 
         if (config.api.rateLimit) {
@@ -75,9 +81,11 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
   const getEngine = async (): Promise<SearchEngine> => {
     if (!enginePromise) {
+      const config = options.config;
       enginePromise = SearchEngine.create({
         cwd: options.cwd,
-        configPath: options.configPath
+        configPath: options.configPath,
+        config
       });
     }
 
