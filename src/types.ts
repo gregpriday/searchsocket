@@ -419,6 +419,8 @@ export interface IndexStats {
   deletes: number;
   estimatedTokens: number;
   estimatedCostUSD: number;
+  routeExact: number;
+  routeBestEffort: number;
   stageTimingsMs: Record<string, number>;
 }
 

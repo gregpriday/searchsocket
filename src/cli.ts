@@ -76,6 +76,7 @@ function printIndexSummary(stats: IndexStats): void {
   process.stdout.write(`deletes: ${stats.deletes}\n`);
   process.stdout.write(`estimated tokens: ${stats.estimatedTokens}\n`);
   process.stdout.write(`estimated cost (USD): ${formatUsd(stats.estimatedCostUSD)}\n`);
+  process.stdout.write(`route mapping: ${stats.routeExact} exact, ${stats.routeBestEffort} best-effort\n`);
   process.stdout.write("stage timings (ms):\n");
   for (const [stage, ms] of Object.entries(stats.stageTimingsMs)) {
     process.stdout.write(`  ${stage}: ${ms}\n`);

@@ -51,7 +51,18 @@ function detectSourceMode(cwd: string, config: ResolvedSearchSocketConfig, parse
 export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): ResolvedSearchSocketConfig {
   const projectId = rawConfig.project?.id ?? inferProjectId(cwd);
   const defaults = createDefaultConfig(projectId);
-  const parsed = searchSocketConfigSchema.parse(rawConfig);
+
+  const parseResult = searchSocketConfigSchema.safeParse(rawConfig);
+  if (!parseResult.success) {
+    const issues = parseResult.error.issues
+      .map((issue) => `  ${issue.path.join(".")}: ${issue.message}`)
+      .join("\n");
+    throw new SearchSocketError(
+      "CONFIG_MISSING",
+      `Invalid searchsocket.config.ts:\n${issues}`
+    );
+  }
+  const parsed = parseResult.data;
 
   const merged: ResolvedSearchSocketConfig = {
     ...defaults,

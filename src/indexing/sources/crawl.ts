@@ -1,25 +1,27 @@
 import { gunzipSync } from "node:zlib";
+import { load as cheerioLoad } from "cheerio";
 import pLimit from "p-limit";
+import { Logger } from "../../core/logger";
 import type { PageSourceRecord, ResolvedSearchSocketConfig } from "../../types";
 import { ensureLeadingSlash, joinUrl, normalizeUrlPath } from "../../utils/path";
 
+const logger = new Logger();
+
 function extractLocs(xml: string): string[] {
+  const $ = cheerioLoad(xml, { xmlMode: true });
   const locs: string[] = [];
-  const regex = /<loc>(.*?)<\/loc>/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(xml)) !== null) {
-    const loc = match[1];
-    if (loc) {
-      locs.push(loc);
+  $("loc").each((_i, el) => {
+    const text = $(el).text().trim();
+    if (text) {
+      locs.push(text);
     }
-  }
-
+  });
   return locs;
 }
 
 function isSitemapIndex(xml: string): boolean {
-  return /<sitemapindex[\s>]/i.test(xml);
+  const $ = cheerioLoad(xml, { xmlMode: true });
+  return $("sitemapindex").length > 0;
 }
 
 async function fetchSitemapXml(url: string): Promise<string> {
@@ -101,9 +103,9 @@ export async function loadCrawledPages(
   const selected = typeof maxPages === "number" ? routes.slice(0, maxPages) : routes;
 
   const limit = pLimit(8);
-  const pages = await Promise.all(
+  const results = await Promise.allSettled(
     selected.map((route) =>
-      limit(async () => {
+      limit(async (): Promise<PageSourceRecord> => {
         const url = joinUrl(crawlConfig.baseUrl, route);
         const response = await fetch(url);
 
@@ -116,10 +118,22 @@ export async function loadCrawledPages(
           html: await response.text(),
           sourcePath: url,
           outgoingLinks: []
-        } satisfies PageSourceRecord;
+        };
       })
     )
   );
+
+  const pages: PageSourceRecord[] = [];
+  for (let i = 0; i < results.length; i += 1) {
+    const result = results[i];
+    if (!result) continue;
+    if (result.status === "fulfilled") {
+      pages.push(result.value);
+    } else {
+      const route = selected[i] ?? "unknown";
+      logger.warn(`Skipping route ${route}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+    }
+  }
 
   return pages;
 }

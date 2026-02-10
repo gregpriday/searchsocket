@@ -24,6 +24,12 @@ const MAX_DIR_SEGMENTS = 8;
 const MAX_SNIPPET_BYTES = 8_000;
 
 /**
+ * Pinecone hard limit for total metadata per record (40KB).
+ * We aim for 38KB to leave a safety margin.
+ */
+const MAX_TOTAL_METADATA_BYTES = 38_000;
+
+/**
  * Fallback dimensions used when describeIndexStats fails (e.g. on Starter pods).
  * If using a model not listed here, the actual vector length from the first
  * upsert/query call takes precedence. This map only affects zero-vector
@@ -156,30 +162,40 @@ export class PineconeVectorStore implements VectorStore {
 
     const formatted = records.map((record) => {
       const dirFilters = toDirFilters(record.metadata.path);
-      const snippet = Buffer.byteLength(record.metadata.snippet, "utf8") > MAX_SNIPPET_BYTES
+      let snippet = Buffer.byteLength(record.metadata.snippet, "utf8") > MAX_SNIPPET_BYTES
         ? record.metadata.snippet.slice(0, MAX_SNIPPET_BYTES)
         : record.metadata.snippet;
+
+      const metadata: PineconeMetadata = {
+        projectId: record.metadata.projectId,
+        scopeName: record.metadata.scopeName,
+        url: record.metadata.url,
+        path: record.metadata.path,
+        title: record.metadata.title,
+        sectionTitle: record.metadata.sectionTitle,
+        headingPath: record.metadata.headingPath,
+        snippet,
+        contentHash: record.metadata.contentHash,
+        modelId: record.metadata.modelId,
+        depth: record.metadata.depth,
+        incomingLinks: record.metadata.incomingLinks,
+        routeFile: record.metadata.routeFile,
+        tags: record.metadata.tags,
+        ...dirFilters
+      };
+
+      // Safety check: if total metadata exceeds Pinecone's limit, truncate snippet further
+      let totalBytes = Buffer.byteLength(JSON.stringify(metadata), "utf8");
+      if (totalBytes > MAX_TOTAL_METADATA_BYTES) {
+        const excess = totalBytes - MAX_TOTAL_METADATA_BYTES;
+        snippet = snippet.slice(0, Math.max(0, snippet.length - excess - 100));
+        metadata.snippet = snippet;
+      }
 
       return {
         id: record.id,
         values: record.vector,
-        metadata: {
-          projectId: record.metadata.projectId,
-          scopeName: record.metadata.scopeName,
-          url: record.metadata.url,
-          path: record.metadata.path,
-          title: record.metadata.title,
-          sectionTitle: record.metadata.sectionTitle,
-          headingPath: record.metadata.headingPath,
-          snippet,
-          contentHash: record.metadata.contentHash,
-          modelId: record.metadata.modelId,
-          depth: record.metadata.depth,
-          incomingLinks: record.metadata.incomingLinks,
-          routeFile: record.metadata.routeFile,
-          tags: record.metadata.tags,
-          ...dirFilters
-        } satisfies PineconeMetadata
+        metadata
       };
     });
 

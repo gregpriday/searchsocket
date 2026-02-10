@@ -131,6 +131,36 @@ export class IndexPipeline {
       scopeManifest.chunks = {};
     }
 
+    // Preflight: detect manifest vs remote desynchronization.
+    // If the local manifest has chunks but the remote registry shows vectorCount=0,
+    // the remote was likely wiped externally and we need a full re-sync.
+    const manifestChunkCount = Object.keys(scopeManifest.chunks).length;
+    if (manifestChunkCount > 0 && !options.force && !options.dryRun) {
+      try {
+        const remoteScopes = await this.vectorStore.listScopes(scope.projectId);
+        const remoteScope = remoteScopes.find(
+          (s) => s.scopeName === scope.scopeName
+        );
+
+        if (remoteScope && remoteScope.vectorCount === 0) {
+          this.logger.warn(
+            `Local manifest has ${manifestChunkCount} chunks but remote reports 0 vectors. ` +
+              "The remote index may have been wiped. Re-running with --force to re-sync."
+          );
+          scopeManifest.chunks = {};
+        } else if (!remoteScope && manifestChunkCount > 0) {
+          this.logger.warn(
+            `Local manifest has ${manifestChunkCount} chunks but no remote registry entry found. ` +
+              "The remote index may have been wiped. Re-running with --force to re-sync."
+          );
+          scopeManifest.chunks = {};
+        }
+      } catch {
+        // If we cannot reach the remote to verify, proceed normally.
+        // The worst case is unchanged chunks are skipped (existing behavior).
+      }
+    }
+
     stageEnd("manifest", manifestStart);
 
     const sourceStart = stageStart();
@@ -192,6 +222,8 @@ export class IndexPipeline {
 
     const mirrorStart = stageStart();
     const mirrorPages: MirrorPage[] = [];
+    let routeExact = 0;
+    let routeBestEffort = 0;
 
     for (const page of extractedPages) {
       const routeMatch = mapUrlToRoute(page.url, routePatterns);
@@ -208,6 +240,9 @@ export class IndexPipeline {
         this.logger.warn(
           `No exact route match for ${page.url}, falling back to ${routeMatch.routeFile}.`
         );
+        routeBestEffort += 1;
+      } else {
+        routeExact += 1;
       }
 
       const mirror: MirrorPage = {
@@ -406,6 +441,8 @@ export class IndexPipeline {
       deletes: deletes.length,
       estimatedTokens,
       estimatedCostUSD: Number(estimatedCostUSD.toFixed(8)),
+      routeExact,
+      routeBestEffort,
       stageTimingsMs
     };
   }

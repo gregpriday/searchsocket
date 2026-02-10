@@ -1,6 +1,6 @@
 import { load } from "cheerio";
 import TurndownService from "turndown";
-import { gfm } from "turndown-plugin-gfm";
+import { gfm, highlightedCodeBlock, strikethrough, tables, taskListItems } from "turndown-plugin-gfm";
 import type { ExtractedPage, ResolvedSearchSocketConfig } from "../types";
 import { normalizeMarkdown, normalizeText } from "../utils/text";
 import { normalizeUrlPath } from "../utils/path";
@@ -66,7 +66,21 @@ export function extractFromHtml(
     headingStyle: "atx",
     codeBlockStyle: "fenced"
   });
-  turndown.use(gfm);
+
+  if (config.transform.preserveCodeBlocks && config.transform.preserveTables) {
+    turndown.use(gfm);
+  } else {
+    // Always apply strikethrough and task list items
+    turndown.use(strikethrough);
+    turndown.use(taskListItems);
+
+    if (config.transform.preserveTables) {
+      turndown.use(tables);
+    }
+    if (config.transform.preserveCodeBlocks) {
+      turndown.use(highlightedCodeBlock);
+    }
+  }
 
   const markdown = normalizeMarkdown(turndown.turndown(root.html() ?? ""));
 

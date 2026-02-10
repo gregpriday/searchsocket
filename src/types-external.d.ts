@@ -4,9 +4,13 @@ declare module "turndown-plugin-gfm" {
   export const gfm: (service: TurndownService) => void;
   export const tables: (service: TurndownService) => void;
   export const strikethrough: (service: TurndownService) => void;
+  export const highlightedCodeBlock: (service: TurndownService) => void;
+  export const taskListItems: (service: TurndownService) => void;
   export default {
     gfm,
     tables,
-    strikethrough
+    strikethrough,
+    highlightedCodeBlock,
+    taskListItems
   };
 }
