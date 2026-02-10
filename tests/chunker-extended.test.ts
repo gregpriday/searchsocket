@@ -124,4 +124,52 @@ describe("chunkMirrorPage - extended", () => {
       expect(chunk.chunkText.length).toBeGreaterThan(0);
     }
   });
+
+  it("splits a single oversized paragraph to keep chunks within maxChars", () => {
+    const constrainedConfig = createDefaultConfig("test");
+    constrainedConfig.chunking.maxChars = 220;
+    constrainedConfig.chunking.minChars = 40;
+    constrainedConfig.chunking.overlapChars = 30;
+
+    const singleLongParagraph = `# Oversized\n\n${"word ".repeat(250).trim()}\n`;
+    const page = makePage(singleLongParagraph);
+    const chunks = chunkMirrorPage(page, constrainedConfig, scope);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.chunkText.length).toBeLessThanOrEqual(constrainedConfig.chunking.maxChars);
+    }
+  });
+
+  it("keeps non-protected chunks within maxChars under randomized paragraph inputs", () => {
+    const fuzzConfig = createDefaultConfig("test");
+    fuzzConfig.chunking.maxChars = 180;
+    fuzzConfig.chunking.minChars = 30;
+    fuzzConfig.chunking.overlapChars = 24;
+
+    let seed = 1337;
+    const rand = (): number => {
+      seed = (seed * 1103515245 + 12345) % 0x80000000;
+      return seed / 0x80000000;
+    };
+
+    for (let i = 0; i < 40; i += 1) {
+      const blockCount = 3 + Math.floor(rand() * 6);
+      const lines: string[] = ["# Fuzz"];
+
+      for (let b = 0; b < blockCount; b += 1) {
+        const wordCount = 20 + Math.floor(rand() * 80);
+        const words = Array.from({ length: wordCount }, (_, idx) => `w${i}_${b}_${idx}`);
+        lines.push("");
+        lines.push(words.join(" "));
+      }
+
+      const page = makePage(`${lines.join("\n")}\n`);
+      const chunks = chunkMirrorPage(page, fuzzConfig, scope);
+
+      for (const chunk of chunks) {
+        expect(chunk.chunkText.length).toBeLessThanOrEqual(fuzzConfig.chunking.maxChars);
+      }
+    }
+  });
 });

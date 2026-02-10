@@ -15,7 +15,8 @@ export async function loadStaticOutputPages(
     absolute: true
   });
 
-  const selected = typeof maxPages === "number" ? htmlFiles.slice(0, maxPages) : htmlFiles;
+  const limit = typeof maxPages === "number" ? Math.max(0, Math.floor(maxPages)) : undefined;
+  const selected = typeof limit === "number" ? htmlFiles.slice(0, limit) : htmlFiles;
 
   const pages: PageSourceRecord[] = [];
 

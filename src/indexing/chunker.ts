@@ -140,6 +140,66 @@ function blockify(text: string, config: ResolvedSearchSocketConfig["chunking"]):
   return blocks;
 }
 
+function isProtectedBlock(block: string, config: ResolvedSearchSocketConfig["chunking"]): boolean {
+  const lines = block.trim().split("\n");
+  const first = (lines[0] ?? "").trim();
+  const last = (lines[lines.length - 1] ?? "").trim();
+
+  const isCodeBlock = /^```/.test(first) && /^```/.test(last);
+  if (isCodeBlock && config.dontSplitInside.includes("code")) {
+    return true;
+  }
+
+  const isTableBlock = lines.every((line) => {
+    const trimmed = line.trim();
+    return trimmed.length === 0 || /^\|.*\|$/.test(trimmed) || /^\|?\s*:?-+:?\s*\|/.test(trimmed);
+  });
+  if (isTableBlock && config.dontSplitInside.includes("table")) {
+    return true;
+  }
+
+  const isQuoteBlock = lines.every((line) => {
+    const trimmed = line.trim();
+    return trimmed.length === 0 || trimmed.startsWith(">");
+  });
+  return isQuoteBlock && config.dontSplitInside.includes("blockquote");
+}
+
+function splitOversizedBlock(block: string, config: ResolvedSearchSocketConfig["chunking"]): string[] {
+  const trimmed = block.trim();
+  if (trimmed.length <= config.maxChars || isProtectedBlock(trimmed, config)) {
+    return [trimmed];
+  }
+
+  const chunks: string[] = [];
+  let start = 0;
+
+  while (start < trimmed.length) {
+    let end = Math.min(start + config.maxChars, trimmed.length);
+
+    if (end < trimmed.length) {
+      const boundary = trimmed.lastIndexOf(" ", end);
+      if (boundary > start + Math.floor(config.maxChars * 0.6)) {
+        end = boundary;
+      }
+    }
+
+    const chunk = trimmed.slice(start, end).trim();
+    if (chunk) {
+      chunks.push(chunk);
+    }
+
+    if (end >= trimmed.length) {
+      break;
+    }
+
+    const nextStart = Math.max(0, end - config.overlapChars);
+    start = nextStart > start ? nextStart : end;
+  }
+
+  return chunks.length > 0 ? chunks : [trimmed];
+}
+
 function splitSection(section: Section, config: ResolvedSearchSocketConfig["chunking"]): Array<Pick<Chunk, "sectionTitle" | "headingPath" | "chunkText">> {
   const text = section.text.trim();
   if (!text) {
@@ -161,21 +221,26 @@ function splitSection(section: Section, config: ResolvedSearchSocketConfig["chun
   let current = "";
 
   for (const block of blocks) {
-    if (!current) {
-      current = block;
-      continue;
+    const pieces = splitOversizedBlock(block, config);
+
+    for (const piece of pieces) {
+      if (!current) {
+        current = piece;
+        continue;
+      }
+
+      const candidate = `${current}\n\n${piece}`;
+      if (candidate.length <= config.maxChars) {
+        current = candidate;
+        continue;
+      }
+
+      chunks.push(current);
+
+      const overlap = current.slice(Math.max(0, current.length - config.overlapChars)).trim();
+      const withOverlap = overlap ? `${overlap}\n\n${piece}` : piece;
+      current = withOverlap.length <= config.maxChars ? withOverlap : piece;
     }
-
-    const candidate = `${current}\n\n${block}`;
-    if (candidate.length <= config.maxChars) {
-      current = candidate;
-      continue;
-    }
-
-    chunks.push(current);
-
-    const overlap = current.slice(Math.max(0, current.length - config.overlapChars)).trim();
-    current = overlap ? `${overlap}\n\n${block}` : block;
   }
 
   if (current.trim()) {
@@ -189,7 +254,12 @@ function splitSection(section: Section, config: ResolvedSearchSocketConfig["chun
       continue;
     }
 
-    if (chunk.length < config.minChars) {
+    const canMerge =
+      chunk.length < config.minChars &&
+      merged[merged.length - 1] !== undefined &&
+      (merged[merged.length - 1]?.length ?? 0) + 2 + chunk.length <= config.maxChars;
+
+    if (canMerge) {
       merged[merged.length - 1] = `${merged[merged.length - 1]}\n\n${chunk}`;
     } else {
       merged.push(chunk);

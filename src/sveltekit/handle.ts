@@ -1,7 +1,7 @@
 import { loadConfig } from "../config/load";
 import { SearchSocketError, toErrorPayload } from "../errors";
 import { SearchEngine } from "../search/engine";
-import type { ResolvedSearchSocketConfig } from "../types";
+import type { ResolvedSearchSocketConfig, SearchRequest } from "../types";
 
 interface RateBucket {
   count: number;
@@ -167,9 +167,35 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
     }
 
     try {
-      const body = await event.request.json();
+      let rawBody: string;
+      if (typeof event.request.text === "function") {
+        rawBody = await event.request.text();
+      } else {
+        let parsedFallback: unknown;
+        try {
+          parsedFallback = await event.request.json();
+        } catch (error) {
+          if (error instanceof SyntaxError) {
+            throw new SearchSocketError("INVALID_REQUEST", "Malformed JSON request body", 400);
+          }
+          throw error;
+        }
+        rawBody = JSON.stringify(parsedFallback);
+      }
+
+      if (Buffer.byteLength(rawBody, "utf8") > bodyLimit) {
+        throw new SearchSocketError("INVALID_REQUEST", "Request body too large", 413);
+      }
+
+      let body: unknown;
+      try {
+        body = JSON.parse(rawBody);
+      } catch {
+        throw new SearchSocketError("INVALID_REQUEST", "Malformed JSON request body", 400);
+      }
+
       const engine = await getEngine();
-      const result = await engine.search(body);
+      const result = await engine.search(body as SearchRequest);
 
       return withCors(
         new Response(JSON.stringify(result), {

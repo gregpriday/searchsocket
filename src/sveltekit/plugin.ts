@@ -53,12 +53,13 @@ function shouldRunAutoIndex(options: SearchSocketAutoIndexOptions): boolean {
 
 export function searchsocketVitePlugin(options: SearchSocketAutoIndexOptions = {}): MinimalVitePlugin {
   let executed = false;
+  let running = false;
 
   return {
     name: "searchsocket:auto-index",
     apply: "build",
     async closeBundle() {
-      if (executed) {
+      if (executed || running) {
         return;
       }
 
@@ -66,33 +67,38 @@ export function searchsocketVitePlugin(options: SearchSocketAutoIndexOptions = {
         return;
       }
 
-      executed = true;
+      running = true;
 
       const cwd = path.resolve(options.cwd ?? process.cwd());
       const logger = new Logger({
         verbose: options.verbose ?? true
       });
 
-      logger.info("[searchsocket] build completed, starting incremental index...");
+      try {
+        logger.info("[searchsocket] build completed, starting incremental index...");
 
-      const pipeline = await IndexPipeline.create({
-        cwd,
-        configPath: options.configPath,
-        logger
-      });
+        const pipeline = await IndexPipeline.create({
+          cwd,
+          configPath: options.configPath,
+          logger
+        });
 
-      const stats = await pipeline.run({
-        changedOnly: options.changedOnly ?? true,
-        force: options.force ?? false,
-        dryRun: options.dryRun ?? false,
-        scopeOverride: options.scope,
-        verbose: options.verbose
-      });
+        const stats = await pipeline.run({
+          changedOnly: options.changedOnly ?? true,
+          force: options.force ?? false,
+          dryRun: options.dryRun ?? false,
+          scopeOverride: options.scope,
+          verbose: options.verbose
+        });
 
-      logger.info(
-        `[searchsocket] indexed pages=${stats.pagesProcessed} chunks=${stats.chunksTotal} changed=${stats.chunksChanged} embedded=${stats.newEmbeddings}`
-      );
-      logger.info("[searchsocket] markdown mirror written under .searchsocket/pages/<scope> (safe to commit for content workflows).");
+        logger.info(
+          `[searchsocket] indexed pages=${stats.pagesProcessed} chunks=${stats.chunksTotal} changed=${stats.chunksChanged} embedded=${stats.newEmbeddings}`
+        );
+        logger.info("[searchsocket] markdown mirror written under .searchsocket/pages/<scope> (safe to commit for content workflows).");
+        executed = true;
+      } finally {
+        running = false;
+      }
     }
   };
 }

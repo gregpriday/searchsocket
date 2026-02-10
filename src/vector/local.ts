@@ -134,9 +134,10 @@ export class LocalVectorStore implements VectorStore {
       }
 
       if (opts.pathPrefix) {
-        const prefix = opts.pathPrefix.endsWith("/") ? opts.pathPrefix : `${opts.pathPrefix}/`;
+        const rawPrefix = opts.pathPrefix.startsWith("/") ? opts.pathPrefix : `/${opts.pathPrefix}`;
+        const prefix = rawPrefix.endsWith("/") ? rawPrefix : `${rawPrefix}/`;
         const normalizedPath = stored.path.replace(/\/$/, "");
-        const normalizedPrefix = opts.pathPrefix.replace(/\/$/, "");
+        const normalizedPrefix = rawPrefix.replace(/\/$/, "");
         if (normalizedPath !== normalizedPrefix && !stored.path.startsWith(prefix)) {
           continue;
         }

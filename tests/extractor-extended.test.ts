@@ -100,6 +100,24 @@ describe("extractFromHtml - extended", () => {
     expect(extracted?.outgoingLinks).not.toContain("#anchor");
   });
 
+  it("resolves relative outgoing links against the current page path", () => {
+    const html = `
+      <html>
+        <head><title>Docs</title></head>
+        <body>
+          <main>
+            <a href="advanced">Advanced</a>
+            <a href="./faq">FAQ</a>
+          </main>
+        </body>
+      </html>
+    `;
+
+    const extracted = extractFromHtml("/docs/getting-started", html, config);
+    expect(extracted?.outgoingLinks).toContain("/docs/advanced");
+    expect(extracted?.outgoingLinks).toContain("/docs/faq");
+  });
+
   it("extracts tags from first path segment", () => {
     const extracted = extractFromHtml(
       "/docs/getting-started",
@@ -142,5 +160,14 @@ describe("extractFromMarkdown", () => {
   it("returns null for empty markdown", () => {
     const extracted = extractFromMarkdown("/test", "   ");
     expect(extracted).toBeNull();
+  });
+
+  it("does not treat noindex comments inside fenced code blocks as page directives", () => {
+    const extracted = extractFromMarkdown(
+      "/docs/code-sample",
+      "```html\n<!-- noindex -->\n```\n\nVisible docs content."
+    );
+    expect(extracted).not.toBeNull();
+    expect(extracted?.markdown).toContain("Visible docs content.");
   });
 });

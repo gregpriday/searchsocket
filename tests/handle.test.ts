@@ -41,7 +41,8 @@ function makeEvent(options: {
     request: {
       method: options.method,
       headers,
-      json: async () => options.body
+      json: async () => options.body,
+      text: async () => bodyStr
     },
     getClientAddress: () => "127.0.0.1"
   };
@@ -313,6 +314,90 @@ describe("searchsocketHandle", () => {
       error: {
         code: "INVALID_REQUEST",
         message: "bad query"
+      }
+    });
+  });
+
+  it("returns INVALID_REQUEST when request JSON is malformed", async () => {
+    const config = makeConfig();
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const event = makeEvent({
+      pathname: "/api/search",
+      method: "POST",
+      body: { q: "unused" }
+    });
+
+    event.request.text = async () => "{ invalid json";
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Malformed JSON request body"
+      }
+    });
+  });
+
+  it("rejects oversized bodies even when content-length is missing", async () => {
+    const config = makeConfig();
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn().mockResolvedValue({
+        q: "ok",
+        scope: "main",
+        results: [],
+        meta: {
+          timingsMs: { embed: 0, vector: 0, rerank: 0, total: 0 },
+          usedRerank: false,
+          modelId: "text-embedding-3-small"
+        }
+      })
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config, maxBodyBytes: 16 });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search",
+      method: "POST",
+      body: { q: "x".repeat(10_000) }
+    });
+
+    // Simulate missing content-length from some proxies/clients.
+    event.request.headers.delete("content-length");
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "INVALID_REQUEST"
+      }
+    });
+  });
+
+  it("returns INVALID_REQUEST for malformed JSON when request.text is unavailable", async () => {
+    const config = makeConfig();
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const event = makeEvent({
+      pathname: "/api/search",
+      method: "POST",
+      body: { q: "unused" }
+    });
+
+    delete (event.request as { text?: () => Promise<string> }).text;
+    event.request.json = async () => {
+      throw new SyntaxError("Unexpected token");
+    };
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Malformed JSON request body"
       }
     });
   });

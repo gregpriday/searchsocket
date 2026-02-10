@@ -106,6 +106,30 @@ export interface PineconeVectorStoreOptions {
   index?: PineconeLikeIndex;
 }
 
+function truncateUtf8(input: string, maxBytes: number): string {
+  if (maxBytes <= 0) {
+    return "";
+  }
+
+  if (Buffer.byteLength(input, "utf8") <= maxBytes) {
+    return input;
+  }
+
+  let low = 0;
+  let high = input.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    const bytes = Buffer.byteLength(input.slice(0, mid), "utf8");
+    if (bytes <= maxBytes) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return input.slice(0, low);
+}
+
 function toDirFilters(pathValue: string): Record<string, string> {
   const segments = pathValue
     .split("/")
@@ -188,9 +212,7 @@ export class PineconeVectorStore implements VectorStore {
 
     const formatted = records.map((record) => {
       const dirFilters = toDirFilters(record.metadata.path);
-      let snippet = Buffer.byteLength(record.metadata.snippet, "utf8") > MAX_SNIPPET_BYTES
-        ? record.metadata.snippet.slice(0, MAX_SNIPPET_BYTES)
-        : record.metadata.snippet;
+      let snippet = truncateUtf8(record.metadata.snippet, MAX_SNIPPET_BYTES);
 
       const metadata: PineconeMetadata = {
         projectId: record.metadata.projectId,
@@ -213,9 +235,18 @@ export class PineconeVectorStore implements VectorStore {
       // Safety check: if total metadata exceeds Pinecone's limit, truncate snippet further
       let totalBytes = Buffer.byteLength(JSON.stringify(metadata), "utf8");
       if (totalBytes > MAX_TOTAL_METADATA_BYTES) {
-        const excess = totalBytes - MAX_TOTAL_METADATA_BYTES;
-        snippet = snippet.slice(0, Math.max(0, snippet.length - excess - 100));
+        const snippetBytes = Buffer.byteLength(snippet, "utf8");
+        const nonSnippetBytes = totalBytes - snippetBytes;
+        const maxSnippetBytes = Math.max(0, MAX_TOTAL_METADATA_BYTES - nonSnippetBytes);
+        snippet = truncateUtf8(snippet, maxSnippetBytes);
         metadata.snippet = snippet;
+
+        totalBytes = Buffer.byteLength(JSON.stringify(metadata), "utf8");
+        if (totalBytes > MAX_TOTAL_METADATA_BYTES) {
+          const excess = totalBytes - MAX_TOTAL_METADATA_BYTES;
+          snippet = truncateUtf8(snippet, Math.max(0, Buffer.byteLength(snippet, "utf8") - excess));
+          metadata.snippet = snippet;
+        }
       }
 
       return {

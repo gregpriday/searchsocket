@@ -101,7 +101,7 @@ export class SearchEngine {
     const embedStart = process.hrtime.bigint();
     const queryEmbeddings = await this.embeddings.embedTexts([input.q], this.config.embeddings.model);
     const queryVector = queryEmbeddings[0];
-    if (!queryVector) {
+    if (!queryVector || queryVector.length === 0) {
       throw new SearchSocketError("VECTOR_BACKEND_UNAVAILABLE", "Unable to create query embedding.");
     }
     const embedMs = hrTimeMs(embedStart);
@@ -196,7 +196,8 @@ export class SearchEngine {
       // fall through to plain path handling
     }
 
-    return normalizeUrlPath(pathOrUrl);
+    const withoutQueryOrHash = pathOrUrl.split(/[?#]/)[0] ?? pathOrUrl;
+    return normalizeUrlPath(withoutQueryOrHash);
   }
 
   private assertModelCompatibility(scopeName: string): void {

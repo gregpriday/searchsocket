@@ -58,8 +58,10 @@ async function parseSitemap(xml: string, baseUrl: string): Promise<string[]> {
 
   for (const loc of locs) {
     try {
-      const url = new URL(loc);
-      routes.push(normalizeUrlPath(url.pathname));
+      const parsed = loc.startsWith("http://") || loc.startsWith("https://")
+        ? new URL(loc)
+        : new URL(loc, baseUrl);
+      routes.push(normalizeUrlPath(parsed.pathname));
     } catch {
       // ignore invalid entry
     }
@@ -75,7 +77,7 @@ async function resolveRoutes(config: ResolvedSearchSocketConfig): Promise<string
   }
 
   if (crawlConfig.routes.length > 0) {
-    return [...new Set(crawlConfig.routes.map(ensureLeadingSlash))];
+    return [...new Set(crawlConfig.routes.map((route) => normalizeUrlPath(ensureLeadingSlash(route))))];
   }
 
   if (!crawlConfig.sitemapUrl) {
@@ -100,12 +102,13 @@ export async function loadCrawledPages(
   }
 
   const routes = await resolveRoutes(config);
-  const selected = typeof maxPages === "number" ? routes.slice(0, maxPages) : routes;
+  const maxCount = typeof maxPages === "number" ? Math.max(0, Math.floor(maxPages)) : undefined;
+  const selected = typeof maxCount === "number" ? routes.slice(0, maxCount) : routes;
 
-  const limit = pLimit(8);
+  const concurrencyLimit = pLimit(8);
   const results = await Promise.allSettled(
     selected.map((route) =>
-      limit(async (): Promise<PageSourceRecord> => {
+      concurrencyLimit(async (): Promise<PageSourceRecord> => {
         const url = joinUrl(crawlConfig.baseUrl, route);
         const response = await fetch(url);
 

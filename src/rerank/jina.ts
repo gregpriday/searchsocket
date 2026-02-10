@@ -46,14 +46,23 @@ export class JinaReranker implements Reranker {
     while (attempt <= this.maxRetries) {
       attempt += 1;
 
-      const response = await fetch("https://api.jina.ai/v1/rerank", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify(body)
-      });
+      let response: Response;
+      try {
+        response = await fetch("https://api.jina.ai/v1/rerank", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${this.apiKey}`
+          },
+          body: JSON.stringify(body)
+        });
+      } catch (error) {
+        if (attempt <= this.maxRetries) {
+          await sleep(Math.min(300 * 2 ** attempt, 4000));
+          continue;
+        }
+        throw error;
+      }
 
       if (!response.ok) {
         const retryable = response.status === 429 || response.status >= 500;
@@ -72,6 +81,9 @@ export class JinaReranker implements Reranker {
       };
 
       const rawResults = payload.results ?? payload.data ?? [];
+      if (!Array.isArray(rawResults)) {
+        throw new Error("Invalid Jina rerank response format");
+      }
 
       return rawResults
         .flatMap((item) => {

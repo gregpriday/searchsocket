@@ -20,6 +20,14 @@ export class OpenAIEmbeddingsProvider implements EmbeddingsProvider {
   private readonly concurrency: number;
 
   constructor(options: OpenAIEmbeddingsProviderOptions) {
+    if (!Number.isInteger(options.batchSize) || options.batchSize <= 0) {
+      throw new Error(`Invalid batchSize: ${options.batchSize}. batchSize must be a positive integer.`);
+    }
+
+    if (!Number.isInteger(options.concurrency) || options.concurrency <= 0) {
+      throw new Error(`Invalid concurrency: ${options.concurrency}. concurrency must be a positive integer.`);
+    }
+
     this.client = new OpenAI({
       apiKey: options.apiKey
     });

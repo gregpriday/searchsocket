@@ -65,7 +65,8 @@ export async function loadContentFilesPages(
     onlyFiles: true
   });
 
-  const selected = typeof maxPages === "number" ? files.slice(0, maxPages) : files;
+  const limit = typeof maxPages === "number" ? Math.max(0, Math.floor(maxPages)) : undefined;
+  const selected = typeof limit === "number" ? files.slice(0, limit) : files;
   const pages: PageSourceRecord[] = [];
 
   for (const filePath of selected) {

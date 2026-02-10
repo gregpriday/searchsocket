@@ -6,17 +6,38 @@ import type { ExtractedPage, ResolvedSearchSocketConfig } from "../types";
 import { normalizeMarkdown, normalizeText } from "../utils/text";
 import { normalizeUrlPath } from "../utils/path";
 
+function hasTopLevelNoindexComment(markdown: string): boolean {
+  const lines = markdown.split(/\r?\n/);
+  let inFence = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^(```|~~~)/.test(trimmed)) {
+      inFence = !inFence;
+      continue;
+    }
+
+    if (!inFence && /<!--\s*noindex\s*-->/i.test(line)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export function extractFromHtml(
   url: string,
   html: string,
   config: ResolvedSearchSocketConfig
 ): ExtractedPage | null {
   const $ = load(html);
+  const normalizedUrl = normalizeUrlPath(url);
+  const pageBaseUrl = new URL(`https://searchsocket.local${normalizedUrl}`);
 
   const title =
     normalizeText($("title").first().text() || "") ||
     normalizeText($(`${config.extract.mainSelector} h1`).first().text() || "") ||
-    normalizeUrlPath(url);
+    normalizedUrl;
 
   if (config.extract.respectRobotsNoindex) {
     const robots = $("meta[name='robots']").attr("content") ?? "";
@@ -51,7 +72,7 @@ export function extractFromHtml(
     }
 
     try {
-      const parsed = new URL(href, "https://searchsocket.local");
+      const parsed = new URL(href, pageBaseUrl);
       if (!["http:", "https:"].includes(parsed.protocol)) {
         return;
       }
@@ -104,8 +125,8 @@ export function extractFromHtml(
 }
 
 export function extractFromMarkdown(url: string, markdown: string, title?: string): ExtractedPage | null {
-  // Check for <!-- noindex --> HTML comment before any processing
-  if (/<!--\s*noindex\s*-->/i.test(markdown)) {
+  // Check for <!-- noindex --> comments outside fenced code blocks.
+  if (hasTopLevelNoindexComment(markdown)) {
     return null;
   }
 

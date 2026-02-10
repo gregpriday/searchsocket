@@ -19,7 +19,15 @@ export function createSearchClient(options: SearchClientOptions = {}) {
         body: JSON.stringify(request)
       });
 
-      const payload = await response.json();
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        if (!response.ok) {
+          throw new Error("Search failed");
+        }
+        throw new Error("Invalid search response");
+      }
 
       if (!response.ok) {
         const message = (payload as { error?: { message?: string } }).error?.message ?? "Search failed";

@@ -88,6 +88,23 @@ describe("LocalVectorStore contract", () => {
     expect(hits[0]?.metadata.url).toBe("/docs/a");
   });
 
+  it("accepts pathPrefix without a leading slash for compatibility with API callers", async () => {
+    const dir = await makeTempDir();
+    const store = new LocalVectorStore(path.join(dir, "test.json"));
+
+    await store.upsert(
+      [
+        record("a", [1, 0, 0], "/docs/a"),
+        record("b", [0.9, 0.1, 0], "/blog/b")
+      ],
+      scope
+    );
+
+    const hits = await store.query([1, 0, 0], { topK: 10, pathPrefix: "docs" }, scope);
+    expect(hits.length).toBe(1);
+    expect(hits[0]?.metadata.url).toBe("/docs/a");
+  });
+
   it("filters by tags", async () => {
     const dir = await makeTempDir();
     const store = new LocalVectorStore(path.join(dir, "test.json"));

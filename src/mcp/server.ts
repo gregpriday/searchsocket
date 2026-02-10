@@ -5,6 +5,7 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { SearchEngine } from "../search/engine";
+import { loadConfig } from "../config/load";
 import type { ResolvedSearchSocketConfig } from "../types";
 
 export interface McpServerOptions {
@@ -166,20 +167,23 @@ async function startHttpServer(serverFactory: () => McpServer, config: ResolvedS
 }
 
 export async function runMcpServer(options: McpServerOptions = {}): Promise<void> {
-  const transport = options.transport ?? "stdio";
+  const config = await loadConfig({
+    cwd: options.cwd,
+    configPath: options.configPath
+  });
+  const resolvedTransport = options.transport ?? config.mcp.transport;
 
-  // For stdio transport, redirect ALL output to stderr before any initialization
+  // For stdio transport, redirect ALL output to stderr before server initialization
   // to prevent corrupting the JSON-RPC stream on stdout.
-  if (transport === "stdio") {
+  if (resolvedTransport === "stdio") {
     redirectConsoleToStderr();
   }
 
   const engine = await SearchEngine.create({
     cwd: options.cwd,
-    configPath: options.configPath
+    configPath: options.configPath,
+    config
   });
-  const config = engine.getConfig();
-  const resolvedTransport = options.transport ?? config.mcp.transport;
 
   if (resolvedTransport === "http") {
     await startHttpServer(() => createServer(engine), config, options);

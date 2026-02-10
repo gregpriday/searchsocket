@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SearchEngine } from "../src/search/engine";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { EmbeddingsProvider, VectorHit, VectorStore } from "../src/types";
@@ -101,6 +101,27 @@ describe("SearchEngine - adversarial cases", () => {
     });
   });
 
+  it("rejects invalid topK values outside schema bounds", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      embeddingsProvider: new FakeEmbeddings(),
+      vectorStore: new FakeStore()
+    });
+
+    await expect(engine.search({ q: "test", topK: 0 })).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+      status: 400
+    });
+    await expect(engine.search({ q: "test", topK: 101 })).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+      status: 400
+    });
+  });
+
   it("rejects rerank=true when rerank provider is disabled", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
@@ -174,6 +195,37 @@ Run pnpm add searchsocket.
     expect(page.markdown).toContain("Run pnpm add searchsocket.");
   });
 
+  it("normalizes query/hash suffixes for path-style getPage inputs", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    const pagePath = path.join(cwd, ".searchsocket", "pages", "main", "docs", "faq.md");
+
+    await fs.mkdir(path.dirname(pagePath), { recursive: true });
+    await fs.writeFile(
+      pagePath,
+      `---
+url: "/docs/faq"
+title: "FAQ"
+routeFile: "src/routes/docs/faq/+page.svelte"
+---
+
+Frequently asked questions.
+`,
+      "utf8"
+    );
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      embeddingsProvider: new FakeEmbeddings(),
+      vectorStore: new FakeStore()
+    });
+
+    const page = await engine.getPage("/docs/faq?ref=nav#pricing");
+    expect(page.url).toBe("/docs/faq");
+    expect(page.frontmatter.title).toBe("FAQ");
+  });
+
   it("returns 404 when requested indexed page does not exist", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
@@ -226,5 +278,38 @@ Run pnpm add searchsocket.
     await expect(engine.search({ q: "test" })).rejects.toMatchObject({
       code: "EMBEDDING_MODEL_MISMATCH"
     });
+  });
+
+  it("rejects empty embedding vectors instead of querying the backend with invalid data", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+
+    const query = vi.fn().mockResolvedValue([]);
+    const store: VectorStore = {
+      upsert: async () => undefined,
+      query,
+      deleteByIds: async () => undefined,
+      deleteScope: async () => undefined,
+      listScopes: async () => [],
+      recordScope: async () => undefined,
+      health: async () => ({ ok: true })
+    };
+
+    const embeddings: EmbeddingsProvider = {
+      estimateTokens: (text) => text.length,
+      embedTexts: async () => [[]]
+    };
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      embeddingsProvider: embeddings,
+      vectorStore: store
+    });
+
+    await expect(engine.search({ q: "test" })).rejects.toMatchObject({
+      code: "VECTOR_BACKEND_UNAVAILABLE"
+    });
+    expect(query).not.toHaveBeenCalled();
   });
 });

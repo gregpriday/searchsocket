@@ -92,6 +92,32 @@ describe("createSearchClient", () => {
     await expect(client.search({ q: "test" })).rejects.toThrow("Search failed");
   });
 
+  it("throws generic message when error response is not valid JSON", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => {
+        throw new SyntaxError("Unexpected token");
+      }
+    });
+
+    const client = createSearchClient({ fetchImpl: mockFetch as unknown as typeof fetch });
+
+    await expect(client.search({ q: "test" })).rejects.toThrow("Search failed");
+  });
+
+  it("throws explicit error when success response is not valid JSON", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => {
+        throw new SyntaxError("Unexpected token");
+      }
+    });
+
+    const client = createSearchClient({ fetchImpl: mockFetch as unknown as typeof fetch });
+
+    await expect(client.search({ q: "test" })).rejects.toThrow("Invalid search response");
+  });
+
   it("sends all request fields", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,

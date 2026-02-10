@@ -199,17 +199,29 @@ export class IndexPipeline {
     }
 
     extractedPages.sort((a, b) => a.url.localeCompare(b.url));
+    const uniquePages: ExtractedPage[] = [];
+    const seenUrls = new Set<string>();
+    for (const page of extractedPages) {
+      if (seenUrls.has(page.url)) {
+        this.logger.warn(
+          `Duplicate page source for ${page.url}; keeping first extracted page and skipping the duplicate.`
+        );
+        continue;
+      }
+      seenUrls.add(page.url);
+      uniquePages.push(page);
+    }
     stageEnd("extract", extractStart);
 
     const linkStart = stageStart();
-    const pageSet = new Set(extractedPages.map((page) => normalizeUrlPath(page.url)));
+    const pageSet = new Set(uniquePages.map((page) => normalizeUrlPath(page.url)));
     const incomingLinkCount = new Map<string, number>();
 
-    for (const page of extractedPages) {
+    for (const page of uniquePages) {
       incomingLinkCount.set(page.url, incomingLinkCount.get(page.url) ?? 0);
     }
 
-    for (const page of extractedPages) {
+    for (const page of uniquePages) {
       for (const outgoing of page.outgoingLinks) {
         if (!pageSet.has(outgoing)) {
           continue;
@@ -225,7 +237,7 @@ export class IndexPipeline {
     let routeExact = 0;
     let routeBestEffort = 0;
 
-    for (const page of extractedPages) {
+    for (const page of uniquePages) {
       const routeMatch = mapUrlToRoute(page.url, routePatterns);
 
       if (routeMatch.routeResolution === "best-effort") {
@@ -233,7 +245,8 @@ export class IndexPipeline {
           throw new SearchSocketError(
             "ROUTE_MAPPING_FAILED",
             `Strict route mapping enabled: no exact route match for ${page.url} (resolved to ${routeMatch.routeFile}). ` +
-              "Disable source.strictRouteMapping or add the missing route file."
+              "Disable source.strictRouteMapping or add the missing route file.",
+            400
           );
         }
 
@@ -268,8 +281,9 @@ export class IndexPipeline {
     const chunkStart = stageStart();
     let chunks: Chunk[] = mirrorPages.flatMap((page) => chunkMirrorPage(page, this.config, scope));
 
-    if (typeof options.maxChunks === "number") {
-      chunks = chunks.slice(0, options.maxChunks);
+    const maxChunks = typeof options.maxChunks === "number" ? Math.max(0, Math.floor(options.maxChunks)) : undefined;
+    if (typeof maxChunks === "number") {
+      chunks = chunks.slice(0, maxChunks);
     }
 
     for (const chunk of chunks) {
