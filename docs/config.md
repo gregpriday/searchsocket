@@ -1,6 +1,6 @@
-# SiteScribe Config Reference
+# SearchSocket Config Reference
 
-Configuration file: `sitescribe.config.ts`
+Configuration file: `searchsocket.config.ts`
 
 ```ts
 export default {
@@ -15,7 +15,7 @@ export default {
 - `project.baseUrl` (optional canonical URL)
 - `scope.mode` (`fixed` | `git` | `env`, default `fixed`)
 - `scope.fixed` (default `main`)
-- `scope.envVar` (default `SITESCRIBE_SCOPE`)
+- `scope.envVar` (default `SEARCHSOCKET_SCOPE`)
 - `scope.sanitize` (default `true`)
 
 ## Source
@@ -80,7 +80,7 @@ export default {
 ### Local
 
 - `vector.provider = "local"`
-- `vector.local.path` (default `.sitescribe/local-vectors.sqlite`)
+- `vector.local.path` (default `.searchsocket/local-vectors.sqlite`)
 
 ## Reranking
 
@@ -108,7 +108,7 @@ export default {
 - `mcp.http.port` (default `3338`)
 - `mcp.http.path` (default `/mcp`)
 
-- `state.dir` (default `.sitescribe`)
+- `state.dir` (default `.searchsocket`)
 
 ## Env Variables
 
@@ -119,6 +119,6 @@ Common env variables:
 - `MILVUS_TOKEN`
 - `PINECONE_API_KEY`
 - `JINA_API_KEY`
-- `SITESCRIBE_SCOPE` (only with `scope.mode = "env"`)
-- `SITESCRIBE_AUTO_INDEX` (build plugin trigger)
-- `SITESCRIBE_DISABLE_AUTO_INDEX` (build plugin kill switch)
+- `SEARCHSOCKET_SCOPE` (only with `scope.mode = "env"`)
+- `SEARCHSOCKET_AUTO_INDEX` (build plugin trigger)
+- `SEARCHSOCKET_DISABLE_AUTO_INDEX` (build plugin kill switch)

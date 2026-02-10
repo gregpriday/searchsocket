@@ -8,7 +8,7 @@ import { createDefaultConfig } from "../src/config/defaults";
 const tempDirs: string[] = [];
 
 async function makeTempDir(): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "sitescribe-cfg-"));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "searchsocket-cfg-"));
   tempDirs.push(dir);
   return dir;
 }
@@ -28,7 +28,7 @@ describe("createDefaultConfig", () => {
     expect(config.chunking.overlapChars).toBe(200);
     expect(config.chunking.minChars).toBe(250);
     expect(config.api.path).toBe("/api/search");
-    expect(config.state.dir).toBe(".sitescribe");
+    expect(config.state.dir).toBe(".searchsocket");
   });
 
   it("uses project id for vector index names", () => {

@@ -3,9 +3,9 @@ import { MilvusVectorStore } from "../src/vector/milvus";
 import type { Scope, VectorRecord } from "../src/types";
 
 const scope: Scope = {
-  projectId: "sitescribe-test",
+  projectId: "searchsocket-test",
   scopeName: "main",
-  scopeId: "sitescribe-test:main"
+  scopeId: "searchsocket-test:main"
 };
 
 function makeRecord(id: string): VectorRecord {
@@ -70,8 +70,8 @@ describe("MilvusVectorStore", () => {
 
     const store = new MilvusVectorStore({
       address: "http://localhost:19530",
-      collectionName: "sitescribe_chunks",
-      registryCollectionName: "sitescribe_registry",
+      collectionName: "searchsocket_chunks",
+      registryCollectionName: "searchsocket_registry",
       client: fakeClient
     });
 
@@ -81,7 +81,7 @@ describe("MilvusVectorStore", () => {
     expect(search).toHaveBeenCalledTimes(1);
 
     const args = search.mock.calls[0]?.[0] as { filter?: string };
-    expect(args.filter).toContain("projectId == \"sitescribe-test\"");
+    expect(args.filter).toContain("projectId == \"searchsocket-test\"");
     expect(args.filter).toContain("scopeName == \"main\"");
     expect(args.filter).toContain("(path == \"/docs\" or path like \"/docs/%\")");
     expect(args.filter).toContain("tags like \"%\\\"docs\\\"%\"");
@@ -102,8 +102,8 @@ describe("MilvusVectorStore", () => {
 
     const store = new MilvusVectorStore({
       address: "http://localhost:19530",
-      collectionName: "sitescribe_chunks",
-      registryCollectionName: "sitescribe_registry",
+      collectionName: "searchsocket_chunks",
+      registryCollectionName: "searchsocket_registry",
       client: fakeClient
     });
 

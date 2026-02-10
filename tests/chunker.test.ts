@@ -3,11 +3,11 @@ import { createDefaultConfig } from "../src/config/defaults";
 import { chunkMirrorPage } from "../src/indexing/chunker";
 import type { MirrorPage, Scope } from "../src/types";
 
-const config = createDefaultConfig("sitescribe-test");
+const config = createDefaultConfig("searchsocket-test");
 const scope: Scope = {
-  projectId: "sitescribe-test",
+  projectId: "searchsocket-test",
   scopeName: "main",
-  scopeId: "sitescribe-test:main"
+  scopeId: "searchsocket-test:main"
 };
 
 describe("chunkMirrorPage", () => {

@@ -1,12 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import fg from "fast-glob";
-import type { PageSourceRecord, ResolvedSiteScribeConfig } from "../../types";
+import type { PageSourceRecord, ResolvedSearchSocketConfig } from "../../types";
 import { staticHtmlFileToUrl } from "../../utils/path";
 
 export async function loadStaticOutputPages(
   cwd: string,
-  config: ResolvedSiteScribeConfig,
+  config: ResolvedSearchSocketConfig,
   maxPages?: number
 ): Promise<PageSourceRecord[]> {
   const outputDir = path.resolve(cwd, config.source.staticOutputDir);

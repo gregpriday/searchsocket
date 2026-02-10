@@ -1,14 +1,14 @@
 import { load } from "cheerio";
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
-import type { ExtractedPage, ResolvedSiteScribeConfig } from "../types";
+import type { ExtractedPage, ResolvedSearchSocketConfig } from "../types";
 import { normalizeMarkdown, normalizeText } from "../utils/text";
 import { normalizeUrlPath } from "../utils/path";
 
 export function extractFromHtml(
   url: string,
   html: string,
-  config: ResolvedSiteScribeConfig
+  config: ResolvedSearchSocketConfig
 ): ExtractedPage | null {
   const $ = load(html);
 

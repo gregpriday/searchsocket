@@ -5,7 +5,7 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { SearchEngine } from "../search/engine";
-import type { ResolvedSiteScribeConfig } from "../types";
+import type { ResolvedSearchSocketConfig } from "../types";
 
 export interface McpServerOptions {
   cwd?: string;
@@ -17,7 +17,7 @@ export interface McpServerOptions {
 
 function createServer(engine: SearchEngine): McpServer {
   const server = new McpServer({
-    name: "sitescribe-mcp",
+    name: "searchsocket-mcp",
     version: "0.1.0"
   });
 
@@ -93,7 +93,7 @@ function redirectConsoleToStderr(): void {
   void originalLog;
 }
 
-async function startHttpServer(serverFactory: () => McpServer, config: ResolvedSiteScribeConfig, opts: McpServerOptions): Promise<void> {
+async function startHttpServer(serverFactory: () => McpServer, config: ResolvedSearchSocketConfig, opts: McpServerOptions): Promise<void> {
   const app = createMcpExpressApp();
   const port = opts.httpPort ?? config.mcp.http.port;
   const endpointPath = opts.httpPath ?? config.mcp.http.path;
@@ -153,7 +153,7 @@ async function startHttpServer(serverFactory: () => McpServer, config: ResolvedS
 
   await new Promise<void>((resolve, reject) => {
     const instance = app.listen(port, "127.0.0.1", () => {
-      process.stdout.write(`SiteScribe MCP HTTP server listening on http://127.0.0.1:${port}${endpointPath}\n`);
+      process.stdout.write(`SearchSocket MCP HTTP server listening on http://127.0.0.1:${port}${endpointPath}\n`);
       resolve();
     });
     instance.once("error", reject);

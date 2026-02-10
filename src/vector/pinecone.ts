@@ -8,7 +8,7 @@ import type {
   VectorStore
 } from "../types";
 
-const REGISTRY_NAMESPACE = "_sitescribe_registry";
+const REGISTRY_NAMESPACE = "_searchsocket_registry";
 /**
  * Maximum path segments stored as dir0..dirN metadata keys for prefix filtering.
  * Paths deeper than 8 levels will only be filterable up to this depth. This is

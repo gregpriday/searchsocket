@@ -38,7 +38,7 @@ class FakeStore implements VectorStore {
         id: "first",
         score: 0.99,
         metadata: {
-          projectId: "sitescribe-rerank",
+          projectId: "searchsocket-rerank",
           scopeName: "main",
           url: "/a",
           path: "/a",
@@ -58,7 +58,7 @@ class FakeStore implements VectorStore {
         id: "second",
         score: 0.1,
         metadata: {
-          projectId: "sitescribe-rerank",
+          projectId: "searchsocket-rerank",
           scopeName: "main",
           url: "/b",
           path: "/b",
@@ -104,10 +104,10 @@ afterEach(async () => {
 
 describe("SearchEngine rerank", () => {
   it("applies reranker ordering when rerank=true", async () => {
-    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "sitescribe-rerank-"));
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "searchsocket-rerank-"));
     tempDirs.push(cwd);
 
-    const config = createDefaultConfig("sitescribe-rerank");
+    const config = createDefaultConfig("searchsocket-rerank");
     config.rerank.provider = "jina";
 
     const engine = await SearchEngine.create({

@@ -1,16 +1,16 @@
 import path from "node:path";
-import type { ResolvedSiteScribeConfig, VectorStore } from "../types";
-import { SiteScribeError } from "../errors";
+import type { ResolvedSearchSocketConfig, VectorStore } from "../types";
+import { SearchSocketError } from "../errors";
 import { LocalVectorStore } from "./local";
 import { MilvusVectorStore } from "./milvus";
 import { PineconeVectorStore } from "./pinecone";
 
-export function createVectorStore(config: ResolvedSiteScribeConfig, cwd: string): VectorStore {
+export function createVectorStore(config: ResolvedSearchSocketConfig, cwd: string): VectorStore {
   if (config.vector.provider === "pinecone") {
     const apiKey = process.env[config.vector.pinecone.apiKeyEnv];
 
     if (!apiKey) {
-      throw new SiteScribeError(
+      throw new SearchSocketError(
         "CONFIG_MISSING",
         `Pinecone API key env var ${config.vector.pinecone.apiKeyEnv} is not set.`
       );
@@ -32,7 +32,7 @@ export function createVectorStore(config: ResolvedSiteScribeConfig, cwd: string)
     const token = process.env[config.vector.milvus.tokenEnv];
 
     if (!uri) {
-      throw new SiteScribeError(
+      throw new SearchSocketError(
         "CONFIG_MISSING",
         `Milvus URI env var ${config.vector.milvus.uriEnv} is not set.`
       );
@@ -46,5 +46,5 @@ export function createVectorStore(config: ResolvedSiteScribeConfig, cwd: string)
     });
   }
 
-  throw new SiteScribeError("VECTOR_BACKEND_UNAVAILABLE", `Unsupported vector provider: ${config.vector.provider}`);
+  throw new SearchSocketError("VECTOR_BACKEND_UNAVAILABLE", `Unsupported vector provider: ${config.vector.provider}`);
 }

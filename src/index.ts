@@ -6,11 +6,11 @@ export type {
   QueryOpts,
   RerankCandidate,
   Reranker,
-  ResolvedSiteScribeConfig,
+  ResolvedSearchSocketConfig,
   Scope,
   SearchRequest,
   SearchResponse,
-  SiteScribeConfig,
+  SearchSocketConfig,
   VectorHit,
   VectorRecord,
   VectorStore
@@ -24,5 +24,5 @@ export { IndexPipeline } from "./indexing/pipeline";
 export { SearchEngine } from "./search/engine";
 export { createVectorStore } from "./vector";
 export { runMcpServer } from "./mcp/server";
-export { sitescribeHandle, sitescribeVitePlugin } from "./sveltekit";
+export { searchsocketHandle, searchsocketVitePlugin } from "./sveltekit";
 export { createSearchClient } from "./client";

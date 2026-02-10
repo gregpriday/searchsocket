@@ -3,9 +3,9 @@ import { PineconeVectorStore } from "../src/vector/pinecone";
 import type { Scope, VectorRecord } from "../src/types";
 
 const scope: Scope = {
-  projectId: "sitescribe-test",
+  projectId: "searchsocket-test",
   scopeName: "main",
-  scopeId: "sitescribe-test:main"
+  scopeId: "searchsocket-test:main"
 };
 
 function makeRecord(id: string, pathValue: string): VectorRecord {
@@ -40,7 +40,7 @@ describe("PineconeVectorStore", () => {
           id: "chunk-1",
           score: 0.91,
           metadata: {
-            projectId: "sitescribe-test",
+            projectId: "searchsocket-test",
             scopeName: "main",
             url: "/docs/page",
             path: "/docs/page",
@@ -71,7 +71,7 @@ describe("PineconeVectorStore", () => {
 
     const store = new PineconeVectorStore({
       apiKey: "pc-test",
-      indexName: "sitescribe",
+      indexName: "searchsocket",
       embeddingModel: "text-embedding-3-small",
       index: fakeIndex
     });
@@ -88,7 +88,7 @@ describe("PineconeVectorStore", () => {
     expect(query).toHaveBeenCalledTimes(1);
     const queryArgs = query.mock.calls[0]?.[0] as { filter?: Record<string, unknown> };
     expect(queryArgs.filter).toMatchObject({
-      projectId: { $eq: "sitescribe-test" },
+      projectId: { $eq: "searchsocket-test" },
       scopeName: { $eq: "main" },
       dir0: { $eq: "docs" },
       tag_docs: { $eq: true }

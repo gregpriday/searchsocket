@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const siteScribeConfigSchema = z.object({
+export const searchSocketConfigSchema = z.object({
   project: z
     .object({
       id: z.string().min(1).optional(),
@@ -155,4 +155,4 @@ export const siteScribeConfigSchema = z.object({
     .optional()
 });
 
-export type ParsedSiteScribeConfig = z.infer<typeof siteScribeConfigSchema>;
+export type ParsedSearchSocketConfig = z.infer<typeof searchSocketConfigSchema>;

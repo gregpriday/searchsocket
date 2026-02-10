@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createDefaultConfig } from "../src/config/defaults";
 import { extractFromHtml } from "../src/indexing/extractor";
 
-const config = createDefaultConfig("sitescribe-test");
+const config = createDefaultConfig("searchsocket-test");
 
 describe("extractFromHtml", () => {
   it("extracts main content and removes boilerplate/ignored blocks", () => {

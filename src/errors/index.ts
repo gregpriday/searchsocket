@@ -1,4 +1,4 @@
-export type SiteScribeErrorCode =
+export type SearchSocketErrorCode =
   | "CONFIG_MISSING"
   | "EMBEDDING_MODEL_MISMATCH"
   | "VECTOR_BACKEND_UNAVAILABLE"
@@ -6,11 +6,11 @@ export type SiteScribeErrorCode =
   | "INVALID_REQUEST"
   | "INTERNAL_ERROR";
 
-export class SiteScribeError extends Error {
-  public readonly code: SiteScribeErrorCode;
+export class SearchSocketError extends Error {
+  public readonly code: SearchSocketErrorCode;
   public readonly status: number;
 
-  constructor(code: SiteScribeErrorCode, message: string, status = 500) {
+  constructor(code: SearchSocketErrorCode, message: string, status = 500) {
     super(message);
     this.code = code;
     this.status = status;
@@ -19,11 +19,11 @@ export class SiteScribeError extends Error {
 
 export function toErrorPayload(error: unknown): {
   error: {
-    code: SiteScribeErrorCode;
+    code: SearchSocketErrorCode;
     message: string;
   };
 } {
-  if (error instanceof SiteScribeError) {
+  if (error instanceof SearchSocketError) {
     return {
       error: {
         code: error.code,

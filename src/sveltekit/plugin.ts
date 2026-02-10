@@ -8,7 +8,7 @@ interface MinimalVitePlugin {
   closeBundle?: () => Promise<void> | void;
 }
 
-export interface SiteScribeAutoIndexOptions {
+export interface SearchSocketAutoIndexOptions {
   cwd?: string;
   configPath?: string;
   enabled?: boolean;
@@ -21,7 +21,7 @@ export interface SiteScribeAutoIndexOptions {
   verbose?: boolean;
 }
 
-function shouldRunAutoIndex(options: SiteScribeAutoIndexOptions): boolean {
+function shouldRunAutoIndex(options: SearchSocketAutoIndexOptions): boolean {
   if (options.enabled === true) {
     return true;
   }
@@ -30,8 +30,8 @@ function shouldRunAutoIndex(options: SiteScribeAutoIndexOptions): boolean {
     return false;
   }
 
-  const triggerEnvVar = options.triggerEnvVar ?? "SITESCRIBE_AUTO_INDEX";
-  const disableEnvVar = options.disableEnvVar ?? "SITESCRIBE_DISABLE_AUTO_INDEX";
+  const triggerEnvVar = options.triggerEnvVar ?? "SEARCHSOCKET_AUTO_INDEX";
+  const disableEnvVar = options.disableEnvVar ?? "SEARCHSOCKET_DISABLE_AUTO_INDEX";
 
   const disabled = process.env[disableEnvVar];
   if (disabled && /^(1|true|yes)$/i.test(disabled)) {
@@ -51,11 +51,11 @@ function shouldRunAutoIndex(options: SiteScribeAutoIndexOptions): boolean {
   return false;
 }
 
-export function sitescribeVitePlugin(options: SiteScribeAutoIndexOptions = {}): MinimalVitePlugin {
+export function searchsocketVitePlugin(options: SearchSocketAutoIndexOptions = {}): MinimalVitePlugin {
   let executed = false;
 
   return {
-    name: "sitescribe:auto-index",
+    name: "searchsocket:auto-index",
     apply: "build",
     async closeBundle() {
       if (executed) {
@@ -73,7 +73,7 @@ export function sitescribeVitePlugin(options: SiteScribeAutoIndexOptions = {}): 
         verbose: options.verbose ?? true
       });
 
-      logger.info("[sitescribe] build completed, starting incremental index...");
+      logger.info("[searchsocket] build completed, starting incremental index...");
 
       const pipeline = await IndexPipeline.create({
         cwd,
@@ -90,9 +90,9 @@ export function sitescribeVitePlugin(options: SiteScribeAutoIndexOptions = {}): 
       });
 
       logger.info(
-        `[sitescribe] indexed pages=${stats.pagesProcessed} chunks=${stats.chunksTotal} changed=${stats.chunksChanged} cached=${stats.cachedEmbeddings} new=${stats.newEmbeddings}`
+        `[searchsocket] indexed pages=${stats.pagesProcessed} chunks=${stats.chunksTotal} changed=${stats.chunksChanged} cached=${stats.cachedEmbeddings} new=${stats.newEmbeddings}`
       );
-      logger.info("[sitescribe] markdown mirror written under .sitescribe/pages/<scope> (safe to commit for content workflows).");
+      logger.info("[searchsocket] markdown mirror written under .searchsocket/pages/<scope> (safe to commit for content workflows).");
     }
   };
 }

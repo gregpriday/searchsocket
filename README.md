@@ -1,4 +1,4 @@
-# SiteScribe
+# SearchSocket
 
 Semantic site search and MCP retrieval for SvelteKit content projects.
 
@@ -8,13 +8,13 @@ Semantic site search and MCP retrieval for SvelteKit content projects.
 - Vector backends: **Milvus/Zilliz Cloud**, **Pinecone**, **Local SQLite**
 - Rerank: **none** or **Jina** (optional)
 - SvelteKit integrations:
-  - `sitescribeHandle()` for `POST /api/search`
-  - `sitescribeVitePlugin()` for build-triggered indexing
+  - `searchsocketHandle()` for `POST /api/search`
+  - `searchsocketVitePlugin()` for build-triggered indexing
 
 ## Install
 
 ```bash
-pnpm add -D sitescribe
+pnpm add -D searchsocket
 ```
 
 ## Quickstart
@@ -22,10 +22,10 @@ pnpm add -D sitescribe
 1. Initialize:
 
 ```bash
-pnpm sitescribe init
+pnpm searchsocket init
 ```
 
-2. Minimal config (`sitescribe.config.ts`):
+2. Minimal config (`searchsocket.config.ts`):
 
 ```ts
 export default {
@@ -37,15 +37,15 @@ export default {
 3. Add SvelteKit API hook (`src/hooks.server.ts`):
 
 ```ts
-import { sitescribeHandle } from "sitescribe/sveltekit";
+import { searchsocketHandle } from "searchsocket/sveltekit";
 
-export const handle = sitescribeHandle();
+export const handle = searchsocketHandle();
 ```
 
 4. Index:
 
 ```bash
-pnpm sitescribe index --changed-only
+pnpm searchsocket index --changed-only
 ```
 
 5. Query:
@@ -59,11 +59,11 @@ curl -X POST http://localhost:5173/api/search \
 ## Build-Triggered Indexing (SvelteKit-First)
 
 ```ts
-import { sitescribeVitePlugin } from "sitescribe/sveltekit";
+import { searchsocketVitePlugin } from "searchsocket/sveltekit";
 
 export default {
   plugins: [
-    sitescribeVitePlugin({
+    searchsocketVitePlugin({
       changedOnly: true
     })
   ]
@@ -73,8 +73,8 @@ export default {
 Env-driven enable/disable:
 
 ```bash
-SITESCRIBE_AUTO_INDEX=1 pnpm build
-SITESCRIBE_DISABLE_AUTO_INDEX=1 pnpm build
+SEARCHSOCKET_AUTO_INDEX=1 pnpm build
+SEARCHSOCKET_DISABLE_AUTO_INDEX=1 pnpm build
 ```
 
 ## Git-Tracked Markdown Mirror
@@ -82,7 +82,7 @@ SITESCRIBE_DISABLE_AUTO_INDEX=1 pnpm build
 Indexing writes deterministic markdown mirror files:
 
 ```text
-.sitescribe/pages/<scope>/**.md
+.searchsocket/pages/<scope>/**.md
 ```
 
 For content workflows, you can commit this mirror to git.
@@ -90,15 +90,15 @@ For content workflows, you can commit this mirror to git.
 ## Commands
 
 ```bash
-sitescribe init
-sitescribe index [--scope <name>] [--changed-only] [--force] [--dry-run]
-sitescribe status [--scope <name>]
-sitescribe dev [--mcp] [--scope <name>]
-sitescribe clean [--remote] [--scope <name>]
-sitescribe prune [--older-than 30d] [--apply]
-sitescribe doctor
-sitescribe mcp [--transport stdio|http]
-sitescribe search --q "..." [--rerank]
+searchsocket init
+searchsocket index [--scope <name>] [--changed-only] [--force] [--dry-run]
+searchsocket status [--scope <name>]
+searchsocket dev [--mcp] [--scope <name>]
+searchsocket clean [--remote] [--scope <name>]
+searchsocket prune [--older-than 30d] [--apply]
+searchsocket doctor
+searchsocket mcp [--transport stdio|http]
+searchsocket search --q "..." [--rerank]
 ```
 
 ## MCP
@@ -106,7 +106,7 @@ sitescribe search --q "..." [--rerank]
 Start MCP server:
 
 ```bash
-sitescribe mcp
+searchsocket mcp
 ```
 
 Tools:
@@ -136,6 +136,6 @@ Optional rerank:
 - `JINA_API_KEY`
 
 Optional scope/build:
-- `SITESCRIBE_SCOPE`
-- `SITESCRIBE_AUTO_INDEX`
-- `SITESCRIBE_DISABLE_AUTO_INDEX`
+- `SEARCHSOCKET_SCOPE`
+- `SEARCHSOCKET_AUTO_INDEX`
+- `SEARCHSOCKET_DISABLE_AUTO_INDEX`

@@ -1,5 +1,5 @@
 import pLimit from "p-limit";
-import type { PageSourceRecord, ResolvedSiteScribeConfig } from "../../types";
+import type { PageSourceRecord, ResolvedSearchSocketConfig } from "../../types";
 import { ensureLeadingSlash, joinUrl, normalizeUrlPath } from "../../utils/path";
 
 function extractLocs(xml: string): string[] {
@@ -59,7 +59,7 @@ async function parseSitemap(xml: string, baseUrl: string): Promise<string[]> {
   return [...new Set(routes)];
 }
 
-async function resolveRoutes(config: ResolvedSiteScribeConfig): Promise<string[]> {
+async function resolveRoutes(config: ResolvedSearchSocketConfig): Promise<string[]> {
   const crawlConfig = config.source.crawl;
   if (!crawlConfig) {
     return [];
@@ -82,7 +82,7 @@ async function resolveRoutes(config: ResolvedSiteScribeConfig): Promise<string[]
 }
 
 export async function loadCrawledPages(
-  config: ResolvedSiteScribeConfig,
+  config: ResolvedSearchSocketConfig,
   maxPages?: number
 ): Promise<PageSourceRecord[]> {
   const crawlConfig = config.source.crawl;

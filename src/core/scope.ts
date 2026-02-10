@@ -1,8 +1,8 @@
 import { execSync } from "node:child_process";
-import type { ResolvedSiteScribeConfig, Scope } from "../types";
+import type { ResolvedSearchSocketConfig, Scope } from "../types";
 import { sanitizeScopeName } from "../utils/text";
 
-function resolveRawScopeName(config: ResolvedSiteScribeConfig): string {
+function resolveRawScopeName(config: ResolvedSearchSocketConfig): string {
   if (config.scope.mode === "fixed") {
     return config.scope.fixed;
   }
@@ -26,7 +26,7 @@ function resolveRawScopeName(config: ResolvedSiteScribeConfig): string {
   }
 }
 
-export function resolveScope(config: ResolvedSiteScribeConfig, override?: string): Scope {
+export function resolveScope(config: ResolvedSearchSocketConfig, override?: string): Scope {
   const rawName = override ?? resolveRawScopeName(config);
   const scopeName = config.scope.sanitize ? sanitizeScopeName(rawName) : rawName;
 

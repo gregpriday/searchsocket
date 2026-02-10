@@ -14,13 +14,13 @@ import {
   readRegistry
 } from "./core/state";
 import { createEmbeddingsProvider } from "./embeddings";
-import { SiteScribeError } from "./errors";
+import { SearchSocketError } from "./errors";
 import { IndexPipeline } from "./indexing/pipeline";
 import { runMcpServer } from "./mcp/server";
 import { SearchEngine } from "./search/engine";
 import { createVectorStore } from "./vector";
 import { sanitizeScopeName } from "./utils/text";
-import type { IndexStats, ResolvedSiteScribeConfig, Scope } from "./types";
+import type { IndexStats, ResolvedSearchSocketConfig, Scope } from "./types";
 
 interface RootCommandOptions {
   cwd?: string;
@@ -30,7 +30,7 @@ interface RootCommandOptions {
 function parsePositiveInt(value: string, flag: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new SiteScribeError("INVALID_REQUEST", `${flag} must be a positive integer`, 400);
+    throw new SearchSocketError("INVALID_REQUEST", `${flag} must be a positive integer`, 400);
   }
   return parsed;
 }
@@ -38,7 +38,7 @@ function parsePositiveInt(value: string, flag: string): number {
 function parseDurationMs(value: string): number {
   const match = value.trim().match(/^(\d+)(ms|s|m|h|d)$/i);
   if (!match) {
-    throw new SiteScribeError(
+    throw new SearchSocketError(
       "INVALID_REQUEST",
       "Duration must look like 30d, 12h, 15m, 45s, or 500ms",
       400
@@ -60,7 +60,7 @@ function parseDurationMs(value: string): number {
     case "d":
       return amount * 86_400_000;
     default:
-      throw new SiteScribeError("INVALID_REQUEST", `Unsupported duration unit: ${unit}`, 400);
+      throw new SearchSocketError("INVALID_REQUEST", `Unsupported duration unit: ${unit}`, 400);
   }
 }
 
@@ -83,7 +83,7 @@ function printIndexSummary(stats: IndexStats): void {
   }
 }
 
-function collectWatchPaths(config: ResolvedSiteScribeConfig, cwd: string): string[] {
+function collectWatchPaths(config: ResolvedSearchSocketConfig, cwd: string): string[] {
   const paths = ["src/routes/**"];
 
   if (config.source.mode === "content-files" && config.source.contentFiles) {
@@ -98,14 +98,14 @@ function collectWatchPaths(config: ResolvedSiteScribeConfig, cwd: string): strin
 
   if (config.source.mode === "crawl") {
     // crawl mode has no local source files; route files still trigger reindex
-    paths.push("sitescribe.config.ts");
+    paths.push("searchsocket.config.ts");
   }
 
   return paths.map((value) => path.resolve(cwd, value));
 }
 
 function ensureStateDir(cwd: string): string {
-  const target = path.join(cwd, ".sitescribe");
+  const target = path.join(cwd, ".searchsocket");
   fs.mkdirSync(target, { recursive: true });
   return target;
 }
@@ -113,10 +113,10 @@ function ensureStateDir(cwd: string): string {
 function ensureGitignore(cwd: string): void {
   const gitignorePath = path.join(cwd, ".gitignore");
   const entries = [
-    ".sitescribe/embeddings-cache.sqlite",
-    ".sitescribe/local-vectors.sqlite",
-    ".sitescribe/manifest.json",
-    ".sitescribe/registry.json"
+    ".searchsocket/embeddings-cache.sqlite",
+    ".searchsocket/local-vectors.sqlite",
+    ".searchsocket/manifest.json",
+    ".searchsocket/registry.json"
   ];
 
   let content = "";
@@ -131,7 +131,7 @@ function ensureGitignore(cwd: string): void {
     return;
   }
 
-  const block = `\n# SiteScribe local state\n${missing.join("\n")}\n`;
+  const block = `\n# SearchSocket local state\n${missing.join("\n")}\n`;
   fs.writeFileSync(gitignorePath, content.trimEnd() + block, "utf8");
 }
 
@@ -173,8 +173,8 @@ function readRemoteGitBranches(cwd: string): Set<string> {
   }
 }
 
-async function loadResolvedConfigForDev(cwd: string, configPath?: string): Promise<ResolvedSiteScribeConfig> {
-  const resolvedConfigPath = path.resolve(cwd, configPath ?? "sitescribe.config.ts");
+async function loadResolvedConfigForDev(cwd: string, configPath?: string): Promise<ResolvedSearchSocketConfig> {
+  const resolvedConfigPath = path.resolve(cwd, configPath ?? "searchsocket.config.ts");
   if (fs.existsSync(resolvedConfigPath)) {
     return loadConfig({ cwd, configPath });
   }
@@ -242,15 +242,15 @@ async function runIndexCommand(opts: {
 const program = new Command();
 
 program
-  .name("sitescribe")
+  .name("searchsocket")
   .description("Semantic site search and MCP retrieval for SvelteKit")
   .version(pkg.version)
   .option("-C, --cwd <path>", "working directory", process.cwd())
-  .option("--config <path>", "config path (defaults to sitescribe.config.ts)");
+  .option("--config <path>", "config path (defaults to searchsocket.config.ts)");
 
 program
   .command("init")
-  .description("Create sitescribe.config.ts and .sitescribe state directory")
+  .description("Create searchsocket.config.ts and .searchsocket state directory")
   .action(async (_opts, command) => {
     const root = getRootOptions(command).cwd ?? process.cwd();
     const cwd = path.resolve(root);
@@ -263,14 +263,14 @@ program
     process.stdout.write(`created/verified state dir: ${stateDir}\n\n`);
 
     process.stdout.write("SvelteKit hook snippet:\n\n");
-    process.stdout.write('import { sitescribeHandle } from "sitescribe/sveltekit";\n\n');
-    process.stdout.write("export const handle = sitescribeHandle();\n\n");
+    process.stdout.write('import { searchsocketHandle } from "searchsocket/sveltekit";\n\n');
+    process.stdout.write("export const handle = searchsocketHandle();\n\n");
 
     process.stdout.write("Optional build-triggered indexing plugin:\n\n");
-    process.stdout.write('import { sitescribeVitePlugin } from "sitescribe/sveltekit";\n\n');
+    process.stdout.write('import { searchsocketVitePlugin } from "searchsocket/sveltekit";\n\n');
     process.stdout.write("// svelte.config.js / vite plugins:\n");
-    process.stdout.write("// sitescribeVitePlugin({ enabled: true, changedOnly: true })\n");
-    process.stdout.write("// or env-driven: SITESCRIBE_AUTO_INDEX=1 pnpm build\n");
+    process.stdout.write("// searchsocketVitePlugin({ enabled: true, changedOnly: true })\n");
+    process.stdout.write("// or env-driven: SEARCHSOCKET_AUTO_INDEX=1 pnpm build\n");
   });
 
 program
@@ -375,7 +375,7 @@ program
     const config = await loadResolvedConfigForDev(cwd, rootOpts?.config);
     const watchPaths = collectWatchPaths(config, cwd);
 
-    process.stdout.write("starting sitescribe dev watcher...\n");
+    process.stdout.write("starting searchsocket dev watcher...\n");
     process.stdout.write(`watching:\n${watchPaths.map((entry) => `  - ${entry}`).join("\n")}\n`);
 
     let running = false;
@@ -598,7 +598,7 @@ program
 
     const checks: Array<{ name: string; ok: boolean; details?: string }> = [];
 
-    let config: ResolvedSiteScribeConfig | null = null;
+    let config: ResolvedSearchSocketConfig | null = null;
     try {
       config = await loadConfig({ cwd, configPath: rootOpts?.config });
       checks.push({ name: "config parse", ok: true });
@@ -647,7 +647,7 @@ program
 
       try {
         const provider = createEmbeddingsProvider(config);
-        await provider.embedTexts(["sitescribe doctor ping"], config.embeddings.model);
+        await provider.embedTexts(["searchsocket doctor ping"], config.embeddings.model);
         checks.push({ name: "embedding provider connectivity", ok: true });
       } catch (error) {
         checks.push({
@@ -678,8 +678,8 @@ program
         try {
           const testScope: Scope = {
             projectId: config.project.id,
-            scopeName: "_sitescribe_doctor_probe",
-            scopeId: `${config.project.id}:_sitescribe_doctor_probe`
+            scopeName: "_searchsocket_doctor_probe",
+            scopeId: `${config.project.id}:_searchsocket_doctor_probe`
           };
           await store.recordScope({
             projectId: testScope.projectId,
@@ -735,7 +735,7 @@ program
 
 program
   .command("mcp")
-  .description("Run SiteScribe MCP server")
+  .description("Run SearchSocket MCP server")
   .option("--transport <transport>", "stdio|http", "stdio")
   .option("--port <n>", "HTTP port", "3338")
   .option("--path <path>", "HTTP path", "/mcp")
@@ -786,6 +786,6 @@ async function main(): Promise<void> {
 
 main().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`sitescribe error: ${message}\n`);
+  process.stderr.write(`searchsocket error: ${message}\n`);
   process.exit(1);
 });

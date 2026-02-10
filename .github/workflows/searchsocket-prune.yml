@@ -1,4 +1,4 @@
-name: sitescribe-prune
+name: searchsocket-prune
 
 on:
   schedule:
@@ -16,7 +16,7 @@ on:
         default: false
 
 concurrency:
-  group: sitescribe-prune
+  group: searchsocket-prune
   cancel-in-progress: false
 
 jobs:
@@ -45,11 +45,11 @@ jobs:
         id: preview
         run: |
           OLDER_THAN="${{ inputs.older-than || '30d' }}"
-          echo "## SiteScribe Prune Preview" >> "$GITHUB_STEP_SUMMARY"
+          echo "## SearchSocket Prune Preview" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Cutoff:** \`--older-than ${OLDER_THAN}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          pnpm sitescribe prune --older-than "$OLDER_THAN" 2>&1 | tee /tmp/prune-preview.txt
+          pnpm searchsocket prune --older-than "$OLDER_THAN" 2>&1 | tee /tmp/prune-preview.txt
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           cat /tmp/prune-preview.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -64,7 +64,7 @@ jobs:
         if: ${{ !inputs.dry-run }}
         run: |
           OLDER_THAN="${{ inputs.older-than || '30d' }}"
-          pnpm sitescribe prune --older-than "$OLDER_THAN" --apply
+          pnpm searchsocket prune --older-than "$OLDER_THAN" --apply
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           MILVUS_URI: ${{ secrets.MILVUS_URI }}

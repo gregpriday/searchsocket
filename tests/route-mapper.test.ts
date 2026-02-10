@@ -7,7 +7,7 @@ import { buildRoutePatterns, mapUrlToRoute } from "../src/indexing/route-mapper"
 const tempDirs: string[] = [];
 
 async function makeTempProject(): Promise<string> {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sitescribe-routes-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "searchsocket-routes-"));
   tempDirs.push(tempDir);
 
   const files = [

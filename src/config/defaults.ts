@@ -1,4 +1,4 @@
-import type { ResolvedSiteScribeConfig } from "../types";
+import type { ResolvedSearchSocketConfig } from "../types";
 
 export const DEFAULT_DROP_SELECTORS = [
   ".sidebar",
@@ -9,7 +9,7 @@ export const DEFAULT_DROP_SELECTORS = [
   "[role='navigation']"
 ];
 
-export function createDefaultConfig(projectId: string): ResolvedSiteScribeConfig {
+export function createDefaultConfig(projectId: string): ResolvedSearchSocketConfig {
   return {
     project: {
       id: projectId
@@ -17,7 +17,7 @@ export function createDefaultConfig(projectId: string): ResolvedSiteScribeConfig
     scope: {
       mode: "fixed",
       fixed: "main",
-      envVar: "SITESCRIBE_SCOPE",
+      envVar: "SEARCHSOCKET_SCOPE",
       sanitize: true
     },
     source: {
@@ -66,7 +66,7 @@ export function createDefaultConfig(projectId: string): ResolvedSiteScribeConfig
         collection: `${projectId}_chunks`
       },
       local: {
-        path: ".sitescribe/local-vectors.sqlite"
+        path: ".searchsocket/local-vectors.sqlite"
       }
     },
     rerank: {
@@ -101,7 +101,7 @@ export function createDefaultConfig(projectId: string): ResolvedSiteScribeConfig
       }
     },
     state: {
-      dir: ".sitescribe"
+      dir: ".searchsocket"
     }
   };
 }

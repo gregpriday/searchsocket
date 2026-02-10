@@ -1,28 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { SiteScribeError, toErrorPayload } from "../src/errors";
+import { SearchSocketError, toErrorPayload } from "../src/errors";
 
-describe("SiteScribeError", () => {
+describe("SearchSocketError", () => {
   it("sets code, message, and status", () => {
-    const error = new SiteScribeError("CONFIG_MISSING", "Config not found", 404);
+    const error = new SearchSocketError("CONFIG_MISSING", "Config not found", 404);
     expect(error.code).toBe("CONFIG_MISSING");
     expect(error.message).toBe("Config not found");
     expect(error.status).toBe(404);
   });
 
   it("defaults status to 500", () => {
-    const error = new SiteScribeError("INTERNAL_ERROR", "Something broke");
+    const error = new SearchSocketError("INTERNAL_ERROR", "Something broke");
     expect(error.status).toBe(500);
   });
 
   it("extends Error", () => {
-    const error = new SiteScribeError("RATE_LIMITED", "slow down", 429);
+    const error = new SearchSocketError("RATE_LIMITED", "slow down", 429);
     expect(error instanceof Error).toBe(true);
   });
 });
 
 describe("toErrorPayload", () => {
-  it("formats SiteScribeError", () => {
-    const error = new SiteScribeError("INVALID_REQUEST", "bad input", 400);
+  it("formats SearchSocketError", () => {
+    const error = new SearchSocketError("INVALID_REQUEST", "bad input", 400);
     const payload = toErrorPayload(error);
     expect(payload.error.code).toBe("INVALID_REQUEST");
     expect(payload.error.message).toBe("bad input");

@@ -1,23 +1,23 @@
-# SiteScribe Detailed Implementation TODO
+# SearchSocket Detailed Implementation TODO
 
 This checklist is derived from `spec.md`.
 
 ## Phase 1: Package + Tooling
 
-- [x] Initialize npm package as `sitescribe`
+- [x] Initialize npm package as `searchsocket`
 - [x] Configure TypeScript build for ESM + CJS outputs
-- [x] Add `sitescribe` CLI binary output
-- [x] Export package entrypoints: `sitescribe`, `sitescribe/sveltekit`, `sitescribe/client`
+- [x] Add `searchsocket` CLI binary output
+- [x] Export package entrypoints: `searchsocket`, `searchsocket/sveltekit`, `searchsocket/client`
 - [x] Add test harness (Vitest)
 - [x] Add strict TS config and compile checks
 
 ## Phase 2: Core Types + Config + State
 
 - [x] Define typed config schema with defaults
-- [x] Implement config loader for `sitescribe.config.ts`
+- [x] Implement config loader for `searchsocket.config.ts`
 - [x] Implement scope resolution (`fixed` / `git` / `env`)
 - [x] Implement project ID inference from `package.json`
-- [x] Implement `.sitescribe` state directory management
+- [x] Implement `.searchsocket` state directory management
 - [x] Implement manifest read/write/update
 - [x] Implement local scope registry read/write/update
 - [x] Add structured error codes (`CONFIG_MISSING`, etc.)
@@ -41,7 +41,7 @@ This checklist is derived from `spec.md`.
 - [x] Convert extracted HTML to deterministic Markdown
 - [x] Preserve code blocks and tables in transform
 - [x] Compute graph metadata (incoming/outgoing/depth)
-- [x] Write mirror files to `.sitescribe/pages/<scope>/...`
+- [x] Write mirror files to `.searchsocket/pages/<scope>/...`
 - [x] Write deterministic frontmatter including `routeFile`
 
 ## Phase 5: Chunking + Hashing + Incremental Plan
@@ -85,11 +85,11 @@ This checklist is derived from `spec.md`.
 - [x] Implement timing metadata in API responses
 - [x] Implement model mismatch protection
 - [x] Implement CORS + rate limiting + payload guardrails
-- [x] Implement `sitescribeHandle()` memoized provider init
+- [x] Implement `searchsocketHandle()` memoized provider init
 
 ## Phase 9: MCP Server
 
-- [x] Implement `sitescribe mcp` command
+- [x] Implement `searchsocket mcp` command
 - [x] Add stdio transport
 - [x] Add optional localhost HTTP transport
 - [x] Implement `search` tool
@@ -99,13 +99,13 @@ This checklist is derived from `spec.md`.
 
 ## Phase 10: CLI Commands
 
-- [x] `sitescribe init`
-- [x] `sitescribe index`
-- [x] `sitescribe status`
-- [x] `sitescribe dev` watch mode
-- [x] `sitescribe clean`
-- [x] `sitescribe prune` (dry-run default + fallback summary)
-- [x] `sitescribe doctor`
+- [x] `searchsocket init`
+- [x] `searchsocket index`
+- [x] `searchsocket status`
+- [x] `searchsocket dev` watch mode
+- [x] `searchsocket clean`
+- [x] `searchsocket prune` (dry-run default + fallback summary)
+- [x] `searchsocket doctor`
 - [x] Add human + JSON logging mode
 
 ## Phase 11: Tests

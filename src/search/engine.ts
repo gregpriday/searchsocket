@@ -3,7 +3,7 @@ import path from "node:path";
 import matter from "gray-matter";
 import { z } from "zod";
 import { createEmbeddingsProvider } from "../embeddings";
-import { SiteScribeError } from "../errors";
+import { SearchSocketError } from "../errors";
 import { loadConfig } from "../config/load";
 import { resolveScope } from "../core/scope";
 import { readManifest } from "../core/state";
@@ -16,7 +16,7 @@ import type { RankedHit } from "./ranking";
 import type {
   EmbeddingsProvider,
   Reranker,
-  ResolvedSiteScribeConfig,
+  ResolvedSearchSocketConfig,
   SearchRequest,
   SearchResponse,
   VectorStore
@@ -34,7 +34,7 @@ const requestSchema = z.object({
 export interface SearchEngineOptions {
   cwd?: string;
   configPath?: string;
-  config?: ResolvedSiteScribeConfig;
+  config?: ResolvedSearchSocketConfig;
   embeddingsProvider?: EmbeddingsProvider;
   vectorStore?: VectorStore;
   reranker?: Reranker | null;
@@ -42,14 +42,14 @@ export interface SearchEngineOptions {
 
 export class SearchEngine {
   private readonly cwd: string;
-  private readonly config: ResolvedSiteScribeConfig;
+  private readonly config: ResolvedSearchSocketConfig;
   private readonly embeddings: EmbeddingsProvider;
   private readonly vectorStore: VectorStore;
   private readonly reranker: Reranker | null;
 
   private constructor(options: {
     cwd: string;
-    config: ResolvedSiteScribeConfig;
+    config: ResolvedSearchSocketConfig;
     embeddings: EmbeddingsProvider;
     vectorStore: VectorStore;
     reranker: Reranker | null;
@@ -78,14 +78,14 @@ export class SearchEngine {
     });
   }
 
-  getConfig(): ResolvedSiteScribeConfig {
+  getConfig(): ResolvedSearchSocketConfig {
     return this.config;
   }
 
   async search(request: SearchRequest): Promise<SearchResponse> {
     const parsed = requestSchema.safeParse(request);
     if (!parsed.success) {
-      throw new SiteScribeError("INVALID_REQUEST", parsed.error.issues[0]?.message ?? "Invalid request", 400);
+      throw new SearchSocketError("INVALID_REQUEST", parsed.error.issues[0]?.message ?? "Invalid request", 400);
     }
 
     const input = parsed.data;
@@ -102,7 +102,7 @@ export class SearchEngine {
     const queryEmbeddings = await this.embeddings.embedTexts([input.q], this.config.embeddings.model);
     const queryVector = queryEmbeddings[0];
     if (!queryVector) {
-      throw new SiteScribeError("VECTOR_BACKEND_UNAVAILABLE", "Unable to create query embedding.");
+      throw new SearchSocketError("VECTOR_BACKEND_UNAVAILABLE", "Unable to create query embedding.");
     }
     const embedMs = hrTimeMs(embedStart);
 
@@ -170,7 +170,7 @@ export class SearchEngine {
     );
 
     if (!fs.existsSync(mirrorPath)) {
-      throw new SiteScribeError("INVALID_REQUEST", `Indexed page not found for ${urlPath}`, 404);
+      throw new SearchSocketError("INVALID_REQUEST", `Indexed page not found for ${urlPath}`, 404);
     }
 
     const raw = fs.readFileSync(mirrorPath, "utf8");
@@ -212,7 +212,7 @@ export class SearchEngine {
     }
 
     if (scopeManifest.embeddingModel !== this.config.embeddings.model) {
-      throw new SiteScribeError(
+      throw new SearchSocketError(
         "EMBEDDING_MODEL_MISMATCH",
         `Scope ${scopeName} was indexed with ${scopeManifest.embeddingModel}. Current config uses ${this.config.embeddings.model}. Re-index with --force.`
       );
@@ -225,7 +225,7 @@ export class SearchEngine {
     topK: number
   ): Promise<RankedHit[]> {
     if (this.config.rerank.provider !== "jina") {
-      throw new SiteScribeError(
+      throw new SearchSocketError(
         "INVALID_REQUEST",
         "rerank=true requested but rerank.provider is not configured as 'jina'.",
         400
@@ -233,7 +233,7 @@ export class SearchEngine {
     }
 
     if (!this.reranker) {
-      throw new SiteScribeError(
+      throw new SearchSocketError(
         "CONFIG_MISSING",
         `rerank=true requested but ${this.config.rerank.jina.apiKeyEnv} is not set.`,
         400

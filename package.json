@@ -1,5 +1,5 @@
 {
-  "name": "sitescribe",
+  "name": "searchsocket",
   "version": "0.1.0",
   "description": "Semantic site search and MCP retrieval for SvelteKit static sites",
   "license": "MIT",
@@ -9,7 +9,7 @@
     "README.md"
   ],
   "bin": {
-    "sitescribe": "dist/cli.cjs"
+    "searchsocket": "dist/cli.cjs"
   },
   "exports": {
     ".": {

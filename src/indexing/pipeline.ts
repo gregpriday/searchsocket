@@ -9,7 +9,7 @@ import {
   writeManifest
 } from "../core/state";
 import { createEmbeddingsProvider } from "../embeddings";
-import { SiteScribeError } from "../errors";
+import { SearchSocketError } from "../errors";
 import { createVectorStore } from "../vector";
 import { chunkMirrorPage } from "./chunker";
 import { EmbeddingCache } from "./embedding-cache";
@@ -29,7 +29,7 @@ import type {
   IndexOptions,
   IndexStats,
   MirrorPage,
-  ResolvedSiteScribeConfig,
+  ResolvedSearchSocketConfig,
   Scope,
   ScopeInfo,
   VectorRecord,
@@ -46,7 +46,7 @@ const DEFAULT_EMBEDDING_PRICE_PER_1K = 0.00002;
 interface IndexPipelineOptions {
   cwd?: string;
   configPath?: string;
-  config?: ResolvedSiteScribeConfig;
+  config?: ResolvedSearchSocketConfig;
   embeddingsProvider?: EmbeddingsProvider;
   vectorStore?: VectorStore;
   logger?: Logger;
@@ -54,14 +54,14 @@ interface IndexPipelineOptions {
 
 export class IndexPipeline {
   private readonly cwd: string;
-  private readonly config: ResolvedSiteScribeConfig;
+  private readonly config: ResolvedSearchSocketConfig;
   private readonly embeddings: EmbeddingsProvider;
   private readonly vectorStore: VectorStore;
   private readonly logger: Logger;
 
   private constructor(options: {
     cwd: string;
-    config: ResolvedSiteScribeConfig;
+    config: ResolvedSearchSocketConfig;
     embeddings: EmbeddingsProvider;
     vectorStore: VectorStore;
     logger: Logger;
@@ -88,7 +88,7 @@ export class IndexPipeline {
     });
   }
 
-  getConfig(): ResolvedSiteScribeConfig {
+  getConfig(): ResolvedSearchSocketConfig {
     return this.config;
   }
 
@@ -122,7 +122,7 @@ export class IndexPipeline {
       scopeManifest.embeddingModel !== this.config.embeddings.model &&
       !options.force
     ) {
-      throw new SiteScribeError(
+      throw new SearchSocketError(
         "EMBEDDING_MODEL_MISMATCH",
         `Scope ${scope.scopeName} uses model ${scopeManifest.embeddingModel}. Re-run with --force to migrate.`
       );
@@ -198,7 +198,7 @@ export class IndexPipeline {
       const routeMatch = mapUrlToRoute(page.url, routePatterns);
 
       if (this.config.source.strictRouteMapping && routeMatch.routeResolution === "best-effort") {
-        throw new SiteScribeError(
+        throw new SearchSocketError(
           "INVALID_REQUEST",
           `Strict route mapping enabled: no exact route match for ${page.url} (resolved to ${routeMatch.routeFile}). ` +
             "Disable source.strictRouteMapping or add the missing route file."

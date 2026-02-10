@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import fg from "fast-glob";
-import type { PageSourceRecord, ResolvedSiteScribeConfig } from "../../types";
+import type { PageSourceRecord, ResolvedSearchSocketConfig } from "../../types";
 import { normalizeUrlPath } from "../../utils/path";
 
 function filePathToUrl(filePath: string, baseDir: string): string {
@@ -42,7 +42,7 @@ function normalizeSvelteToMarkdown(source: string): string {
 
 export async function loadContentFilesPages(
   cwd: string,
-  config: ResolvedSiteScribeConfig,
+  config: ResolvedSearchSocketConfig,
   maxPages?: number
 ): Promise<PageSourceRecord[]> {
   const contentConfig = config.source.contentFiles;

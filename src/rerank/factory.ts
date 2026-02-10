@@ -1,7 +1,7 @@
-import type { Reranker, ResolvedSiteScribeConfig } from "../types";
+import type { Reranker, ResolvedSearchSocketConfig } from "../types";
 import { JinaReranker } from "./jina";
 
-export function createReranker(config: ResolvedSiteScribeConfig): Reranker | null {
+export function createReranker(config: ResolvedSearchSocketConfig): Reranker | null {
   if (config.rerank.provider === "none") {
     return null;
   }

@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { sitescribeHandle } from "../src/sveltekit/handle";
+import { searchsocketHandle } from "../src/sveltekit/handle";
 import { createDefaultConfig } from "../src/config/defaults";
-import type { ResolvedSiteScribeConfig } from "../src/types";
+import type { ResolvedSearchSocketConfig } from "../src/types";
 
-function makeConfig(overrides: Partial<ResolvedSiteScribeConfig> = {}): ResolvedSiteScribeConfig {
+function makeConfig(overrides: Partial<ResolvedSearchSocketConfig> = {}): ResolvedSearchSocketConfig {
   const base = createDefaultConfig("test");
   return {
     ...base,
@@ -16,7 +16,7 @@ function makeConfig(overrides: Partial<ResolvedSiteScribeConfig> = {}): Resolved
         ...overrides.api?.cors
       }
     }
-  } as ResolvedSiteScribeConfig;
+  } as ResolvedSearchSocketConfig;
 }
 
 function makeEvent(options: {
@@ -47,14 +47,14 @@ function makeEvent(options: {
 // We test the handle function indirectly by mocking loadConfig and SearchEngine
 // Since handle() loads config lazily, we test the structural behavior
 
-describe("sitescribeHandle", () => {
+describe("searchsocketHandle", () => {
   it("returns a function", () => {
-    const handle = sitescribeHandle();
+    const handle = searchsocketHandle();
     expect(typeof handle).toBe("function");
   });
 
   it("passes through non-matching paths", async () => {
-    const handle = sitescribeHandle({ path: "/api/search" });
+    const handle = searchsocketHandle({ path: "/api/search" });
     const resolveResult = new Response("ok");
     const resolve = vi.fn().mockResolvedValue(resolveResult);
 
@@ -65,12 +65,12 @@ describe("sitescribeHandle", () => {
   });
 
   it("accepts custom path option", () => {
-    const handle = sitescribeHandle({ path: "/custom/search" });
+    const handle = searchsocketHandle({ path: "/custom/search" });
     expect(typeof handle).toBe("function");
   });
 
   it("accepts maxBodyBytes option", () => {
-    const handle = sitescribeHandle({ maxBodyBytes: 1024 });
+    const handle = searchsocketHandle({ maxBodyBytes: 1024 });
     expect(typeof handle).toBe("function");
   });
 });

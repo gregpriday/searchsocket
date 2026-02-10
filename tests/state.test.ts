@@ -21,7 +21,7 @@ const scope: Scope = {
 };
 
 async function makeTempDir(): Promise<string> {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "sitescribe-state-"));
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "searchsocket-state-"));
   tempDirs.push(dir);
   return dir;
 }
@@ -33,7 +33,7 @@ afterEach(async () => {
 describe("ensureStateDirs", () => {
   it("creates state and pages directories", async () => {
     const cwd = await makeTempDir();
-    const { statePath, pagesPath } = ensureStateDirs(cwd, ".sitescribe", scope);
+    const { statePath, pagesPath } = ensureStateDirs(cwd, ".searchsocket", scope);
     expect(fs.existsSync(statePath)).toBe(true);
     expect(fs.existsSync(pagesPath)).toBe(true);
     expect(pagesPath).toContain("pages/main");

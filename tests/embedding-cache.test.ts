@@ -6,7 +6,7 @@ import { EmbeddingCache } from "../src/indexing/embedding-cache";
 
 describe("EmbeddingCache", () => {
   it("stores and retrieves embedding vectors by hash + model", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "sitescribe-cache-"));
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "searchsocket-cache-"));
     const cachePath = path.join(dir, "embeddings-cache.sqlite");
 
     const cache = new EmbeddingCache(cachePath);

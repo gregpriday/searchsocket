@@ -1,11 +1,11 @@
-import type { ResolvedSiteScribeConfig, VectorHit } from "../types";
+import type { ResolvedSearchSocketConfig, VectorHit } from "../types";
 
 export interface RankedHit {
   hit: VectorHit;
   finalScore: number;
 }
 
-export function rankHits(hits: VectorHit[], config: ResolvedSiteScribeConfig): RankedHit[] {
+export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig): RankedHit[] {
   return hits
     .map((hit) => {
       let score = hit.score;

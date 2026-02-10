@@ -19,7 +19,7 @@ const otherScope: Scope = {
 };
 
 async function makeTempDir(): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "sitescribe-vec-"));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "searchsocket-vec-"));
   tempDirs.push(dir);
   return dir;
 }

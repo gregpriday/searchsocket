@@ -3,7 +3,7 @@
 ## 1. Main Branch Indexing (GitHub Actions)
 
 ```yaml
-name: sitescribe-index-main
+name: searchsocket-index-main
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm sitescribe index --changed-only
+      - run: pnpm searchsocket index --changed-only
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           MILVUS_URI: ${{ secrets.MILVUS_URI }}
@@ -34,7 +34,7 @@ jobs:
 ## 2. PR Cost Preview (Dry Run)
 
 ```yaml
-name: sitescribe-dry-run
+name: searchsocket-dry-run
 
 on:
   pull_request:
@@ -54,7 +54,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm sitescribe index --dry-run --changed-only
+      - run: pnpm searchsocket index --dry-run --changed-only
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
@@ -66,9 +66,9 @@ If using `scope.mode = "git"` or `scope.mode = "env"`, index each preview branch
 Example with `scope.mode = "env"`:
 
 ```yaml
-- run: pnpm sitescribe index --changed-only
+- run: pnpm searchsocket index --changed-only
   env:
-    SITESCRIBE_SCOPE: ${{ github.head_ref || github.ref_name }}
+    SEARCHSOCKET_SCOPE: ${{ github.head_ref || github.ref_name }}
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     MILVUS_URI: ${{ secrets.MILVUS_URI }}
     MILVUS_TOKEN: ${{ secrets.MILVUS_TOKEN }}
@@ -82,7 +82,7 @@ Example with `scope.mode = "env"`:
 > could incorrectly delete scopes for active feature branches.
 
 ```yaml
-name: sitescribe-prune
+name: searchsocket-prune
 
 on:
   schedule:
@@ -105,7 +105,7 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm sitescribe prune --older-than 30d --apply
+      - run: pnpm searchsocket prune --older-than 30d --apply
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           MILVUS_URI: ${{ secrets.MILVUS_URI }}
@@ -116,27 +116,27 @@ jobs:
 
 Use the build plugin + env flags:
 
-- Set `SITESCRIBE_AUTO_INDEX=1` in Vercel project env
+- Set `SEARCHSOCKET_AUTO_INDEX=1` in Vercel project env
 - Set provider credentials (`OPENAI_API_KEY` + vector backend env vars)
 
 Your Vite plugin setup:
 
 ```ts
-import { sitescribeVitePlugin } from "sitescribe/sveltekit";
+import { searchsocketVitePlugin } from "searchsocket/sveltekit";
 
 export default {
-  plugins: [sitescribeVitePlugin({ changedOnly: true })]
+  plugins: [searchsocketVitePlugin({ changedOnly: true })]
 };
 ```
 
 Disable temporarily:
 
-- set `SITESCRIBE_DISABLE_AUTO_INDEX=1`
+- set `SEARCHSOCKET_DISABLE_AUTO_INDEX=1`
 
 ## 6. Committing Markdown Mirror (Content Projects)
 
 If you want deterministic indexed content tracked in git:
 
-- keep `.sitescribe/pages/**` committed
-- ensure `.sitescribe/*.sqlite` remains ignored (recommended)
+- keep `.searchsocket/pages/**` committed
+- ensure `.searchsocket/*.sqlite` remains ignored (recommended)
 - review markdown mirror diffs in PRs to validate indexing input changes

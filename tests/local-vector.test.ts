@@ -6,9 +6,9 @@ import { LocalVectorStore } from "../src/vector/local";
 import type { Scope, VectorRecord } from "../src/types";
 
 const scope: Scope = {
-  projectId: "sitescribe-test",
+  projectId: "searchsocket-test",
   scopeName: "main",
-  scopeId: "sitescribe-test:main"
+  scopeId: "searchsocket-test:main"
 };
 
 function record(id: string, vector: number[], url: string, tags: string[]): VectorRecord {
@@ -36,7 +36,7 @@ function record(id: string, vector: number[], url: string, tags: string[]): Vect
 
 describe("LocalVectorStore", () => {
   it("supports query filtering by pathPrefix and tags", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "sitescribe-local-"));
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "searchsocket-local-"));
     const dbPath = path.join(dir, "local-vectors.sqlite");
 
     const store = new LocalVectorStore(dbPath);

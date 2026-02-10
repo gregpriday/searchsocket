@@ -4,7 +4,7 @@ export type VectorProvider = "pinecone" | "milvus" | "local";
 export type EmbeddingProvider = "openai";
 export type RerankProvider = "none" | "jina";
 
-export interface SiteScribeConfig {
+export interface SearchSocketConfig {
   project?: {
     id?: string;
     baseUrl?: string;
@@ -113,7 +113,7 @@ export interface SiteScribeConfig {
   };
 }
 
-export interface ResolvedSiteScribeConfig {
+export interface ResolvedSearchSocketConfig {
   project: {
     id: string;
     baseUrl?: string;

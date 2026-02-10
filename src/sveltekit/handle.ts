@@ -1,7 +1,7 @@
 import { loadConfig } from "../config/load";
-import { SiteScribeError, toErrorPayload } from "../errors";
+import { SearchSocketError, toErrorPayload } from "../errors";
 import { SearchEngine } from "../search/engine";
-import type { ResolvedSiteScribeConfig } from "../types";
+import type { ResolvedSearchSocketConfig } from "../types";
 
 interface RateBucket {
   count: number;
@@ -41,20 +41,20 @@ class InMemoryRateLimiter {
   }
 }
 
-export interface SiteScribeHandleOptions {
+export interface SearchSocketHandleOptions {
   configPath?: string;
   cwd?: string;
   path?: string;
   maxBodyBytes?: number;
 }
 
-export function sitescribeHandle(options: SiteScribeHandleOptions = {}) {
+export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
   let enginePromise: Promise<SearchEngine> | null = null;
-  let configPromise: Promise<ResolvedSiteScribeConfig> | null = null;
+  let configPromise: Promise<ResolvedSearchSocketConfig> | null = null;
   let apiPath = options.path;
   let rateLimiter: InMemoryRateLimiter | null = null;
 
-  const getConfig = async (): Promise<ResolvedSiteScribeConfig> => {
+  const getConfig = async (): Promise<ResolvedSearchSocketConfig> => {
     if (!configPromise) {
       configPromise = loadConfig({
         cwd: options.cwd,
@@ -103,7 +103,7 @@ export function sitescribeHandle(options: SiteScribeHandleOptions = {}) {
 
     if (event.request.method !== "POST") {
       return withCors(
-        new Response(JSON.stringify(toErrorPayload(new SiteScribeError("INVALID_REQUEST", "Method not allowed", 405))), {
+        new Response(JSON.stringify(toErrorPayload(new SearchSocketError("INVALID_REQUEST", "Method not allowed", 405))), {
           status: 405,
           headers: {
             "content-type": "application/json"
@@ -118,7 +118,7 @@ export function sitescribeHandle(options: SiteScribeHandleOptions = {}) {
     if (contentLength > bodyLimit) {
       return withCors(
         new Response(
-          JSON.stringify(toErrorPayload(new SiteScribeError("INVALID_REQUEST", "Request body too large", 413))),
+          JSON.stringify(toErrorPayload(new SearchSocketError("INVALID_REQUEST", "Request body too large", 413))),
           {
             status: 413,
             headers: {
@@ -140,7 +140,7 @@ export function sitescribeHandle(options: SiteScribeHandleOptions = {}) {
       if (!rateLimiter.check(ip)) {
         return withCors(
           new Response(
-            JSON.stringify(toErrorPayload(new SiteScribeError("RATE_LIMITED", "Rate limit exceeded", 429))),
+            JSON.stringify(toErrorPayload(new SearchSocketError("RATE_LIMITED", "Rate limit exceeded", 429))),
             {
               status: 429,
               headers: {
@@ -171,7 +171,7 @@ export function sitescribeHandle(options: SiteScribeHandleOptions = {}) {
       );
     } catch (error) {
       const payload = toErrorPayload(error);
-      const status = error instanceof SiteScribeError ? error.status : 500;
+      const status = error instanceof SearchSocketError ? error.status : 500;
 
       return withCors(
         new Response(JSON.stringify(payload), {
@@ -187,7 +187,7 @@ export function sitescribeHandle(options: SiteScribeHandleOptions = {}) {
   };
 }
 
-function buildCorsHeaders(request: Request, config: ResolvedSiteScribeConfig): Record<string, string> {
+function buildCorsHeaders(request: Request, config: ResolvedSearchSocketConfig): Record<string, string> {
   const allowOrigins = config.api.cors.allowOrigins;
   if (!allowOrigins || allowOrigins.length === 0) {
     return {};
@@ -207,7 +207,7 @@ function buildCorsHeaders(request: Request, config: ResolvedSiteScribeConfig): R
   };
 }
 
-function withCors(response: Response, request: Request, config: ResolvedSiteScribeConfig): Response {
+function withCors(response: Response, request: Request, config: ResolvedSearchSocketConfig): Response {
   const corsHeaders = buildCorsHeaders(request, config);
 
   if (Object.keys(corsHeaders).length === 0) {

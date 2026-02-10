@@ -1,4 +1,4 @@
-import type { Chunk, MirrorPage, ResolvedSiteScribeConfig, Scope } from "../types";
+import type { Chunk, MirrorPage, ResolvedSearchSocketConfig, Scope } from "../types";
 import { sha1, sha256 } from "../utils/hash";
 import { normalizeText, toSnippet } from "../utils/text";
 
@@ -69,7 +69,7 @@ function parseHeadingSections(markdown: string, headingPathDepth: number): Secti
   return sections;
 }
 
-function blockify(text: string, config: ResolvedSiteScribeConfig["chunking"]): string[] {
+function blockify(text: string, config: ResolvedSearchSocketConfig["chunking"]): string[] {
   const lines = text.split("\n");
   const blocks: string[] = [];
 
@@ -140,7 +140,7 @@ function blockify(text: string, config: ResolvedSiteScribeConfig["chunking"]): s
   return blocks;
 }
 
-function splitSection(section: Section, config: ResolvedSiteScribeConfig["chunking"]): Array<Pick<Chunk, "sectionTitle" | "headingPath" | "chunkText">> {
+function splitSection(section: Section, config: ResolvedSearchSocketConfig["chunking"]): Array<Pick<Chunk, "sectionTitle" | "headingPath" | "chunkText">> {
   const text = section.text.trim();
   if (!text) {
     return [];
@@ -205,7 +205,7 @@ function splitSection(section: Section, config: ResolvedSiteScribeConfig["chunki
 
 export function chunkMirrorPage(
   page: MirrorPage,
-  config: ResolvedSiteScribeConfig,
+  config: ResolvedSearchSocketConfig,
   scope: Scope
 ): Chunk[] {
   const sections = parseHeadingSections(page.markdown, config.chunking.headingPathDepth);

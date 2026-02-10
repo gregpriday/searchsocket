@@ -6,7 +6,7 @@ import { IndexPipeline } from "../src/indexing/pipeline";
 import { SearchEngine } from "../src/search/engine";
 import { createDefaultConfig } from "../src/config/defaults";
 import { createVectorStore } from "../src/vector";
-import type { EmbeddingsProvider, ResolvedSiteScribeConfig } from "../src/types";
+import type { EmbeddingsProvider, ResolvedSearchSocketConfig } from "../src/types";
 
 const tempDirs: string[] = [];
 
@@ -36,8 +36,8 @@ class FakeEmbeddingsProvider implements EmbeddingsProvider {
   }
 }
 
-async function createProjectFixture(): Promise<{ cwd: string; config: ResolvedSiteScribeConfig }> {
-  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "sitescribe-int-"));
+async function createProjectFixture(): Promise<{ cwd: string; config: ResolvedSearchSocketConfig }> {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "searchsocket-int-"));
   tempDirs.push(cwd);
 
   await fs.mkdir(path.join(cwd, "build", "docs", "getting-started"), { recursive: true });
@@ -61,7 +61,7 @@ async function createProjectFixture(): Promise<{ cwd: string; config: ResolvedSi
           <h1>Getting Started</h1>
           <p>The orbitengine token appears only on this page.</p>
           <h2>Installation</h2>
-          <p>Install with pnpm add sitescribe.</p>
+          <p>Install with pnpm add searchsocket.</p>
         </main>
       </body></html>
     `,
@@ -75,12 +75,12 @@ async function createProjectFixture(): Promise<{ cwd: string; config: ResolvedSi
     "utf8"
   );
 
-  const config = createDefaultConfig("sitescribe-int");
+  const config = createDefaultConfig("searchsocket-int");
   config.source.mode = "static-output";
   config.source.staticOutputDir = "build";
   config.vector.provider = "local";
-  config.vector.local.path = ".sitescribe/local-vectors.sqlite";
-  config.state.dir = ".sitescribe";
+  config.vector.local.path = ".searchsocket/local-vectors.sqlite";
+  config.state.dir = ".searchsocket";
 
   return { cwd, config };
 }
