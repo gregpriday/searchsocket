@@ -56,6 +56,7 @@ export interface SearchSocketConfig {
     apiKeyEnv?: string;
     batchSize?: number;
     concurrency?: number;
+    pricePer1kTokens?: number;
   };
   vector?: {
     provider: VectorProvider;
@@ -165,6 +166,7 @@ export interface ResolvedSearchSocketConfig {
     apiKeyEnv: string;
     batchSize: number;
     concurrency: number;
+    pricePer1kTokens?: number;
   };
   vector: {
     provider: VectorProvider;

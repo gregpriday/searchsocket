@@ -6,11 +6,19 @@ import { normalizeUrlPath } from "../../utils/path";
 
 function filePathToUrl(filePath: string, baseDir: string): string {
   const relative = path.relative(baseDir, filePath).replace(/\\/g, "/");
+  const segments = relative.split("/").filter(Boolean);
 
-  if (relative.endsWith("/+page.svelte")) {
-    const routePath = relative
-      .replace(/\/\+page\.svelte$/, "")
-      .split("/")
+  if (/(^|\/)\+page\.svelte$/.test(relative)) {
+    const routeSegments = segments.slice();
+
+    if ((routeSegments[0] ?? "").toLowerCase() === "src" && (routeSegments[1] ?? "").toLowerCase() === "routes") {
+      routeSegments.splice(0, 2);
+    } else if ((routeSegments[0] ?? "").toLowerCase() === "routes") {
+      routeSegments.splice(0, 1);
+    }
+
+    const routePath = routeSegments
+      .filter((segment) => segment !== "+page.svelte")
       .filter((segment) => segment && !segment.startsWith("("))
       .map((segment) =>
         segment

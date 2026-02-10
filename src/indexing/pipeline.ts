@@ -231,7 +231,7 @@ export class IndexPipeline {
       if (routeMatch.routeResolution === "best-effort") {
         if (this.config.source.strictRouteMapping) {
           throw new SearchSocketError(
-            "INVALID_REQUEST",
+            "ROUTE_MAPPING_FAILED",
             `Strict route mapping enabled: no exact route match for ${page.url} (resolved to ${routeMatch.routeFile}). ` +
               "Disable source.strictRouteMapping or add the missing route file."
           );
@@ -317,11 +317,11 @@ export class IndexPipeline {
       0
     );
 
-    const estimatedCostUSD =
-      (estimatedTokens / 1000) *
-      (EMBEDDING_PRICE_PER_1K_TOKENS_USD[this.config.embeddings.model] ??
-        EMBEDDING_PRICE_PER_1K_TOKENS_USD["text-embedding-3-small"] ??
-        DEFAULT_EMBEDDING_PRICE_PER_1K);
+    const pricePer1k = this.config.embeddings.pricePer1kTokens
+      ?? EMBEDDING_PRICE_PER_1K_TOKENS_USD[this.config.embeddings.model]
+      ?? DEFAULT_EMBEDDING_PRICE_PER_1K;
+
+    const estimatedCostUSD = (estimatedTokens / 1000) * pricePer1k;
 
     let newEmbeddings = 0;
     const vectorsByChunk = new Map<string, number[]>();
@@ -332,11 +332,21 @@ export class IndexPipeline {
         this.config.embeddings.model
       );
 
+      if (embeddings.length !== changedChunks.length) {
+        throw new SearchSocketError(
+          "VECTOR_BACKEND_UNAVAILABLE",
+          `Embedding provider returned ${embeddings.length} vectors for ${changedChunks.length} chunks.`
+        );
+      }
+
       for (let i = 0; i < changedChunks.length; i += 1) {
         const chunk = changedChunks[i];
         const embedding = embeddings[i];
-        if (!chunk || !embedding) {
-          continue;
+        if (!chunk || !embedding || embedding.length === 0) {
+          throw new SearchSocketError(
+            "VECTOR_BACKEND_UNAVAILABLE",
+            `Embedding provider returned an invalid vector for chunk index ${i}.`
+          );
         }
         vectorsByChunk.set(chunk.chunkKey, embedding);
         newEmbeddings += 1;

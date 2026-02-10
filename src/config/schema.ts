@@ -68,7 +68,8 @@ export const searchSocketConfigSchema = z.object({
       model: z.string().min(1).optional(),
       apiKeyEnv: z.string().min(1).optional(),
       batchSize: z.number().int().positive().optional(),
-      concurrency: z.number().int().positive().optional()
+      concurrency: z.number().int().positive().optional(),
+      pricePer1kTokens: z.number().positive().optional()
     })
     .optional(),
   vector: z

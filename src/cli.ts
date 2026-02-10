@@ -644,6 +644,37 @@ program
         });
       }
 
+      // Validate source mode prerequisites
+      if (config.source.mode === "static-output") {
+        const outputDir = path.resolve(cwd, config.source.staticOutputDir);
+        const exists = fs.existsSync(outputDir);
+        checks.push({
+          name: "source: static output dir",
+          ok: exists,
+          details: exists ? outputDir : `${outputDir} not found (run your build first)`
+        });
+      } else if (config.source.mode === "content-files") {
+        const contentConfig = config.source.contentFiles;
+        if (contentConfig) {
+          const fg = await import("fast-glob");
+          const baseDir = path.resolve(cwd, contentConfig.baseDir);
+          const files = await fg.default(contentConfig.globs, { cwd: baseDir, onlyFiles: true });
+          checks.push({
+            name: "source: content files",
+            ok: files.length > 0,
+            details: files.length > 0
+              ? `${files.length} files matched`
+              : `no files matched globs ${contentConfig.globs.join(", ")} in ${baseDir}`
+          });
+        } else {
+          checks.push({
+            name: "source: content files",
+            ok: false,
+            details: "source.contentFiles config missing"
+          });
+        }
+      }
+
       try {
         const provider = createEmbeddingsProvider(config);
         await provider.embedTexts(["searchsocket doctor ping"], config.embeddings.model);

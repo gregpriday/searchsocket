@@ -60,9 +60,12 @@ interface StoreData {
   registry: Record<string, ScopeInfo>;
 }
 
+const LOCAL_STORE_WARN_THRESHOLD = 5_000;
+
 export class LocalVectorStore implements VectorStore {
   private readonly filePath: string;
   private data: StoreData;
+  private sizeWarningEmitted = false;
 
   constructor(filePath: string) {
     this.filePath = path.resolve(filePath);
@@ -70,8 +73,24 @@ export class LocalVectorStore implements VectorStore {
 
     if (fs.existsSync(this.filePath)) {
       this.data = JSON.parse(fs.readFileSync(this.filePath, "utf8")) as StoreData;
+      this.checkSize();
     } else {
       this.data = { version: 1, vectors: {}, registry: {} };
+    }
+  }
+
+  private checkSize(): void {
+    if (this.sizeWarningEmitted) {
+      return;
+    }
+    const count = Object.keys(this.data.vectors).length;
+    if (count >= LOCAL_STORE_WARN_THRESHOLD) {
+      process.stderr.write(
+        `warning: local vector store has ${count} vectors. ` +
+        "Performance may degrade for large sites. " +
+        "Consider switching to Pinecone or Milvus (vector.provider in config).\n"
+      );
+      this.sizeWarningEmitted = true;
     }
   }
 
@@ -101,6 +120,7 @@ export class LocalVectorStore implements VectorStore {
     }
 
     this.save();
+    this.checkSize();
   }
 
   async query(queryVector: number[], opts: QueryOpts, scope: Scope): Promise<VectorHit[]> {

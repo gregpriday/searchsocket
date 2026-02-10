@@ -87,15 +87,43 @@ describe("PineconeVectorStore", () => {
     expect(upsertArgs.records?.[0]?.metadata).not.toHaveProperty("tag_docs");
 
     expect(query).toHaveBeenCalledTimes(1);
-    const queryArgs = query.mock.calls[0]?.[0] as { filter?: Record<string, unknown> };
-    expect(queryArgs.filter).toMatchObject({
-      projectId: { $eq: "searchsocket-test" },
-      scopeName: { $eq: "main" },
-      dir0: { $eq: "docs" },
-      tags: { $in: ["docs"] }
-    });
+    const queryArgs = query.mock.calls[0]?.[0] as { filter?: { $and?: Array<Record<string, unknown>> } };
+    const clauses = queryArgs.filter?.$and ?? [];
+    expect(clauses).toContainEqual({ projectId: { $eq: "searchsocket-test" } });
+    expect(clauses).toContainEqual({ scopeName: { $eq: "main" } });
+    expect(clauses).toContainEqual({ dir0: { $eq: "docs" } });
+    expect(clauses).toContainEqual({ tags: { $in: ["docs"] } });
 
     expect(hits.length).toBe(1);
     expect(hits[0]?.metadata.url).toBe("/docs/page");
+  });
+
+  it("builds an all-tags filter when multiple tags are requested", async () => {
+    const query = vi.fn().mockResolvedValue({ matches: [] });
+
+    const fakeIndex = {
+      upsert: vi.fn().mockResolvedValue(undefined),
+      query,
+      deleteMany: vi.fn().mockResolvedValue(undefined),
+      deleteAll: vi.fn().mockResolvedValue(undefined),
+      describeIndexStats: vi.fn().mockResolvedValue({ dimension: 3 }),
+      listPaginated: vi.fn().mockResolvedValue({ vectors: [], pagination: {} }),
+      fetch: vi.fn().mockResolvedValue({ records: {} })
+    };
+
+    const store = new PineconeVectorStore({
+      apiKey: "pc-test",
+      indexName: "searchsocket",
+      embeddingModel: "text-embedding-3-small",
+      index: fakeIndex
+    });
+
+    await store.query([0.1, 0.2, 0.3], { topK: 5, pathPrefix: "/docs", tags: ["docs", "guide"] }, scope);
+
+    const queryArgs = query.mock.calls[0]?.[0] as { filter?: { $and?: Array<Record<string, unknown>> } };
+    const clauses = queryArgs.filter?.$and ?? [];
+
+    expect(clauses).toContainEqual({ tags: { $in: ["docs"] } });
+    expect(clauses).toContainEqual({ tags: { $in: ["guide"] } });
   });
 });

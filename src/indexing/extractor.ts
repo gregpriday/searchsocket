@@ -1,4 +1,5 @@
 import { load } from "cheerio";
+import matter from "gray-matter";
 import TurndownService from "turndown";
 import { gfm, highlightedCodeBlock, strikethrough, tables, taskListItems } from "turndown-plugin-gfm";
 import type { ExtractedPage, ResolvedSearchSocketConfig } from "../types";
@@ -50,13 +51,12 @@ export function extractFromHtml(
     }
 
     try {
-      if (href.startsWith("http://") || href.startsWith("https://")) {
-        const parsed = new URL(href);
-        outgoingLinks.push(normalizeUrlPath(parsed.pathname));
+      const parsed = new URL(href, "https://searchsocket.local");
+      if (!["http:", "https:"].includes(parsed.protocol)) {
         return;
       }
 
-      outgoingLinks.push(normalizeUrlPath(href));
+      outgoingLinks.push(normalizeUrlPath(parsed.pathname));
     } catch {
       // ignore malformed links
     }
@@ -104,14 +104,31 @@ export function extractFromHtml(
 }
 
 export function extractFromMarkdown(url: string, markdown: string, title?: string): ExtractedPage | null {
-  const normalized = normalizeMarkdown(markdown);
+  // Check for <!-- noindex --> HTML comment before any processing
+  if (/<!--\s*noindex\s*-->/i.test(markdown)) {
+    return null;
+  }
+
+  // Parse frontmatter and check for noindex flag
+  const parsed = matter(markdown);
+  const frontmatter = parsed.data as Record<string, unknown>;
+
+  const searchsocketMeta = frontmatter.searchsocket as Record<string, unknown> | undefined;
+  if (frontmatter.noindex === true || searchsocketMeta?.noindex === true) {
+    return null;
+  }
+
+  const content = parsed.content;
+  const normalized = normalizeMarkdown(content);
   if (!normalizeText(normalized)) {
     return null;
   }
 
+  const resolvedTitle = title ?? (typeof frontmatter.title === "string" ? frontmatter.title : undefined) ?? normalizeUrlPath(url);
+
   return {
     url: normalizeUrlPath(url),
-    title: title ?? normalizeUrlPath(url),
+    title: resolvedTitle,
     markdown: normalized,
     outgoingLinks: [],
     noindex: false,

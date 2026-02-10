@@ -135,6 +135,32 @@ function buildPrefixFilter(pathPrefix?: string): Record<string, unknown> {
   return out;
 }
 
+function buildQueryFilter(scope: Scope, opts: QueryOpts): Record<string, unknown> {
+  const clauses: Array<Record<string, unknown>> = [
+    {
+      projectId: { $eq: scope.projectId }
+    },
+    {
+      scopeName: { $eq: scope.scopeName }
+    }
+  ];
+
+  const prefixFilters = buildPrefixFilter(opts.pathPrefix);
+  for (const [key, value] of Object.entries(prefixFilters)) {
+    clauses.push({ [key]: value });
+  }
+
+  for (const tag of opts.tags ?? []) {
+    clauses.push({
+      tags: {
+        $in: [tag]
+      }
+    });
+  }
+
+  return { $and: clauses };
+}
+
 function toRegistryId(projectId: string, scopeName: string): string {
   return `${projectId}:${scopeName}`;
 }
@@ -211,16 +237,7 @@ export class PineconeVectorStore implements VectorStore {
   async query(queryVector: number[], opts: QueryOpts, scope: Scope): Promise<VectorHit[]> {
     await this.ensureDimension(queryVector.length);
 
-    const filter: Record<string, unknown> = {
-      projectId: { $eq: scope.projectId },
-      scopeName: { $eq: scope.scopeName },
-      ...buildPrefixFilter(opts.pathPrefix)
-    };
-
-    const filterTags = opts.tags ?? [];
-    if (filterTags.length > 0) {
-      filter.tags = { $in: filterTags };
-    }
+    const filter = buildQueryFilter(scope, opts);
 
     const response = await this.index.query({
       namespace: scope.scopeName,

@@ -95,6 +95,10 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
   const bodyLimit = options.maxBodyBytes ?? 64 * 1024;
 
   return async ({ event, resolve }: { event: any; resolve: (event: any) => Promise<Response> }) => {
+    if (apiPath && event.url.pathname !== apiPath) {
+      return resolve(event);
+    }
+
     const config = await getConfig();
     const targetPath = apiPath ?? config.api.path;
 

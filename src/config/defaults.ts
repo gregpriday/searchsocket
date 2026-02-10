@@ -51,7 +51,7 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       model: "text-embedding-3-small",
       apiKeyEnv: "OPENAI_API_KEY",
       batchSize: 64,
-      concurrency: 8
+      concurrency: 4
     },
     vector: {
       provider: "milvus",

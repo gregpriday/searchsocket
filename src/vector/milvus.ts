@@ -25,6 +25,7 @@ interface MilvusLikeClient {
     filter?: string;
     output_fields?: string[];
     limit?: number;
+    offset?: number;
   }): Promise<{ data: any[] }>;
   showCollections(): Promise<unknown>;
 }
@@ -215,22 +216,40 @@ export class MilvusVectorStore implements VectorStore {
   async listScopes(scopeProjectId: string): Promise<ScopeInfo[]> {
     await this.ensureRegistryCollection();
 
-    const response = await this.client.query({
-      collection_name: this.registryCollectionName,
-      filter: `projectId == ${quote(scopeProjectId)}`,
-      output_fields: ["projectId", "scopeName", "modelId", "lastIndexedAt", "vectorCount"],
-      limit: 10_000
-    });
-
-    const rows = response.data as Array<{
+    const PAGE_SIZE = 1_000;
+    const allRows: Array<{
       projectId: string;
       scopeName: string;
       modelId: string;
       lastIndexedAt: string;
       vectorCount: number;
-    }>;
+    }> = [];
 
-    return rows.map((row) => ({
+    let offset = 0;
+    while (true) {
+      const response = await this.client.query({
+        collection_name: this.registryCollectionName,
+        filter: `projectId == ${quote(scopeProjectId)}`,
+        output_fields: ["projectId", "scopeName", "modelId", "lastIndexedAt", "vectorCount"],
+        limit: PAGE_SIZE,
+        offset
+      });
+
+      const rows = response.data as typeof allRows;
+      allRows.push(...rows);
+
+      if (rows.length < PAGE_SIZE) {
+        break;
+      }
+
+      offset += PAGE_SIZE;
+      // Safety: prevent runaway pagination
+      if (offset >= 100_000) {
+        break;
+      }
+    }
+
+    return allRows.map((row) => ({
       projectId: row.projectId,
       scopeName: row.scopeName,
       modelId: row.modelId,

@@ -80,6 +80,8 @@ describe("extractFromHtml - extended", () => {
             <a href="/docs/a">Link A</a>
             <a href="/docs/b/">Link B</a>
             <a href="https://example.com/docs/c">Link C</a>
+            <a href="/docs/d?ref=nav#install">Link D</a>
+            <a href="guides/e?foo=bar">Link E</a>
             <a href="#anchor">Anchor</a>
             <a href="mailto:test@example.com">Email</a>
           </main>
@@ -91,6 +93,9 @@ describe("extractFromHtml - extended", () => {
     expect(extracted?.outgoingLinks).toContain("/docs/a");
     expect(extracted?.outgoingLinks).toContain("/docs/b");
     expect(extracted?.outgoingLinks).toContain("/docs/c");
+    expect(extracted?.outgoingLinks).toContain("/docs/d");
+    expect(extracted?.outgoingLinks).toContain("/guides/e");
+    expect(extracted?.outgoingLinks).not.toContain("/docs/d?ref=nav#install");
     // Should not include anchor or mailto
     expect(extracted?.outgoingLinks).not.toContain("#anchor");
   });
