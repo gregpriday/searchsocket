@@ -1,0 +1,124 @@
+# SiteScribe Config Reference
+
+Configuration file: `sitescribe.config.ts`
+
+```ts
+export default {
+  embeddings: { apiKeyEnv: "OPENAI_API_KEY" },
+  vector: { provider: "milvus" }
+};
+```
+
+## Top-level
+
+- `project.id` (default: `package.json` name)
+- `project.baseUrl` (optional canonical URL)
+- `scope.mode` (`fixed` | `git` | `env`, default `fixed`)
+- `scope.fixed` (default `main`)
+- `scope.envVar` (default `SITESCRIBE_SCOPE`)
+- `scope.sanitize` (default `true`)
+
+## Source
+
+- `source.mode` (`static-output` | `crawl` | `content-files`)
+  - auto-detected as:
+    - `static-output` if output dir exists
+    - fallback defaults to `static-output` before first build
+- `source.staticOutputDir` (default `build`)
+- `source.crawl.baseUrl` (required in crawl mode)
+- `source.crawl.routes` (optional route list)
+- `source.crawl.sitemapUrl` (optional sitemap path/url)
+- `source.contentFiles.globs` (required in content-files mode)
+- `source.contentFiles.baseDir` (default project root)
+
+## Extraction / Transform
+
+- `extract.mainSelector` (default `main`)
+- `extract.dropTags` (default `header`, `nav`, `footer`, `aside`)
+- `extract.dropSelectors` (default includes sidebar/toc/breadcrumb patterns)
+- `extract.ignoreAttr` (default `data-search-ignore`)
+- `extract.noindexAttr` (default `data-search-noindex`)
+- `extract.respectRobotsNoindex` (default `true`)
+
+- `transform.output` (`markdown`)
+- `transform.preserveCodeBlocks` (default `true`)
+- `transform.preserveTables` (default `true`)
+
+## Chunking
+
+- `chunking.strategy` (`hybrid`)
+- `chunking.maxChars` (default `2200`)
+- `chunking.overlapChars` (default `200`)
+- `chunking.minChars` (default `250`)
+- `chunking.headingPathDepth` (default `3`)
+- `chunking.dontSplitInside` (default `code`, `table`, `blockquote`)
+
+## Embeddings
+
+- `embeddings.provider` (`openai`)
+- `embeddings.model` (default `text-embedding-3-small`)
+- `embeddings.apiKeyEnv` (default `OPENAI_API_KEY`)
+- `embeddings.batchSize` (default `64`)
+- `embeddings.concurrency` (default `8`)
+
+## Vector Backends
+
+### Milvus / Zilliz Cloud
+
+- `vector.provider = "milvus"`
+- `vector.milvus.uriEnv` (default `MILVUS_URI`)
+- `vector.milvus.tokenEnv` (default `MILVUS_TOKEN`)
+- `vector.milvus.collection` (default `${projectId}_chunks`)
+
+### Pinecone
+
+- `vector.provider = "pinecone"`
+- `vector.pinecone.apiKeyEnv` (default `PINECONE_API_KEY`)
+- `vector.pinecone.index` (default `${projectId}`)
+- `vector.pinecone.namespaceMode` (`scope`)
+
+### Local
+
+- `vector.provider = "local"`
+- `vector.local.path` (default `.sitescribe/local-vectors.sqlite`)
+
+## Reranking
+
+- `rerank.provider` (`none` | `jina`, default `none`)
+- `rerank.topN` (default `20`)
+- `rerank.jina.apiKeyEnv` (default `JINA_API_KEY`)
+- `rerank.jina.model` (default `jina-reranker-v2-base-multilingual`)
+
+## Ranking
+
+- `ranking.enableIncomingLinkBoost` (default `true`)
+- `ranking.enableDepthBoost` (default `true`)
+- `ranking.weights.incomingLinks` (default `0.05`)
+- `ranking.weights.depth` (default `0.03`)
+- `ranking.weights.rerank` (default `1.0`)
+
+## API / MCP / State
+
+- `api.path` (default `/api/search`)
+- `api.cors.allowOrigins` (default `[]`)
+- `api.rateLimit.windowMs` / `api.rateLimit.max` (optional)
+
+- `mcp.enable` (default `true` in dev, `false` in prod)
+- `mcp.transport` (`stdio` | `http`, default `stdio`)
+- `mcp.http.port` (default `3338`)
+- `mcp.http.path` (default `/mcp`)
+
+- `state.dir` (default `.sitescribe`)
+
+## Env Variables
+
+Common env variables:
+
+- `OPENAI_API_KEY`
+- `MILVUS_URI`
+- `MILVUS_TOKEN`
+- `PINECONE_API_KEY`
+- `JINA_API_KEY`
+- `SITESCRIBE_SCOPE` (only with `scope.mode = "env"`)
+- `SITESCRIBE_AUTO_INDEX` (build plugin trigger)
+- `SITESCRIBE_DISABLE_AUTO_INDEX` (build plugin kill switch)

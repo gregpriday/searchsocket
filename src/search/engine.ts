@@ -1,0 +1,278 @@
+import fs from "node:fs";
+import path from "node:path";
+import matter from "gray-matter";
+import { z } from "zod";
+import { createEmbeddingsProvider } from "../embeddings";
+import { SiteScribeError } from "../errors";
+import { loadConfig } from "../config/load";
+import { resolveScope } from "../core/scope";
+import { readManifest } from "../core/state";
+import { createReranker } from "../rerank";
+import { hrTimeMs } from "../utils/time";
+import { normalizeUrlPath, urlPathToMirrorRelative } from "../utils/path";
+import { createVectorStore } from "../vector";
+import { rankHits } from "./ranking";
+import type { RankedHit } from "./ranking";
+import type {
+  EmbeddingsProvider,
+  Reranker,
+  ResolvedSiteScribeConfig,
+  SearchRequest,
+  SearchResponse,
+  VectorStore
+} from "../types";
+
+const requestSchema = z.object({
+  q: z.string().trim().min(1),
+  topK: z.number().int().positive().max(100).optional(),
+  scope: z.string().optional(),
+  pathPrefix: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  rerank: z.boolean().optional()
+});
+
+export interface SearchEngineOptions {
+  cwd?: string;
+  configPath?: string;
+  config?: ResolvedSiteScribeConfig;
+  embeddingsProvider?: EmbeddingsProvider;
+  vectorStore?: VectorStore;
+  reranker?: Reranker | null;
+}
+
+export class SearchEngine {
+  private readonly cwd: string;
+  private readonly config: ResolvedSiteScribeConfig;
+  private readonly embeddings: EmbeddingsProvider;
+  private readonly vectorStore: VectorStore;
+  private readonly reranker: Reranker | null;
+
+  private constructor(options: {
+    cwd: string;
+    config: ResolvedSiteScribeConfig;
+    embeddings: EmbeddingsProvider;
+    vectorStore: VectorStore;
+    reranker: Reranker | null;
+  }) {
+    this.cwd = options.cwd;
+    this.config = options.config;
+    this.embeddings = options.embeddings;
+    this.vectorStore = options.vectorStore;
+    this.reranker = options.reranker;
+  }
+
+  static async create(options: SearchEngineOptions = {}): Promise<SearchEngine> {
+    const cwd = path.resolve(options.cwd ?? process.cwd());
+    const config = options.config ?? (await loadConfig({ cwd, configPath: options.configPath }));
+
+    const embeddings = options.embeddingsProvider ?? createEmbeddingsProvider(config);
+    const vectorStore = options.vectorStore ?? createVectorStore(config, cwd);
+    const reranker = options.reranker ?? createReranker(config);
+
+    return new SearchEngine({
+      cwd,
+      config,
+      embeddings,
+      vectorStore,
+      reranker
+    });
+  }
+
+  getConfig(): ResolvedSiteScribeConfig {
+    return this.config;
+  }
+
+  async search(request: SearchRequest): Promise<SearchResponse> {
+    const parsed = requestSchema.safeParse(request);
+    if (!parsed.success) {
+      throw new SiteScribeError("INVALID_REQUEST", parsed.error.issues[0]?.message ?? "Invalid request", 400);
+    }
+
+    const input = parsed.data;
+    const totalStart = process.hrtime.bigint();
+
+    const resolvedScope = resolveScope(this.config, input.scope);
+    this.assertModelCompatibility(resolvedScope.scopeName);
+
+    const topK = input.topK ?? 10;
+    const wantsRerank = Boolean(input.rerank);
+    const candidateK = Math.max(50, topK);
+
+    const embedStart = process.hrtime.bigint();
+    const queryEmbeddings = await this.embeddings.embedTexts([input.q], this.config.embeddings.model);
+    const queryVector = queryEmbeddings[0];
+    if (!queryVector) {
+      throw new SiteScribeError("VECTOR_BACKEND_UNAVAILABLE", "Unable to create query embedding.");
+    }
+    const embedMs = hrTimeMs(embedStart);
+
+    const vectorStart = process.hrtime.bigint();
+    const hits = await this.vectorStore.query(
+      queryVector,
+      {
+        topK: candidateK,
+        pathPrefix: input.pathPrefix,
+        tags: input.tags
+      },
+      resolvedScope
+    );
+    const vectorMs = hrTimeMs(vectorStart);
+
+    const ranked = rankHits(hits, this.config);
+    let usedRerank = false;
+    let rerankMs = 0;
+    let ordered = ranked;
+
+    if (wantsRerank) {
+      const rerankStart = process.hrtime.bigint();
+      ordered = await this.rerankHits(input.q, ranked, topK);
+      rerankMs = hrTimeMs(rerankStart);
+      usedRerank = true;
+    }
+
+    return {
+      q: input.q,
+      scope: resolvedScope.scopeName,
+      results: ordered.slice(0, topK).map(({ hit, finalScore }) => ({
+        url: hit.metadata.url,
+        title: hit.metadata.title,
+        sectionTitle: hit.metadata.sectionTitle,
+        snippet: hit.metadata.snippet,
+        score: Number(finalScore.toFixed(6)),
+        routeFile: hit.metadata.routeFile
+      })),
+      meta: {
+        timingsMs: {
+          embed: Math.round(embedMs),
+          vector: Math.round(vectorMs),
+          rerank: Math.round(rerankMs),
+          total: Math.round(hrTimeMs(totalStart))
+        },
+        usedRerank,
+        modelId: this.config.embeddings.model
+      }
+    };
+  }
+
+  async getPage(pathOrUrl: string, scope?: string): Promise<{
+    url: string;
+    frontmatter: Record<string, unknown>;
+    markdown: string;
+  }> {
+    const resolvedScope = resolveScope(this.config, scope);
+    const urlPath = this.resolveInputPath(pathOrUrl);
+    const mirrorPath = path.join(
+      this.cwd,
+      this.config.state.dir,
+      "pages",
+      resolvedScope.scopeName,
+      urlPathToMirrorRelative(urlPath)
+    );
+
+    if (!fs.existsSync(mirrorPath)) {
+      throw new SiteScribeError("INVALID_REQUEST", `Indexed page not found for ${urlPath}`, 404);
+    }
+
+    const raw = fs.readFileSync(mirrorPath, "utf8");
+    const parsed = matter(raw);
+
+    return {
+      url: urlPath,
+      frontmatter: parsed.data as Record<string, unknown>,
+      markdown: parsed.content.trim()
+    };
+  }
+
+  async health(): Promise<{ ok: boolean; details?: string }> {
+    return this.vectorStore.health();
+  }
+
+  private resolveInputPath(pathOrUrl: string): string {
+    try {
+      if (/^https?:\/\//.test(pathOrUrl)) {
+        return normalizeUrlPath(new URL(pathOrUrl).pathname);
+      }
+    } catch {
+      // fall through to plain path handling
+    }
+
+    return normalizeUrlPath(pathOrUrl);
+  }
+
+  private assertModelCompatibility(scopeName: string): void {
+    const manifestPath = path.join(this.cwd, this.config.state.dir, "manifest.json");
+    if (!fs.existsSync(manifestPath)) {
+      return;
+    }
+
+    const manifest = readManifest(path.join(this.cwd, this.config.state.dir));
+    const scopeManifest = manifest.scopes[scopeName];
+    if (!scopeManifest) {
+      return;
+    }
+
+    if (scopeManifest.embeddingModel !== this.config.embeddings.model) {
+      throw new SiteScribeError(
+        "EMBEDDING_MODEL_MISMATCH",
+        `Scope ${scopeName} was indexed with ${scopeManifest.embeddingModel}. Current config uses ${this.config.embeddings.model}. Re-index with --force.`
+      );
+    }
+  }
+
+  private async rerankHits(
+    query: string,
+    ranked: RankedHit[],
+    topK: number
+  ): Promise<RankedHit[]> {
+    if (this.config.rerank.provider !== "jina") {
+      throw new SiteScribeError(
+        "INVALID_REQUEST",
+        "rerank=true requested but rerank.provider is not configured as 'jina'.",
+        400
+      );
+    }
+
+    if (!this.reranker) {
+      throw new SiteScribeError(
+        "CONFIG_MISSING",
+        `rerank=true requested but ${this.config.rerank.jina.apiKeyEnv} is not set.`,
+        400
+      );
+    }
+
+    const candidates = ranked.map(({ hit }) => ({
+      id: hit.id,
+      text: [hit.metadata.title, hit.metadata.sectionTitle, hit.metadata.snippet]
+        .filter(Boolean)
+        .join("\n")
+    }));
+
+    const reranked = await this.reranker.rerank(
+      query,
+      candidates,
+      Math.max(topK, this.config.rerank.topN)
+    );
+
+    const rerankScoreById = new Map(reranked.map((entry) => [entry.id, entry.score]));
+
+    return ranked
+      .map((entry) => {
+        const rerankScore = rerankScoreById.get(entry.hit.id);
+        if (rerankScore === undefined) {
+          return {
+            ...entry,
+            finalScore: entry.finalScore
+          };
+        }
+
+        const combinedScore =
+          rerankScore * this.config.ranking.weights.rerank + entry.finalScore * 0.001;
+
+        return {
+          ...entry,
+          finalScore: combinedScore
+        };
+      })
+      .sort((a, b) => b.finalScore - a.finalScore);
+  }
+}

@@ -1,0 +1,443 @@
+export type ScopeMode = "fixed" | "git" | "env";
+export type SourceMode = "static-output" | "crawl" | "content-files";
+export type VectorProvider = "pinecone" | "milvus" | "local";
+export type EmbeddingProvider = "openai";
+export type RerankProvider = "none" | "jina";
+
+export interface SiteScribeConfig {
+  project?: {
+    id?: string;
+    baseUrl?: string;
+  };
+  scope?: {
+    mode?: ScopeMode;
+    fixed?: string;
+    envVar?: string;
+    sanitize?: boolean;
+  };
+  source?: {
+    mode?: SourceMode;
+    staticOutputDir?: string;
+    crawl?: {
+      baseUrl: string;
+      routes?: string[];
+      sitemapUrl?: string;
+    };
+    contentFiles?: {
+      globs: string[];
+      baseDir?: string;
+    };
+  };
+  extract?: {
+    mainSelector?: string;
+    dropTags?: string[];
+    dropSelectors?: string[];
+    ignoreAttr?: string;
+    noindexAttr?: string;
+    respectRobotsNoindex?: boolean;
+  };
+  transform?: {
+    output?: "markdown";
+    preserveCodeBlocks?: boolean;
+    preserveTables?: boolean;
+  };
+  chunking?: {
+    strategy?: "hybrid";
+    maxChars?: number;
+    overlapChars?: number;
+    minChars?: number;
+    headingPathDepth?: number;
+    dontSplitInside?: Array<"code" | "table" | "blockquote">;
+  };
+  embeddings?: {
+    provider?: EmbeddingProvider;
+    model?: string;
+    apiKeyEnv?: string;
+    batchSize?: number;
+    concurrency?: number;
+  };
+  vector?: {
+    provider: VectorProvider;
+    pinecone?: {
+      apiKeyEnv?: string;
+      index?: string;
+      namespaceMode?: "scope";
+    };
+    milvus?: {
+      uriEnv?: string;
+      tokenEnv?: string;
+      collection?: string;
+    };
+    local?: {
+      path?: string;
+    };
+  };
+  rerank?: {
+    provider?: RerankProvider;
+    topN?: number;
+    jina?: {
+      apiKeyEnv?: string;
+      model?: string;
+    };
+  };
+  ranking?: {
+    enableIncomingLinkBoost?: boolean;
+    enableDepthBoost?: boolean;
+    weights?: {
+      incomingLinks?: number;
+      depth?: number;
+      rerank?: number;
+    };
+  };
+  api?: {
+    path?: string;
+    cors?: {
+      allowOrigins?: string[];
+    };
+    rateLimit?: {
+      windowMs?: number;
+      max?: number;
+    };
+  };
+  mcp?: {
+    enable?: boolean;
+    transport?: "stdio" | "http";
+    http?: {
+      port?: number;
+      path?: string;
+    };
+  };
+  state?: {
+    dir?: string;
+  };
+}
+
+export interface ResolvedSiteScribeConfig {
+  project: {
+    id: string;
+    baseUrl?: string;
+  };
+  scope: {
+    mode: ScopeMode;
+    fixed: string;
+    envVar: string;
+    sanitize: boolean;
+  };
+  source: {
+    mode: SourceMode;
+    staticOutputDir: string;
+    crawl?: {
+      baseUrl: string;
+      routes: string[];
+      sitemapUrl?: string;
+    };
+    contentFiles?: {
+      globs: string[];
+      baseDir: string;
+    };
+  };
+  extract: {
+    mainSelector: string;
+    dropTags: string[];
+    dropSelectors: string[];
+    ignoreAttr: string;
+    noindexAttr: string;
+    respectRobotsNoindex: boolean;
+  };
+  transform: {
+    output: "markdown";
+    preserveCodeBlocks: boolean;
+    preserveTables: boolean;
+  };
+  chunking: {
+    strategy: "hybrid";
+    maxChars: number;
+    overlapChars: number;
+    minChars: number;
+    headingPathDepth: number;
+    dontSplitInside: Array<"code" | "table" | "blockquote">;
+  };
+  embeddings: {
+    provider: EmbeddingProvider;
+    model: string;
+    apiKeyEnv: string;
+    batchSize: number;
+    concurrency: number;
+  };
+  vector: {
+    provider: VectorProvider;
+    pinecone: {
+      apiKeyEnv: string;
+      index: string;
+      namespaceMode: "scope";
+    };
+    milvus: {
+      uriEnv: string;
+      tokenEnv: string;
+      collection: string;
+    };
+    local: {
+      path: string;
+    };
+  };
+  rerank: {
+    provider: RerankProvider;
+    topN: number;
+    jina: {
+      apiKeyEnv: string;
+      model: string;
+    };
+  };
+  ranking: {
+    enableIncomingLinkBoost: boolean;
+    enableDepthBoost: boolean;
+    weights: {
+      incomingLinks: number;
+      depth: number;
+      rerank: number;
+    };
+  };
+  api: {
+    path: string;
+    cors: {
+      allowOrigins: string[];
+    };
+    rateLimit?: {
+      windowMs: number;
+      max: number;
+    };
+  };
+  mcp: {
+    enable: boolean;
+    transport: "stdio" | "http";
+    http: {
+      port: number;
+      path: string;
+    };
+  };
+  state: {
+    dir: string;
+  };
+}
+
+export interface Scope {
+  projectId: string;
+  scopeName: string;
+  scopeId: string;
+}
+
+export interface PageSourceRecord {
+  url: string;
+  html?: string;
+  markdown?: string;
+  title?: string;
+  sourcePath?: string;
+  outgoingLinks: string[];
+  tags?: string[];
+}
+
+export interface RouteMatch {
+  routeFile: string;
+  routeResolution: "exact" | "best-effort";
+}
+
+export interface ExtractedPage {
+  url: string;
+  title: string;
+  markdown: string;
+  outgoingLinks: string[];
+  noindex: boolean;
+  tags: string[];
+}
+
+export interface MirrorPage {
+  url: string;
+  title: string;
+  scope: string;
+  routeFile: string;
+  routeResolution: "exact" | "best-effort";
+  generatedAt: string;
+  incomingLinks: number;
+  outgoingLinks: number;
+  depth: number;
+  tags: string[];
+  markdown: string;
+}
+
+export interface Chunk {
+  chunkKey: string;
+  ordinal: number;
+  url: string;
+  path: string;
+  title: string;
+  sectionTitle?: string;
+  headingPath: string[];
+  chunkText: string;
+  snippet: string;
+  depth: number;
+  incomingLinks: number;
+  routeFile: string;
+  tags: string[];
+  contentHash: string;
+}
+
+export interface EmbeddingVector {
+  vector: number[];
+  tokenEstimate: number;
+}
+
+export interface VectorRecord {
+  id: string;
+  vector: number[];
+  metadata: {
+    projectId: string;
+    scopeName: string;
+    url: string;
+    path: string;
+    title: string;
+    sectionTitle: string;
+    headingPath: string[];
+    snippet: string;
+    contentHash: string;
+    modelId: string;
+    depth: number;
+    incomingLinks: number;
+    routeFile: string;
+    tags: string[];
+  };
+}
+
+export interface QueryOpts {
+  topK: number;
+  pathPrefix?: string;
+  tags?: string[];
+}
+
+export interface VectorHit {
+  id: string;
+  score: number;
+  metadata: VectorRecord["metadata"];
+}
+
+export interface ScopeInfo {
+  projectId: string;
+  scopeName: string;
+  modelId: string;
+  lastIndexedAt: string;
+  vectorCount?: number;
+}
+
+export interface VectorStore {
+  upsert(records: VectorRecord[], scope: Scope): Promise<void>;
+  query(queryVector: number[], opts: QueryOpts, scope: Scope): Promise<VectorHit[]>;
+  deleteByIds(ids: string[], scope: Scope): Promise<void>;
+  deleteScope(scope: Scope): Promise<void>;
+  listScopes(scopeProjectId: string): Promise<ScopeInfo[]>;
+  recordScope(info: ScopeInfo): Promise<void>;
+  health(): Promise<{ ok: boolean; details?: string }>;
+}
+
+export interface EmbeddingsProvider {
+  embedTexts(texts: string[], modelId: string): Promise<number[][]>;
+  estimateTokens(text: string): number;
+}
+
+export interface RerankCandidate {
+  id: string;
+  text: string;
+}
+
+export interface Reranker {
+  rerank(query: string, candidates: RerankCandidate[], topN?: number): Promise<Array<{ id: string; score: number }>>;
+}
+
+export interface SearchRequest {
+  q: string;
+  topK?: number;
+  scope?: string;
+  pathPrefix?: string;
+  tags?: string[];
+  rerank?: boolean;
+}
+
+export interface SearchResult {
+  url: string;
+  title: string;
+  sectionTitle?: string;
+  snippet: string;
+  score: number;
+  routeFile: string;
+}
+
+export interface SearchResponse {
+  q: string;
+  scope: string;
+  results: SearchResult[];
+  meta: {
+    timingsMs: {
+      embed: number;
+      vector: number;
+      rerank: number;
+      total: number;
+    };
+    usedRerank: boolean;
+    modelId: string;
+  };
+}
+
+export interface ScopeManifest {
+  projectId: string;
+  scopeName: string;
+  embeddingModel: string;
+  lastIndexedAt?: string;
+  lastEstimate?: {
+    estimatedTokens: number;
+    estimatedCostUSD: number;
+    changedChunks: number;
+  };
+  chunks: Record<string, { contentHash: string; url: string }>;
+}
+
+export interface ManifestFile {
+  version: 1;
+  scopes: Record<string, ScopeManifest>;
+}
+
+export interface RegistryFile {
+  version: 1;
+  scopes: ScopeInfo[];
+}
+
+export interface IndexStats {
+  pagesProcessed: number;
+  chunksTotal: number;
+  chunksChanged: number;
+  cachedEmbeddings: number;
+  newEmbeddings: number;
+  deletes: number;
+  estimatedTokens: number;
+  estimatedCostUSD: number;
+  stageTimingsMs: Record<string, number>;
+}
+
+export interface IndexOptions {
+  scopeOverride?: string;
+  changedOnly?: boolean;
+  force?: boolean;
+  dryRun?: boolean;
+  sourceOverride?: SourceMode;
+  maxPages?: number;
+  maxChunks?: number;
+  verbose?: boolean;
+}
+
+export interface SearchRuntimeOptions {
+  configPath?: string;
+  cwd?: string;
+}
+
+export interface JsonLogEntry {
+  event: string;
+  ts: string;
+  data?: Record<string, unknown>;
+}
