@@ -83,7 +83,7 @@ describe("MilvusVectorStore", () => {
     const args = search.mock.calls[0]?.[0] as { filter?: string };
     expect(args.filter).toContain("projectId == \"sitescribe-test\"");
     expect(args.filter).toContain("scopeName == \"main\"");
-    expect(args.filter).toContain("path like \"/docs%\"");
+    expect(args.filter).toContain("(path == \"/docs\" or path like \"/docs/%\")");
     expect(args.filter).toContain("tags like \"%\\\"docs\\\"%\"");
   });
 

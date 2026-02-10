@@ -140,8 +140,9 @@ export class LocalVectorStore implements VectorStore {
     const values: unknown[] = [scope.projectId, scope.scopeName];
 
     if (opts.pathPrefix) {
-      clauses.push("path LIKE ?");
-      values.push(`${opts.pathPrefix}%`);
+      const prefix = opts.pathPrefix.endsWith("/") ? opts.pathPrefix : `${opts.pathPrefix}/`;
+      clauses.push("(path = ? OR path LIKE ?)");
+      values.push(opts.pathPrefix.replace(/\/$/, ""), `${prefix}%`);
     }
 
     const rows = this.db

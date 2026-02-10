@@ -32,11 +32,27 @@ export function buildMirrorMarkdown(page: MirrorPage): string {
   return `${frontmatterLines.join("\n")}${normalizeMarkdown(page.markdown)}`;
 }
 
+function stripGeneratedAt(content: string): string {
+  return content.replace(/^generatedAt: .*$/m, "");
+}
+
 export async function writeMirrorPage(statePath: string, scope: Scope, page: MirrorPage): Promise<string> {
   const relative = urlPathToMirrorRelative(page.url);
   const outputPath = path.join(statePath, "pages", scope.scopeName, relative);
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
-  await fs.writeFile(outputPath, buildMirrorMarkdown(page), "utf8");
+
+  const newContent = buildMirrorMarkdown(page);
+
+  try {
+    const existing = await fs.readFile(outputPath, "utf8");
+    if (stripGeneratedAt(existing) === stripGeneratedAt(newContent)) {
+      return outputPath;
+    }
+  } catch {
+    // File doesn't exist yet, write it
+  }
+
+  await fs.writeFile(outputPath, newContent, "utf8");
   return outputPath;
 }
 

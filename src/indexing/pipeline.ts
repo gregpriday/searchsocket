@@ -373,38 +373,39 @@ export class IndexPipeline {
     stageEnd("sync", syncStart);
 
     const finalizeStart = stageStart();
-    const nextChunkMap: Record<string, { contentHash: string; url: string }> = {};
 
-    for (const chunk of chunks) {
-      nextChunkMap[chunk.chunkKey] = {
-        contentHash: chunk.contentHash,
-        url: chunk.url
-      };
-    }
-
-    scopeManifest.projectId = scope.projectId;
-    scopeManifest.scopeName = scope.scopeName;
-    scopeManifest.embeddingModel = this.config.embeddings.model;
-    scopeManifest.lastIndexedAt = nowIso();
-    scopeManifest.lastEstimate = {
-      changedChunks: changedChunks.length,
-      estimatedTokens,
-      estimatedCostUSD: Number(estimatedCostUSD.toFixed(8))
-    };
-    scopeManifest.chunks = nextChunkMap;
-
-    writeManifest(statePath, manifestFile);
-
-    const scopeInfo: ScopeInfo = {
-      projectId: scope.projectId,
-      scopeName: scope.scopeName,
-      modelId: this.config.embeddings.model,
-      lastIndexedAt: scopeManifest.lastIndexedAt,
-      vectorCount: chunks.length
-    };
-
-    upsertRegistryScope(statePath, scopeInfo);
     if (!options.dryRun) {
+      const nextChunkMap: Record<string, { contentHash: string; url: string }> = {};
+
+      for (const chunk of chunks) {
+        nextChunkMap[chunk.chunkKey] = {
+          contentHash: chunk.contentHash,
+          url: chunk.url
+        };
+      }
+
+      scopeManifest.projectId = scope.projectId;
+      scopeManifest.scopeName = scope.scopeName;
+      scopeManifest.embeddingModel = this.config.embeddings.model;
+      scopeManifest.lastIndexedAt = nowIso();
+      scopeManifest.lastEstimate = {
+        changedChunks: changedChunks.length,
+        estimatedTokens,
+        estimatedCostUSD: Number(estimatedCostUSD.toFixed(8))
+      };
+      scopeManifest.chunks = nextChunkMap;
+
+      writeManifest(statePath, manifestFile);
+
+      const scopeInfo: ScopeInfo = {
+        projectId: scope.projectId,
+        scopeName: scope.scopeName,
+        modelId: this.config.embeddings.model,
+        lastIndexedAt: scopeManifest.lastIndexedAt,
+        vectorCount: chunks.length
+      };
+
+      upsertRegistryScope(statePath, scopeInfo);
       await this.vectorStore.recordScope(scopeInfo);
       this.logger.event("registry_updated", {
         scope: scope.scopeName,

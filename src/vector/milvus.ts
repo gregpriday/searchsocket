@@ -121,7 +121,9 @@ export class MilvusVectorStore implements VectorStore {
     ];
 
     if (opts.pathPrefix) {
-      exprParts.push(`path like ${quote(`${opts.pathPrefix}%`)}`);
+      const prefix = opts.pathPrefix.endsWith("/") ? opts.pathPrefix : `${opts.pathPrefix}/`;
+      const exact = opts.pathPrefix.replace(/\/$/, "");
+      exprParts.push(`(path == ${quote(exact)} or path like ${quote(`${prefix}%`)})`);
     }
 
     for (const tag of opts.tags ?? []) {

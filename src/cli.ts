@@ -19,6 +19,7 @@ import { IndexPipeline } from "./indexing/pipeline";
 import { runMcpServer } from "./mcp/server";
 import { SearchEngine } from "./search/engine";
 import { createVectorStore } from "./vector";
+import { sanitizeScopeName } from "./utils/text";
 import type { IndexStats, ResolvedSiteScribeConfig, Scope } from "./types";
 
 interface RootCommandOptions {
@@ -510,6 +511,10 @@ program
       keepScopes = readScopesFromFile(path.resolve(cwd, opts.scopesFile));
     } else {
       keepScopes = readRemoteGitBranches(cwd);
+    }
+
+    if (config.scope.sanitize && keepScopes.size > 0) {
+      keepScopes = new Set([...keepScopes].map(sanitizeScopeName));
     }
 
     const olderThanMs = opts.olderThan ? parseDurationMs(opts.olderThan) : undefined;
