@@ -2,16 +2,52 @@ import pLimit from "p-limit";
 import type { PageSourceRecord, ResolvedSiteScribeConfig } from "../../types";
 import { ensureLeadingSlash, joinUrl, normalizeUrlPath } from "../../utils/path";
 
-function parseSitemap(xml: string): string[] {
-  const routes: string[] = [];
+function extractLocs(xml: string): string[] {
+  const locs: string[] = [];
   const regex = /<loc>(.*?)<\/loc>/g;
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(xml)) !== null) {
     const loc = match[1];
-    if (!loc) {
-      continue;
+    if (loc) {
+      locs.push(loc);
     }
+  }
+
+  return locs;
+}
+
+function isSitemapIndex(xml: string): boolean {
+  return /<sitemapindex[\s>]/i.test(xml);
+}
+
+async function fetchSitemapXml(url: string): Promise<string> {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch sitemap ${url}: ${res.status} ${res.statusText}`);
+  }
+  return res.text();
+}
+
+async function parseSitemap(xml: string, baseUrl: string): Promise<string[]> {
+  if (isSitemapIndex(xml)) {
+    const childUrls = extractLocs(xml);
+    const routes: string[] = [];
+
+    for (const childUrl of childUrls) {
+      const resolved = childUrl.startsWith("http") ? childUrl : joinUrl(baseUrl, childUrl);
+      const childXml = await fetchSitemapXml(resolved);
+      const childRoutes = await parseSitemap(childXml, baseUrl);
+      routes.push(...childRoutes);
+    }
+
+    return [...new Set(routes)];
+  }
+
+  const locs = extractLocs(xml);
+  const routes: string[] = [];
+
+  for (const loc of locs) {
     try {
       const url = new URL(loc);
       routes.push(normalizeUrlPath(url.pathname));
@@ -41,12 +77,8 @@ async function resolveRoutes(config: ResolvedSiteScribeConfig): Promise<string[]
     ? crawlConfig.sitemapUrl
     : joinUrl(crawlConfig.baseUrl, crawlConfig.sitemapUrl);
 
-  const res = await fetch(sitemapUrl);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch sitemap ${sitemapUrl}: ${res.status} ${res.statusText}`);
-  }
-
-  return parseSitemap(await res.text());
+  const xml = await fetchSitemapXml(sitemapUrl);
+  return parseSitemap(xml, crawlConfig.baseUrl);
 }
 
 export async function loadCrawledPages(

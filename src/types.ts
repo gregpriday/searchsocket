@@ -18,6 +18,7 @@ export interface SiteScribeConfig {
   source?: {
     mode?: SourceMode;
     staticOutputDir?: string;
+    strictRouteMapping?: boolean;
     crawl?: {
       baseUrl: string;
       routes?: string[];
@@ -126,6 +127,7 @@ export interface ResolvedSiteScribeConfig {
   source: {
     mode: SourceMode;
     staticOutputDir: string;
+    strictRouteMapping: boolean;
     crawl?: {
       baseUrl: string;
       routes: string[];

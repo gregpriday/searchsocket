@@ -158,6 +158,14 @@ function readRemoteGitBranches(cwd: string): Set<string> {
       .filter(Boolean)
       .map((line) => line.replace(/^origin\//, ""));
 
+    if (scopes.length <= 1) {
+      process.stdout.write(
+        "warning: git branch -r returned 1 or fewer branches. " +
+          "If running in CI, ensure the checkout step uses fetch-depth: 0 " +
+          "to avoid accidentally pruning active branch scopes.\n"
+      );
+    }
+
     return new Set(scopes);
   } catch {
     return new Set();
@@ -644,8 +652,9 @@ program
         });
       }
 
+      let store: ReturnType<typeof createVectorStore> | null = null;
       try {
-        const store = createVectorStore(config, cwd);
+        store = createVectorStore(config, cwd);
         const health = await store.health();
         checks.push({
           name: "vector backend connectivity",
@@ -658,6 +667,31 @@ program
           ok: false,
           details: error instanceof Error ? error.message : "unknown error"
         });
+      }
+
+      if (store && config.vector.provider !== "local") {
+        try {
+          const testScope: Scope = {
+            projectId: config.project.id,
+            scopeName: "_sitescribe_doctor_probe",
+            scopeId: `${config.project.id}:_sitescribe_doctor_probe`
+          };
+          await store.recordScope({
+            projectId: testScope.projectId,
+            scopeName: testScope.scopeName,
+            modelId: config.embeddings.model,
+            lastIndexedAt: new Date().toISOString(),
+            vectorCount: 0
+          });
+          await store.deleteScope(testScope);
+          checks.push({ name: "vector backend write permission", ok: true });
+        } catch (error) {
+          checks.push({
+            name: "vector backend write permission",
+            ok: false,
+            details: error instanceof Error ? error.message : "write test failed"
+          });
+        }
       }
 
       try {

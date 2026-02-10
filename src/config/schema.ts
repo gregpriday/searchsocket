@@ -19,6 +19,7 @@ export const siteScribeConfigSchema = z.object({
     .object({
       mode: z.enum(["static-output", "crawl", "content-files"]).optional(),
       staticOutputDir: z.string().min(1).optional(),
+      strictRouteMapping: z.boolean().optional(),
       crawl: z
         .object({
           baseUrl: z.string().url(),

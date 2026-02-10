@@ -196,6 +196,15 @@ export class IndexPipeline {
 
     for (const page of extractedPages) {
       const routeMatch = mapUrlToRoute(page.url, routePatterns);
+
+      if (this.config.source.strictRouteMapping && routeMatch.routeResolution === "best-effort") {
+        throw new SiteScribeError(
+          "INVALID_REQUEST",
+          `Strict route mapping enabled: no exact route match for ${page.url} (resolved to ${routeMatch.routeFile}). ` +
+            "Disable source.strictRouteMapping or add the missing route file."
+        );
+      }
+
       const mirror: MirrorPage = {
         url: page.url,
         title: page.title,

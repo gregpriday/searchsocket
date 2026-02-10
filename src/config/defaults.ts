@@ -22,7 +22,8 @@ export function createDefaultConfig(projectId: string): ResolvedSiteScribeConfig
     },
     source: {
       mode: "static-output",
-      staticOutputDir: "build"
+      staticOutputDir: "build",
+      strictRouteMapping: false
     },
     extract: {
       mainSelector: "main",

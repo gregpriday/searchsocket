@@ -76,6 +76,11 @@ Example with `scope.mode = "env"`:
 
 ## 4. Scheduled Prune Job
 
+> **Important:** The prune command uses `git branch -r` to identify active scopes.
+> You must set `fetch-depth: 0` in the checkout step so that remote branch refs are
+> available. Without this, a shallow clone may only see the current branch and prune
+> could incorrectly delete scopes for active feature branches.
+
 ```yaml
 name: sitescribe-prune
 
@@ -89,6 +94,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 10

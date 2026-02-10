@@ -9,7 +9,19 @@ import type {
 } from "../types";
 
 const REGISTRY_NAMESPACE = "_sitescribe_registry";
+/**
+ * Maximum path segments stored as dir0..dirN metadata keys for prefix filtering.
+ * Paths deeper than 8 levels will only be filterable up to this depth. This is
+ * sufficient for virtually all SvelteKit route structures.
+ */
 const MAX_DIR_SEGMENTS = 8;
+
+/**
+ * Fallback dimensions used when describeIndexStats fails (e.g. on Starter pods).
+ * If using a model not listed here, the actual vector length from the first
+ * upsert/query call takes precedence. This map only affects zero-vector
+ * operations like registry record storage.
+ */
 const FALLBACK_DIMENSIONS: Record<string, number> = {
   "text-embedding-3-small": 1536,
   "text-embedding-3-large": 3072,

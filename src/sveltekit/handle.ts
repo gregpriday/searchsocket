@@ -8,6 +8,13 @@ interface RateBucket {
   resetAt: number;
 }
 
+/**
+ * Simple in-memory rate limiter. Effective for long-lived Node.js processes
+ * (e.g. SvelteKit with adapter-node). In serverless environments (Vercel,
+ * Netlify, Cloudflare Workers), memory is not shared between invocations and
+ * this limiter will reset on each cold start. For serverless deployments, use
+ * your platform's built-in WAF or edge rate-limiting instead.
+ */
 class InMemoryRateLimiter {
   private readonly buckets = new Map<string, RateBucket>();
 
