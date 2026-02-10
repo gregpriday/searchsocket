@@ -19,7 +19,8 @@ export function createVectorStore(config: ResolvedSearchSocketConfig, cwd: strin
     return new PineconeVectorStore({
       apiKey,
       indexName: config.vector.pinecone.index,
-      embeddingModel: config.embeddings.model
+      embeddingModel: config.embeddings.model,
+      dimension: config.vector.dimension
     });
   }
 

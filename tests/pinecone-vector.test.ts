@@ -83,7 +83,8 @@ describe("PineconeVectorStore", () => {
     const upsertArgs = upsert.mock.calls[0]?.[0] as { namespace?: string; records?: Array<{ metadata?: Record<string, unknown> }> };
     expect(upsertArgs.namespace).toBe("main");
     expect(upsertArgs.records?.[0]?.metadata?.dir0).toBe("docs");
-    expect(upsertArgs.records?.[0]?.metadata?.tag_docs).toBe(true);
+    expect(upsertArgs.records?.[0]?.metadata?.tags).toEqual(["docs"]);
+    expect(upsertArgs.records?.[0]?.metadata).not.toHaveProperty("tag_docs");
 
     expect(query).toHaveBeenCalledTimes(1);
     const queryArgs = query.mock.calls[0]?.[0] as { filter?: Record<string, unknown> };
@@ -91,7 +92,7 @@ describe("PineconeVectorStore", () => {
       projectId: { $eq: "searchsocket-test" },
       scopeName: { $eq: "main" },
       dir0: { $eq: "docs" },
-      tag_docs: { $eq: true }
+      tags: { $in: ["docs"] }
     });
 
     expect(hits.length).toBe(1);

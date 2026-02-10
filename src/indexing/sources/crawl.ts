@@ -1,3 +1,4 @@
+import { gunzipSync } from "node:zlib";
 import pLimit from "p-limit";
 import type { PageSourceRecord, ResolvedSearchSocketConfig } from "../../types";
 import { ensureLeadingSlash, joinUrl, normalizeUrlPath } from "../../utils/path";
@@ -26,6 +27,12 @@ async function fetchSitemapXml(url: string): Promise<string> {
   if (!res.ok) {
     throw new Error(`Failed to fetch sitemap ${url}: ${res.status} ${res.statusText}`);
   }
+
+  if (url.endsWith(".gz")) {
+    const buffer = Buffer.from(await res.arrayBuffer());
+    return gunzipSync(buffer).toString("utf8");
+  }
+
   return res.text();
 }
 

@@ -74,6 +74,7 @@ export const searchSocketConfigSchema = z.object({
   vector: z
     .object({
       provider: z.enum(["pinecone", "milvus", "local"]),
+      dimension: z.number().int().positive().optional(),
       pinecone: z
         .object({
           apiKeyEnv: z.string().optional(),

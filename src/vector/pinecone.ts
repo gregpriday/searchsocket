@@ -43,7 +43,7 @@ interface PineconeMetadata {
   incomingLinks: number;
   routeFile: string;
   tags: string[];
-  [key: string]: string | number | boolean | string[];
+  [key: string]: string | number | string[];
 }
 
 interface PineconeLikeIndex {
@@ -88,12 +88,9 @@ export interface PineconeVectorStoreOptions {
   apiKey: string;
   indexName: string;
   embeddingModel: string;
+  dimension?: number;
   client?: Pinecone;
   index?: PineconeLikeIndex;
-}
-
-function sanitizeTagKey(tag: string): string {
-  return `tag_${tag.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`;
 }
 
 function toDirFilters(pathValue: string): Record<string, string> {
@@ -133,12 +130,14 @@ export class PineconeVectorStore implements VectorStore {
   private readonly client: Pinecone;
   private readonly index: PineconeLikeIndex;
   private readonly embeddingModel: string;
+  private readonly configuredDimension?: number;
   private dimension?: number;
 
   constructor(options: PineconeVectorStoreOptions) {
     this.client = options.client ?? new Pinecone({ apiKey: options.apiKey });
     this.index = options.index ?? (this.client.index({ name: options.indexName }) as unknown as PineconeLikeIndex);
     this.embeddingModel = options.embeddingModel;
+    this.configuredDimension = options.dimension;
   }
 
   async upsert(records: VectorRecord[], scope: Scope): Promise<void> {
@@ -150,9 +149,6 @@ export class PineconeVectorStore implements VectorStore {
 
     const formatted = records.map((record) => {
       const dirFilters = toDirFilters(record.metadata.path);
-      const tagFilters = Object.fromEntries(
-        record.metadata.tags.map((tag) => [sanitizeTagKey(tag), true] as const)
-      );
 
       return {
         id: record.id,
@@ -172,8 +168,7 @@ export class PineconeVectorStore implements VectorStore {
           incomingLinks: record.metadata.incomingLinks,
           routeFile: record.metadata.routeFile,
           tags: record.metadata.tags,
-          ...dirFilters,
-          ...tagFilters
+          ...dirFilters
         } satisfies PineconeMetadata
       };
     });
@@ -196,8 +191,9 @@ export class PineconeVectorStore implements VectorStore {
       ...buildPrefixFilter(opts.pathPrefix)
     };
 
-    for (const tag of opts.tags ?? []) {
-      filter[sanitizeTagKey(tag)] = { $eq: true };
+    const filterTags = opts.tags ?? [];
+    if (filterTags.length > 0) {
+      filter.tags = { $in: filterTags };
     }
 
     const response = await this.index.query({
@@ -423,6 +419,11 @@ export class PineconeVectorStore implements VectorStore {
       }
     } catch {
       // fallback to model map
+    }
+
+    if (this.configuredDimension && this.configuredDimension > 0) {
+      this.dimension = this.configuredDimension;
+      return this.configuredDimension;
     }
 
     const fallback = FALLBACK_DIMENSIONS[this.embeddingModel] ?? FALLBACK_DIMENSIONS["text-embedding-3-small"] ?? 1536;

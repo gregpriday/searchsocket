@@ -168,6 +168,7 @@ export interface ResolvedSearchSocketConfig {
   };
   vector: {
     provider: VectorProvider;
+    dimension?: number;
     pinecone: {
       apiKeyEnv: string;
       index: string;
