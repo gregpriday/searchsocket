@@ -6,7 +6,7 @@
   "author": "Greg Priday <greg@siteorigin.com>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/gregpriday/searchsocket.git"
+    "url": "git+https://github.com/gregpriday/searchsocket.git"
   },
   "homepage": "https://github.com/gregpriday/searchsocket",
   "bugs": {
