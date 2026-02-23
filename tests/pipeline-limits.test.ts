@@ -48,8 +48,7 @@ async function createFixture(): Promise<{ cwd: string; config: ResolvedSearchSoc
   const config = createDefaultConfig("searchsocket-pipeline-limits");
   config.source.mode = "static-output";
   config.source.staticOutputDir = "build";
-  config.vector.provider = "local";
-  config.vector.local.path = ".searchsocket/local-vectors.json";
+  config.vector.turso.localPath = ".searchsocket/vectors.db";
   config.state.dir = ".searchsocket";
 
   return { cwd, config };

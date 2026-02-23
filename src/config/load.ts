@@ -111,17 +111,9 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
     vector: {
       ...defaults.vector,
       ...parsed.vector,
-      pinecone: {
-        ...defaults.vector.pinecone,
-        ...parsed.vector?.pinecone
-      },
-      milvus: {
-        ...defaults.vector.milvus,
-        ...parsed.vector?.milvus
-      },
-      local: {
-        ...defaults.vector.local,
-        ...parsed.vector?.local
+      turso: {
+        ...defaults.vector.turso,
+        ...parsed.vector?.turso
       }
     },
     rerank: {
@@ -169,13 +161,7 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
     }
   };
 
-  if (!rawConfig.vector?.provider) {
-    throw new SearchSocketError("CONFIG_MISSING", "`vector.provider` is required in searchsocket.config.ts.");
-  }
-
   merged.project.id = projectId;
-  merged.vector.pinecone.index = rawConfig.vector?.pinecone?.index ?? `${projectId}`;
-  merged.vector.milvus.collection = rawConfig.vector?.milvus?.collection ?? `${projectId}_chunks`;
   merged.source.mode = detectSourceMode(cwd, merged, parsed);
 
   if (merged.source.mode === "crawl" && !merged.source.crawl?.baseUrl) {
@@ -201,9 +187,6 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Resol
       return mergeConfig(cwd, {
         source: {
           mode: "static-output"
-        },
-        vector: {
-          provider: "local"
         }
       });
     }
@@ -228,8 +211,7 @@ export function writeMinimalConfig(cwd: string): string {
   }
 
   const content = `export default {
-  embeddings: { apiKeyEnv: "OPENAI_API_KEY" },
-  vector: { provider: "local" }
+  embeddings: { apiKeyEnv: "OPENAI_API_KEY" }
 };
 `;
 

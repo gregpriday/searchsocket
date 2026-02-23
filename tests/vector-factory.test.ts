@@ -12,37 +12,33 @@ afterEach(async () => {
 });
 
 describe("createVectorStore", () => {
-  it("creates a local vector store with a resolved path", async () => {
+  it("creates a local file DB and passes health check", async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "searchsocket-vector-factory-"));
     tempDirs.push(cwd);
 
     const config = createDefaultConfig("factory-test");
-    config.vector.provider = "local";
-    config.vector.local.path = ".searchsocket/custom-local.json";
+    config.vector.turso.localPath = ".searchsocket/vectors.db";
 
     const store = await createVectorStore(config, cwd);
     expect(await store.health()).toEqual({ ok: true });
   });
 
-  it("throws when pinecone key is missing", async () => {
+  it("uses remote URL from env when set", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "searchsocket-vector-factory-"));
+    tempDirs.push(cwd);
+
     const config = createDefaultConfig("factory-test");
-    config.vector.provider = "pinecone";
-    config.vector.pinecone.apiKeyEnv = "SEARCHSOCKET_TEST_MISSING_PINECONE_KEY";
-    delete process.env.SEARCHSOCKET_TEST_MISSING_PINECONE_KEY;
+    config.vector.turso.urlEnv = "SEARCHSOCKET_TEST_TURSO_URL";
 
-    await expect(createVectorStore(config, process.cwd())).rejects.toMatchObject({
-      code: "CONFIG_MISSING"
-    });
-  });
+    // Use a local file URL to simulate a "remote" config path
+    const dbPath = path.join(cwd, "remote.db");
+    process.env.SEARCHSOCKET_TEST_TURSO_URL = `file:${dbPath}`;
 
-  it("throws when milvus uri is missing", async () => {
-    const config = createDefaultConfig("factory-test");
-    config.vector.provider = "milvus";
-    config.vector.milvus.uriEnv = "SEARCHSOCKET_TEST_MISSING_MILVUS_URI";
-    delete process.env.SEARCHSOCKET_TEST_MISSING_MILVUS_URI;
-
-    await expect(createVectorStore(config, process.cwd())).rejects.toMatchObject({
-      code: "CONFIG_MISSING"
-    });
+    try {
+      const store = await createVectorStore(config, cwd);
+      expect(await store.health()).toEqual({ ok: true });
+    } finally {
+      delete process.env.SEARCHSOCKET_TEST_TURSO_URL;
+    }
   });
 });

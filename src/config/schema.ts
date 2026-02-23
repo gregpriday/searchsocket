@@ -74,25 +74,12 @@ export const searchSocketConfigSchema = z.object({
     .optional(),
   vector: z
     .object({
-      provider: z.enum(["pinecone", "milvus", "local"]),
       dimension: z.number().int().positive().optional(),
-      pinecone: z
+      turso: z
         .object({
-          apiKeyEnv: z.string().optional(),
-          index: z.string().optional(),
-          namespaceMode: z.literal("scope").optional()
-        })
-        .optional(),
-      milvus: z
-        .object({
-          uriEnv: z.string().optional(),
-          tokenEnv: z.string().optional(),
-          collection: z.string().optional()
-        })
-        .optional(),
-      local: z
-        .object({
-          path: z.string().optional()
+          urlEnv: z.string().optional(),
+          authTokenEnv: z.string().optional(),
+          localPath: z.string().optional()
         })
         .optional()
     })

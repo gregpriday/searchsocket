@@ -1,6 +1,5 @@
 export type ScopeMode = "fixed" | "git" | "env";
 export type SourceMode = "static-output" | "crawl" | "content-files";
-export type VectorProvider = "pinecone" | "milvus" | "local";
 export type EmbeddingProvider = "openai";
 export type RerankProvider = "none" | "jina";
 
@@ -59,19 +58,11 @@ export interface SearchSocketConfig {
     pricePer1kTokens?: number;
   };
   vector?: {
-    provider: VectorProvider;
-    pinecone?: {
-      apiKeyEnv?: string;
-      index?: string;
-      namespaceMode?: "scope";
-    };
-    milvus?: {
-      uriEnv?: string;
-      tokenEnv?: string;
-      collection?: string;
-    };
-    local?: {
-      path?: string;
+    dimension?: number;
+    turso?: {
+      urlEnv?: string;
+      authTokenEnv?: string;
+      localPath?: string;
     };
   };
   rerank?: {
@@ -169,20 +160,11 @@ export interface ResolvedSearchSocketConfig {
     pricePer1kTokens?: number;
   };
   vector: {
-    provider: VectorProvider;
     dimension?: number;
-    pinecone: {
-      apiKeyEnv: string;
-      index: string;
-      namespaceMode: "scope";
-    };
-    milvus: {
-      uriEnv: string;
-      tokenEnv: string;
-      collection: string;
-    };
-    local: {
-      path: string;
+    turso: {
+      urlEnv: string;
+      authTokenEnv: string;
+      localPath: string;
     };
   };
   rerank: {

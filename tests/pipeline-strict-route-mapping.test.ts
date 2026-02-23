@@ -44,8 +44,7 @@ async function createProjectFixture(): Promise<{ cwd: string; config: ResolvedSe
   config.source.mode = "static-output";
   config.source.staticOutputDir = "build";
   config.source.strictRouteMapping = true;
-  config.vector.provider = "local";
-  config.vector.local.path = ".searchsocket/local-vectors.json";
+  config.vector.turso.localPath = ".searchsocket/vectors.db";
   config.state.dir = ".searchsocket";
 
   return { cwd, config };

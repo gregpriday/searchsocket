@@ -31,10 +31,11 @@ describe("createDefaultConfig", () => {
     expect(config.state.dir).toBe(".searchsocket");
   });
 
-  it("uses project id for vector index names", () => {
+  it("has turso defaults", () => {
     const config = createDefaultConfig("example");
-    expect(config.vector.pinecone.index).toBe("example");
-    expect(config.vector.milvus.collection).toBe("example_chunks");
+    expect(config.vector.turso.urlEnv).toBe("TURSO_DATABASE_URL");
+    expect(config.vector.turso.authTokenEnv).toBe("TURSO_AUTH_TOKEN");
+    expect(config.vector.turso.localPath).toBe(".searchsocket/vectors.db");
   });
 });
 
@@ -44,11 +45,10 @@ describe("mergeConfig", () => {
     await fs.mkdir(path.join(dir, "build"), { recursive: true });
 
     const merged = mergeConfig(dir, {
-      vector: { provider: "local" },
       chunking: { maxChars: 3000 }
     });
 
-    expect(merged.vector.provider).toBe("local");
+    expect(merged.vector.turso.urlEnv).toBe("TURSO_DATABASE_URL");
     expect(merged.chunking.maxChars).toBe(3000);
     expect(merged.chunking.overlapChars).toBe(200); // default preserved
     expect(merged.embeddings.model).toBe("text-embedding-3-small");
@@ -63,8 +63,7 @@ describe("mergeConfig", () => {
     );
 
     const merged = mergeConfig(dir, {
-      source: { mode: "static-output" },
-      vector: { provider: "local" }
+      source: { mode: "static-output" }
     });
     expect(merged.project.id).toBe("-org-my-site");
   });
@@ -72,8 +71,7 @@ describe("mergeConfig", () => {
   it("falls back to directory name when no package.json", async () => {
     const dir = await makeTempDir();
     const merged = mergeConfig(dir, {
-      source: { mode: "static-output" },
-      vector: { provider: "local" }
+      source: { mode: "static-output" }
     });
     expect(merged.project.id).toBe(path.basename(dir));
   });
@@ -81,22 +79,15 @@ describe("mergeConfig", () => {
   it("throws when source.mode is omitted and static output is missing", async () => {
     const dir = await makeTempDir();
     expect(() =>
-      mergeConfig(dir, {
-        vector: { provider: "local" }
-      })
+      mergeConfig(dir, {})
     ).toThrow("source.mode");
-  });
-
-  it("throws when vector.provider is missing", () => {
-    expect(() => mergeConfig("/tmp", {} as any)).toThrow("vector.provider");
   });
 
   it("throws when crawl mode lacks baseUrl", async () => {
     const dir = await makeTempDir();
     expect(() =>
       mergeConfig(dir, {
-        source: { mode: "crawl" },
-        vector: { provider: "local" }
+        source: { mode: "crawl" }
       })
     ).toThrow("baseUrl");
   });
@@ -105,10 +96,23 @@ describe("mergeConfig", () => {
     const dir = await makeTempDir();
     expect(() =>
       mergeConfig(dir, {
-        source: { mode: "content-files" },
-        vector: { provider: "local" }
+        source: { mode: "content-files" }
       })
     ).toThrow("globs");
+  });
+
+  it("merges turso overrides", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    const merged = mergeConfig(dir, {
+      vector: {
+        turso: { localPath: "custom/vectors.db" }
+      }
+    });
+
+    expect(merged.vector.turso.localPath).toBe("custom/vectors.db");
+    expect(merged.vector.turso.urlEnv).toBe("TURSO_DATABASE_URL"); // default preserved
   });
 });
 
@@ -118,9 +122,10 @@ describe("loadConfig", () => {
     await expect(loadConfig({ cwd: dir })).rejects.toThrow("not found");
   });
 
-  it("falls back to local vector when allowMissing is true", async () => {
+  it("falls back to turso defaults when allowMissing is true", async () => {
     const dir = await makeTempDir();
     const config = await loadConfig({ cwd: dir, allowMissing: true });
-    expect(config.vector.provider).toBe("local");
+    expect(config.vector.turso.urlEnv).toBe("TURSO_DATABASE_URL");
+    expect(config.vector.turso.localPath).toBe(".searchsocket/vectors.db");
   });
 });

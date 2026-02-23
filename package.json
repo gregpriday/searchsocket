@@ -40,9 +40,8 @@
   },
   "packageManager": "pnpm@10.29.2",
   "dependencies": {
+    "@libsql/client": "^0.17.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
-    "@pinecone-database/pinecone": "^7.0.0",
-    "@zilliz/milvus2-sdk-node": "^2.6.9",
     "cheerio": "^1.2.0",
     "chokidar": "^5.0.0",
     "commander": "^14.0.3",

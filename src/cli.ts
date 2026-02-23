@@ -113,7 +113,9 @@ function ensureStateDir(cwd: string): string {
 function ensureGitignore(cwd: string): void {
   const gitignorePath = path.join(cwd, ".gitignore");
   const entries = [
-    ".searchsocket/local-vectors.json",
+    ".searchsocket/vectors.db",
+    ".searchsocket/vectors.db-shm",
+    ".searchsocket/vectors.db-wal",
     ".searchsocket/manifest.json",
     ".searchsocket/registry.json"
   ];
@@ -178,11 +180,7 @@ async function loadResolvedConfigForDev(cwd: string, configPath?: string): Promi
     return loadConfig({ cwd, configPath });
   }
 
-  return mergeConfig(cwd, {
-    vector: {
-      provider: "local"
-    }
-  });
+  return mergeConfig(cwd, {});
 }
 
 function getRootOptions(command: Command): RootCommandOptions {
@@ -335,7 +333,9 @@ program
     process.stdout.write(`project: ${config.project.id}\n`);
     process.stdout.write(`resolved scope: ${scope.scopeName}\n`);
     process.stdout.write(`embedding model: ${config.embeddings.model}\n`);
-    process.stdout.write(`vector provider: ${config.vector.provider}\n`);
+    const tursoUrl = process.env[config.vector.turso.urlEnv];
+    const vectorMode = tursoUrl ? `remote (${tursoUrl})` : `local (${config.vector.turso.localPath})`;
+    process.stdout.write(`vector backend: turso/libsql (${vectorMode})\n`);
     process.stdout.write(`vector health: ${health.ok ? "ok" : `error (${health.details ?? "n/a"})`}\n`);
 
     if (scopeManifest) {
@@ -617,21 +617,12 @@ program
         details: embKey ? undefined : "missing"
       });
 
-      if (config.vector.provider === "milvus") {
-        const milvusUri = process.env[config.vector.milvus.uriEnv];
+      {
+        const tursoUrl = process.env[config.vector.turso.urlEnv];
         checks.push({
-          name: `env ${config.vector.milvus.uriEnv}`,
-          ok: Boolean(milvusUri),
-          details: milvusUri ? undefined : "missing"
-        });
-      }
-
-      if (config.vector.provider === "pinecone") {
-        const pineconeKey = process.env[config.vector.pinecone.apiKeyEnv];
-        checks.push({
-          name: `env ${config.vector.pinecone.apiKeyEnv}`,
-          ok: Boolean(pineconeKey),
-          details: pineconeKey ? undefined : "missing"
+          name: "turso/libsql",
+          ok: true,
+          details: tursoUrl ? `remote: ${tursoUrl}` : `local file: ${config.vector.turso.localPath}`
         });
       }
 
@@ -704,7 +695,7 @@ program
         });
       }
 
-      if (store && config.vector.provider !== "local") {
+      if (store) {
         try {
           const testScope: Scope = {
             projectId: config.project.id,

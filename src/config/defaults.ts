@@ -54,19 +54,10 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       concurrency: 4
     },
     vector: {
-      provider: "milvus",
-      pinecone: {
-        apiKeyEnv: "PINECONE_API_KEY",
-        index: projectId,
-        namespaceMode: "scope"
-      },
-      milvus: {
-        uriEnv: "MILVUS_URI",
-        tokenEnv: "MILVUS_TOKEN",
-        collection: `${projectId}_chunks`
-      },
-      local: {
-        path: ".searchsocket/local-vectors.json"
+      turso: {
+        urlEnv: "TURSO_DATABASE_URL",
+        authTokenEnv: "TURSO_AUTH_TOKEN",
+        localPath: ".searchsocket/vectors.db"
       }
     },
     rerank: {

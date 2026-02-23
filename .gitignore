@@ -25,3 +25,6 @@ coverage/
 
 # TypeScript incremental
 *.tsbuildinfo
+
+# Local scratch work
+temp/
