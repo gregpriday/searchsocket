@@ -127,6 +127,10 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
     ranking: {
       ...defaults.ranking,
       ...parsed.ranking,
+      pageWeights: {
+        ...defaults.ranking.pageWeights,
+        ...parsed.ranking?.pageWeights
+      },
       weights: {
         ...defaults.ranking.weights,
         ...parsed.ranking?.weights

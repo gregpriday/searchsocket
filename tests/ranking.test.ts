@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { rankHits } from "../src/search/ranking";
+import { rankHits, aggregateByPage, findPageWeight } from "../src/search/ranking";
+import type { RankedHit } from "../src/search/ranking";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { VectorHit } from "../src/types";
 
@@ -128,5 +129,176 @@ describe("rankHits", () => {
       expect(Number.isNaN(ranked[0]?.finalScore ?? Number.NaN)).toBe(false);
       expect(Number.isNaN(ranked[1]?.finalScore ?? Number.NaN)).toBe(false);
     }
+  });
+});
+
+function makeRankedHit(url: string, finalScore: number, overrides?: Partial<VectorHit["metadata"]>): RankedHit {
+  return {
+    hit: {
+      id: `${url}-${finalScore}`,
+      score: finalScore,
+      metadata: {
+        projectId: "test",
+        scopeName: "main",
+        url,
+        path: url,
+        title: overrides?.title ?? "Test Page",
+        sectionTitle: overrides?.sectionTitle ?? "",
+        headingPath: overrides?.headingPath ?? [],
+        snippet: overrides?.snippet ?? "snippet",
+        contentHash: "hash",
+        modelId: "text-embedding-3-small",
+        depth: 1,
+        incomingLinks: 0,
+        routeFile: overrides?.routeFile ?? "src/routes/+page.svelte",
+        tags: [],
+        ...overrides
+      }
+    },
+    finalScore
+  };
+}
+
+describe("aggregateByPage", () => {
+  const config = createDefaultConfig("test");
+
+  it("groups multiple chunks from the same URL into one page result", () => {
+    const ranked: RankedHit[] = [
+      makeRankedHit("/home", 0.9, { sectionTitle: "Intro" }),
+      makeRankedHit("/home", 0.7, { sectionTitle: "Features" }),
+      makeRankedHit("/home", 0.6, { sectionTitle: "About" }),
+      makeRankedHit("/about", 0.85, { sectionTitle: "Team" })
+    ];
+
+    const pages = aggregateByPage(ranked, config);
+    expect(pages.length).toBe(2);
+
+    const homeResult = pages.find((p) => p.url === "/home");
+    expect(homeResult).toBeDefined();
+    expect(homeResult!.matchingChunks.length).toBe(3);
+    expect(homeResult!.bestChunk.finalScore).toBe(0.9);
+  });
+
+  it("page with many weak matches outranks page with one strong match", () => {
+    // Single strong chunk on /focused
+    const ranked: RankedHit[] = [
+      makeRankedHit("/focused", 0.92),
+      // Homepage with 8 weaker chunks
+      makeRankedHit("/home", 0.88),
+      makeRankedHit("/home", 0.85),
+      makeRankedHit("/home", 0.83),
+      makeRankedHit("/home", 0.80),
+      makeRankedHit("/home", 0.78),
+      makeRankedHit("/home", 0.75),
+      makeRankedHit("/home", 0.72),
+      makeRankedHit("/home", 0.70)
+    ];
+
+    const pages = aggregateByPage(ranked, config);
+    // /home should rank higher due to aggregation boost from 8 matching chunks
+    expect(pages[0]!.url).toBe("/home");
+    expect(pages[1]!.url).toBe("/focused");
+  });
+
+  it("page weights multiply the score correctly", () => {
+    const weightedConfig = createDefaultConfig("test");
+    weightedConfig.ranking.pageWeights = { "/boosted": 2.0 };
+
+    const ranked: RankedHit[] = [
+      makeRankedHit("/normal", 0.9),
+      makeRankedHit("/boosted", 0.7)
+    ];
+
+    const pages = aggregateByPage(ranked, weightedConfig);
+    // /boosted should win due to 2x page weight
+    expect(pages[0]!.url).toBe("/boosted");
+  });
+
+  it("returns best chunk metadata as the page representative", () => {
+    const ranked: RankedHit[] = [
+      makeRankedHit("/docs", 0.5, { sectionTitle: "Low Section", title: "Docs" }),
+      makeRankedHit("/docs", 0.9, { sectionTitle: "Best Section", title: "Docs" }),
+      makeRankedHit("/docs", 0.7, { sectionTitle: "Mid Section", title: "Docs" })
+    ];
+
+    const pages = aggregateByPage(ranked, config);
+    expect(pages[0]!.bestChunk.hit.metadata.sectionTitle).toBe("Best Section");
+    expect(pages[0]!.bestChunk.finalScore).toBe(0.9);
+  });
+
+  it("single-chunk pages get zero aggregation bonus", () => {
+    const ranked: RankedHit[] = [
+      makeRankedHit("/a", 0.9),
+      makeRankedHit("/b", 0.8)
+    ];
+
+    const pages = aggregateByPage(ranked, config);
+    expect(pages[0]!.url).toBe("/a");
+    expect(pages[1]!.url).toBe("/b");
+    expect(pages[0]!.matchingChunks.length).toBe(1);
+    expect(pages[1]!.matchingChunks.length).toBe(1);
+    // log(1) = 0, so pageScore should equal the chunk score exactly
+    expect(pages[0]!.pageScore).toBe(0.9);
+    expect(pages[1]!.pageScore).toBe(0.8);
+  });
+
+  it("sorts matching chunks within a page by score descending", () => {
+    const ranked: RankedHit[] = [
+      makeRankedHit("/page", 0.5),
+      makeRankedHit("/page", 0.9),
+      makeRankedHit("/page", 0.7)
+    ];
+
+    const pages = aggregateByPage(ranked, config);
+    const chunks = pages[0]!.matchingChunks;
+    expect(chunks[0]!.finalScore).toBe(0.9);
+    expect(chunks[1]!.finalScore).toBe(0.7);
+    expect(chunks[2]!.finalScore).toBe(0.5);
+  });
+
+  it("handles non-finite finalScore inputs without NaN page scores", () => {
+    const ranked: RankedHit[] = [
+      makeRankedHit("/a", Number.NaN),
+      makeRankedHit("/a", 0.5),
+      makeRankedHit("/b", Number.NEGATIVE_INFINITY)
+    ];
+
+    const pages = aggregateByPage(ranked, config);
+    for (const page of pages) {
+      expect(Number.isNaN(page.pageScore)).toBe(false);
+    }
+  });
+});
+
+describe("findPageWeight", () => {
+  it("returns exact match weight", () => {
+    expect(findPageWeight("/docs", { "/docs": 1.5 })).toBe(1.5);
+  });
+
+  it("returns prefix match weight", () => {
+    expect(findPageWeight("/docs/api/auth", { "/docs": 1.5 })).toBe(1.5);
+  });
+
+  it("prefers longest prefix match", () => {
+    const weights = { "/docs": 1.2, "/docs/api": 1.5 };
+    expect(findPageWeight("/docs/api/auth", weights)).toBe(1.5);
+  });
+
+  it("returns 1 when no match found", () => {
+    expect(findPageWeight("/other", { "/docs": 1.5 })).toBe(1);
+  });
+
+  it("returns 1 for empty weights", () => {
+    expect(findPageWeight("/any", {})).toBe(1);
+  });
+
+  it("normalizes trailing slashes for exact match", () => {
+    expect(findPageWeight("/docs", { "/docs/": 1.5 })).toBe(1.5);
+    expect(findPageWeight("/docs/", { "/docs": 1.5 })).toBe(1.5);
+  });
+
+  it("root '/' is exact-only, not a global prefix", () => {
+    expect(findPageWeight("/", { "/": 2.0 })).toBe(2.0);
+    expect(findPageWeight("/about", { "/": 2.0 })).toBe(1);
   });
 });

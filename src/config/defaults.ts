@@ -71,10 +71,12 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
     ranking: {
       enableIncomingLinkBoost: true,
       enableDepthBoost: true,
+      pageWeights: {},
       weights: {
         incomingLinks: 0.05,
         depth: 0.03,
-        rerank: 1.0
+        rerank: 1.0,
+        aggregation: 0.1
       }
     },
     api: {

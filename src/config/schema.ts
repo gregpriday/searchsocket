@@ -100,11 +100,13 @@ export const searchSocketConfigSchema = z.object({
     .object({
       enableIncomingLinkBoost: z.boolean().optional(),
       enableDepthBoost: z.boolean().optional(),
+      pageWeights: z.record(z.string(), z.number().positive()).optional(),
       weights: z
         .object({
           incomingLinks: z.number().optional(),
           depth: z.number().optional(),
-          rerank: z.number().optional()
+          rerank: z.number().optional(),
+          aggregation: z.number().optional()
         })
         .optional()
     })

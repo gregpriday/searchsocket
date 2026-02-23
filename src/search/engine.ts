@@ -8,7 +8,7 @@ import { createReranker } from "../rerank";
 import { hrTimeMs } from "../utils/time";
 import { normalizeUrlPath } from "../utils/path";
 import { createVectorStore } from "../vector/factory";
-import { rankHits } from "./ranking";
+import { rankHits, aggregateByPage } from "./ranking";
 import type { RankedHit } from "./ranking";
 import type {
   EmbeddingsProvider,
@@ -17,6 +17,7 @@ import type {
   Scope,
   SearchRequest,
   SearchResponse,
+  SearchResult,
   VectorStore
 } from "../types";
 
@@ -26,7 +27,8 @@ const requestSchema = z.object({
   scope: z.string().optional(),
   pathPrefix: z.string().optional(),
   tags: z.array(z.string()).optional(),
-  rerank: z.boolean().optional()
+  rerank: z.boolean().optional(),
+  groupBy: z.enum(["page", "chunk"]).optional()
 });
 
 export interface SearchEngineOptions {
@@ -96,7 +98,10 @@ export class SearchEngine {
 
     const topK = input.topK ?? 10;
     const wantsRerank = Boolean(input.rerank);
-    const candidateK = Math.max(50, topK);
+    const groupByPage = (input.groupBy ?? "page") === "page";
+    const candidateK = groupByPage
+      ? Math.max(100, topK * 8)
+      : Math.max(50, topK);
 
     const embedStart = process.hrtime.bigint();
     const queryEmbeddings = await this.embeddings.embedTexts([input.q], this.config.embeddings.model);
@@ -130,17 +135,41 @@ export class SearchEngine {
       usedRerank = true;
     }
 
-    return {
-      q: input.q,
-      scope: resolvedScope.scopeName,
-      results: ordered.slice(0, topK).map(({ hit, finalScore }) => ({
+    let results: SearchResult[];
+
+    if (groupByPage) {
+      const pages = aggregateByPage(ordered, this.config);
+      results = pages.slice(0, topK).map((page) => ({
+        url: page.url,
+        title: page.title,
+        sectionTitle: page.bestChunk.hit.metadata.sectionTitle || undefined,
+        snippet: page.bestChunk.hit.metadata.snippet,
+        score: Number(page.pageScore.toFixed(6)),
+        routeFile: page.routeFile,
+        chunks: page.matchingChunks.length > 1
+          ? page.matchingChunks.slice(0, 5).map((c) => ({
+              sectionTitle: c.hit.metadata.sectionTitle || undefined,
+              snippet: c.hit.metadata.snippet,
+              headingPath: c.hit.metadata.headingPath,
+              score: Number(c.finalScore.toFixed(6))
+            }))
+          : undefined
+      }));
+    } else {
+      results = ordered.slice(0, topK).map(({ hit, finalScore }) => ({
         url: hit.metadata.url,
         title: hit.metadata.title,
-        sectionTitle: hit.metadata.sectionTitle,
+        sectionTitle: hit.metadata.sectionTitle || undefined,
         snippet: hit.metadata.snippet,
         score: Number(finalScore.toFixed(6)),
         routeFile: hit.metadata.routeFile
-      })),
+      }));
+    }
+
+    return {
+      q: input.q,
+      scope: resolvedScope.scopeName,
+      results,
       meta: {
         timingsMs: {
           embed: Math.round(embedMs),
@@ -254,7 +283,7 @@ export class SearchEngine {
           ? entry.finalScore
           : Number.NEGATIVE_INFINITY;
 
-        if (!Number.isFinite(rerankScore)) {
+        if (rerankScore === undefined || !Number.isFinite(rerankScore)) {
           return {
             ...entry,
             finalScore: safeBaseScore
@@ -262,7 +291,7 @@ export class SearchEngine {
         }
 
         const combinedScore =
-          rerankScore * this.config.ranking.weights.rerank + safeBaseScore * 0.001;
+          (rerankScore as number) * this.config.ranking.weights.rerank + safeBaseScore * 0.001;
 
         return {
           ...entry,

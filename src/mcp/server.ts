@@ -32,7 +32,8 @@ function createServer(engine: SearchEngine): McpServer {
         scope: z.string().optional(),
         topK: z.number().int().positive().max(100).optional(),
         pathPrefix: z.string().optional(),
-        tags: z.array(z.string()).optional()
+        tags: z.array(z.string()).optional(),
+        groupBy: z.enum(["page", "chunk"]).optional()
       }
     },
     async (input) => {
@@ -41,7 +42,8 @@ function createServer(engine: SearchEngine): McpServer {
         topK: input.topK,
         scope: input.scope,
         pathPrefix: input.pathPrefix,
-        tags: input.tags
+        tags: input.tags,
+        groupBy: input.groupBy
       });
 
       return {

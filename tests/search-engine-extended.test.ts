@@ -399,7 +399,7 @@ describe("SearchEngine - adversarial cases", () => {
     expect(query).not.toHaveBeenCalled();
   });
 
-  it("overfetches vector candidates to at least 50 for ranking headroom", async () => {
+  it("overfetches vector candidates with higher multiplier in page mode (default)", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
 
@@ -428,11 +428,112 @@ describe("SearchEngine - adversarial cases", () => {
 
     await engine.search({ q: "test", topK: 2 });
 
+    // Default is page mode: Math.max(100, 2 * 8) = 100
+    expect(query).toHaveBeenCalledWith(
+      [1, 0, 0],
+      expect.objectContaining({ topK: 100 }),
+      expect.any(Object)
+    );
+  });
+
+  it("uses chunk-mode overfetch when groupBy is chunk", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+
+    const query = vi.fn(async () => [] as VectorHit[]);
+    const store: VectorStore = {
+      upsert: async () => undefined,
+      query,
+      deleteByIds: async () => undefined,
+      deleteScope: async () => undefined,
+      listScopes: async () => [],
+      recordScope: async () => undefined,
+      health: async () => ({ ok: true }),
+      getContentHashes: async () => new Map(),
+      upsertPages: async () => undefined,
+      getPage: async () => null,
+      deletePages: async () => undefined,
+      getScopeModelId: async () => null
+    };
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      embeddingsProvider: new FakeEmbeddings(),
+      vectorStore: store
+    });
+
+    await engine.search({ q: "test", topK: 2, groupBy: "chunk" });
+
+    // Chunk mode: Math.max(50, 2) = 50
     expect(query).toHaveBeenCalledWith(
       [1, 0, 0],
       expect.objectContaining({ topK: 50 }),
       expect.any(Object)
     );
+  });
+
+  it("default page mode returns deduplicated page results", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/home"), score: 0.9 },
+      { ...makeHit("chunk-2", "/home"), score: 0.7 },
+      { ...makeHit("chunk-3", "/home"), score: 0.6 },
+      { ...makeHit("chunk-4", "/about"), score: 0.85 }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      embeddingsProvider: new FakeEmbeddings(),
+      vectorStore: new FakeStore(hits)
+    });
+
+    const result = await engine.search({ q: "test", topK: 10 });
+
+    // Should have 2 deduplicated page results, not 4 chunks
+    expect(result.results.length).toBe(2);
+    const urls = result.results.map((r) => r.url);
+    expect(urls).toContain("/home");
+    expect(urls).toContain("/about");
+
+    // /home should have sub-chunks since it has 3 matching chunks
+    const homeResult = result.results.find((r) => r.url === "/home");
+    expect(homeResult!.chunks).toBeDefined();
+    expect(homeResult!.chunks!.length).toBe(3);
+
+    // /about should NOT have sub-chunks since it has only 1 chunk
+    const aboutResult = result.results.find((r) => r.url === "/about");
+    expect(aboutResult!.chunks).toBeUndefined();
+  });
+
+  it("groupBy chunk returns raw chunk results without deduplication", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/home"), score: 0.9 },
+      { ...makeHit("chunk-2", "/home"), score: 0.7 },
+      { ...makeHit("chunk-3", "/about"), score: 0.85 }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      embeddingsProvider: new FakeEmbeddings(),
+      vectorStore: new FakeStore(hits)
+    });
+
+    const result = await engine.search({ q: "test", topK: 10, groupBy: "chunk" });
+
+    // Should have all 3 individual chunk results
+    expect(result.results.length).toBe(3);
+    // No chunks sub-array in chunk mode
+    for (const r of result.results) {
+      expect(r.chunks).toBeUndefined();
+    }
   });
 
   it("uses requested topK when it exceeds the candidate floor", async () => {
@@ -464,9 +565,10 @@ describe("SearchEngine - adversarial cases", () => {
 
     await engine.search({ q: "test", topK: 80 });
 
+    // Page mode: Math.max(100, 80 * 8) = 640
     expect(query).toHaveBeenCalledWith(
       [1, 0, 0],
-      expect.objectContaining({ topK: 80 }),
+      expect.objectContaining({ topK: 640 }),
       expect.any(Object)
     );
   });

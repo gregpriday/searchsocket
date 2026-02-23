@@ -157,7 +157,6 @@ export class TursoVectorStore implements VectorStore {
     const dim = this.dimension ?? queryVector.length;
     await this.ensureChunks(dim);
 
-    const overfetch = opts.topK * 3;
     const queryJson = JSON.stringify(queryVector);
     const rs = await this.client.execute({
       sql: `SELECT c.id, c.project_id, c.scope_name, c.url, c.path, c.title,
@@ -166,7 +165,7 @@ export class TursoVectorStore implements VectorStore {
                    vector_distance_cos(c.embedding, vector(?)) AS distance
             FROM vector_top_k('idx', vector(?), ?) AS v
             JOIN chunks AS c ON c.rowid = v.id`,
-      args: [queryJson, queryJson, overfetch]
+      args: [queryJson, queryJson, opts.topK]
     });
 
     let hits: VectorHit[] = [];
@@ -223,7 +222,7 @@ export class TursoVectorStore implements VectorStore {
     }
 
     hits.sort((a, b) => b.score - a.score);
-    return hits.slice(0, opts.topK);
+    return hits;
   }
 
   async deleteByIds(ids: string[], scope: Scope): Promise<void> {

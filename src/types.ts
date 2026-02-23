@@ -76,10 +76,12 @@ export interface SearchSocketConfig {
   ranking?: {
     enableIncomingLinkBoost?: boolean;
     enableDepthBoost?: boolean;
+    pageWeights?: Record<string, number>;
     weights?: {
       incomingLinks?: number;
       depth?: number;
       rerank?: number;
+      aggregation?: number;
     };
   };
   api?: {
@@ -179,10 +181,12 @@ export interface ResolvedSearchSocketConfig {
   ranking: {
     enableIncomingLinkBoost: boolean;
     enableDepthBoost: boolean;
+    pageWeights: Record<string, number>;
     weights: {
       incomingLinks: number;
       depth: number;
       rerank: number;
+      aggregation: number;
     };
   };
   api: {
@@ -370,6 +374,14 @@ export interface SearchRequest {
   pathPrefix?: string;
   tags?: string[];
   rerank?: boolean;
+  groupBy?: "page" | "chunk";
+}
+
+export interface SearchResultChunk {
+  sectionTitle?: string;
+  snippet: string;
+  headingPath: string[];
+  score: number;
 }
 
 export interface SearchResult {
@@ -379,6 +391,7 @@ export interface SearchResult {
   snippet: string;
   score: number;
   routeFile: string;
+  chunks?: SearchResultChunk[];
 }
 
 export interface SearchResponse {
