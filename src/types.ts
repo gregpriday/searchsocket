@@ -48,6 +48,8 @@ export interface SearchSocketConfig {
     minChars?: number;
     headingPathDepth?: number;
     dontSplitInside?: Array<"code" | "table" | "blockquote">;
+    prependTitle?: boolean;
+    pageSummaryChunk?: boolean;
   };
   embeddings?: {
     provider?: EmbeddingProvider;
@@ -156,6 +158,8 @@ export interface ResolvedSearchSocketConfig {
     minChars: number;
     headingPathDepth: number;
     dontSplitInside: Array<"code" | "table" | "blockquote">;
+    prependTitle: boolean;
+    pageSummaryChunk: boolean;
   };
   embeddings: {
     provider: EmbeddingProvider;
@@ -247,6 +251,8 @@ export interface ExtractedPage {
   outgoingLinks: string[];
   noindex: boolean;
   tags: string[];
+  description?: string;
+  keywords?: string[];
 }
 
 export interface MirrorPage {
@@ -261,6 +267,8 @@ export interface MirrorPage {
   depth: number;
   tags: string[];
   markdown: string;
+  description?: string;
+  keywords?: string[];
 }
 
 export interface Chunk {

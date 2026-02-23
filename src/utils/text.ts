@@ -29,6 +29,40 @@ export function toSnippet(markdown: string, maxLen = 220): string {
   return `${plain.slice(0, Math.max(0, maxLen - 1)).trim()}…`;
 }
 
+export function extractFirstParagraph(markdown: string): string {
+  const lines = markdown.split("\n");
+  let inFence = false;
+  const collected: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (/^(```|~~~)/.test(trimmed)) {
+      inFence = !inFence;
+      if (collected.length > 0) break;
+      continue;
+    }
+
+    if (inFence) continue;
+
+    // Skip headings
+    if (/^#{1,6}\s/.test(trimmed)) {
+      if (collected.length > 0) break;
+      continue;
+    }
+
+    // Empty line ends a paragraph
+    if (!trimmed) {
+      if (collected.length > 0) break;
+      continue;
+    }
+
+    collected.push(trimmed);
+  }
+
+  return collected.join(" ");
+}
+
 export function safeJsonParse<T>(value: string, fallback: T): T {
   try {
     return JSON.parse(value) as T;

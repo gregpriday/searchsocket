@@ -64,8 +64,8 @@ describe("IndexPipeline source URL deduplication", () => {
 
     const stats = await pipeline.run({ changedOnly: true, dryRun: true });
     expect(stats.pagesProcessed).toBe(1);
-    expect(stats.chunksTotal).toBe(1);
-    expect(stats.chunksChanged).toBe(1);
-    expect(stats.estimatedTokens).toBe(100);
+    expect(stats.chunksTotal).toBe(2); // 1 summary + 1 regular
+    expect(stats.chunksChanged).toBe(2);
+    expect(stats.estimatedTokens).toBe(200);
   });
 });

@@ -5,7 +5,7 @@ import { ensureStateDirs } from "../core/state";
 import { createEmbeddingsProvider } from "../embeddings";
 import { SearchSocketError } from "../errors";
 import { createVectorStore } from "../vector";
-import { chunkMirrorPage } from "./chunker";
+import { buildEmbeddingText, chunkMirrorPage } from "./chunker";
 import { extractFromHtml, extractFromMarkdown } from "./extractor";
 import { cleanMirrorForScope, writeMirrorPage } from "./mirror";
 import { buildRoutePatterns, mapUrlToRoute } from "./route-mapper";
@@ -234,7 +234,9 @@ export class IndexPipeline {
         outgoingLinks: page.outgoingLinks.length,
         depth: getUrlDepth(page.url),
         tags: page.tags,
-        markdown: page.markdown
+        markdown: page.markdown,
+        description: page.description,
+        keywords: page.keywords
       };
 
       mirrorPages.push(mirror);
@@ -312,7 +314,7 @@ export class IndexPipeline {
 
     const chunkTokenEstimates = new Map<string, number>();
     for (const chunk of changedChunks) {
-      chunkTokenEstimates.set(chunk.chunkKey, this.embeddings.estimateTokens(chunk.chunkText));
+      chunkTokenEstimates.set(chunk.chunkKey, this.embeddings.estimateTokens(buildEmbeddingText(chunk, this.config.chunking.prependTitle)));
     }
 
     const estimatedTokens = changedChunks.reduce(
@@ -331,7 +333,7 @@ export class IndexPipeline {
 
     if (!options.dryRun && changedChunks.length > 0) {
       const embeddings = await this.embeddings.embedTexts(
-        changedChunks.map((chunk) => chunk.chunkText),
+        changedChunks.map((chunk) => buildEmbeddingText(chunk, this.config.chunking.prependTitle)),
         this.config.embeddings.model
       );
 

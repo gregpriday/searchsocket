@@ -4,7 +4,8 @@ import {
   normalizeMarkdown,
   sanitizeScopeName,
   toSnippet,
-  safeJsonParse
+  safeJsonParse,
+  extractFirstParagraph
 } from "../src/utils/text";
 
 describe("normalizeText", () => {
@@ -66,6 +67,37 @@ describe("toSnippet", () => {
     const long = "word ".repeat(100);
     const snippet = toSnippet(long, 50);
     expect(snippet.length).toBeLessThanOrEqual(50);
+  });
+});
+
+describe("extractFirstParagraph", () => {
+  it("extracts paragraph after heading", () => {
+    const md = "# Title\n\nThis is the first paragraph.\n\nSecond paragraph.";
+    expect(extractFirstParagraph(md)).toBe("This is the first paragraph.");
+  });
+
+  it("skips code fences", () => {
+    const md = "```js\nconst x = 1;\n```\n\nActual paragraph here.";
+    expect(extractFirstParagraph(md)).toBe("Actual paragraph here.");
+  });
+
+  it("handles multi-line paragraphs", () => {
+    const md = "# Title\n\nLine one\nline two\nline three.\n\nNext paragraph.";
+    expect(extractFirstParagraph(md)).toBe("Line one line two line three.");
+  });
+
+  it("returns empty string for all-headings input", () => {
+    const md = "# H1\n## H2\n### H3";
+    expect(extractFirstParagraph(md)).toBe("");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(extractFirstParagraph("")).toBe("");
+  });
+
+  it("extracts paragraph when no heading precedes it", () => {
+    const md = "Just a plain paragraph.\n\nAnother one.";
+    expect(extractFirstParagraph(md)).toBe("Just a plain paragraph.");
   });
 });
 

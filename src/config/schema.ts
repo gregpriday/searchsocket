@@ -59,7 +59,9 @@ export const searchSocketConfigSchema = z.object({
       overlapChars: z.number().int().nonnegative().optional(),
       minChars: z.number().int().positive().optional(),
       headingPathDepth: z.number().int().positive().optional(),
-      dontSplitInside: z.array(z.enum(["code", "table", "blockquote"])).optional()
+      dontSplitInside: z.array(z.enum(["code", "table", "blockquote"])).optional(),
+      prependTitle: z.boolean().optional(),
+      pageSummaryChunk: z.boolean().optional()
     })
     .optional(),
   embeddings: z

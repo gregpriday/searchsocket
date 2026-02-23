@@ -37,9 +37,11 @@ describe("chunkMirrorPage - extended", () => {
   it("splits by headings", () => {
     const page = makePage("# Section A\n\nContent A.\n\n## Section B\n\nContent B.\n");
     const chunks = chunkMirrorPage(page, config, scope);
-    expect(chunks.length).toBe(2);
-    expect(chunks[0]?.sectionTitle).toBe("Section A");
-    expect(chunks[1]?.sectionTitle).toBe("Section B");
+    // 1 summary chunk + 2 regular chunks
+    expect(chunks.length).toBe(3);
+    expect(chunks[0]?.sectionTitle).toBeUndefined(); // summary chunk
+    expect(chunks[1]?.sectionTitle).toBe("Section A");
+    expect(chunks[2]?.sectionTitle).toBe("Section B");
   });
 
   it("tracks heading path correctly", () => {
@@ -130,6 +132,7 @@ describe("chunkMirrorPage - extended", () => {
     constrainedConfig.chunking.maxChars = 220;
     constrainedConfig.chunking.minChars = 40;
     constrainedConfig.chunking.overlapChars = 30;
+    constrainedConfig.chunking.pageSummaryChunk = false;
 
     const singleLongParagraph = `# Oversized\n\n${"word ".repeat(250).trim()}\n`;
     const page = makePage(singleLongParagraph);
@@ -146,6 +149,7 @@ describe("chunkMirrorPage - extended", () => {
     fuzzConfig.chunking.maxChars = 180;
     fuzzConfig.chunking.minChars = 30;
     fuzzConfig.chunking.overlapChars = 24;
+    fuzzConfig.chunking.pageSummaryChunk = false;
 
     let seed = 1337;
     const rand = (): number => {
@@ -206,6 +210,7 @@ describe("chunkMirrorPage - extended", () => {
     constrainedConfig.chunking.maxChars = 140;
     constrainedConfig.chunking.overlapChars = 500;
     constrainedConfig.chunking.minChars = 20;
+    constrainedConfig.chunking.pageSummaryChunk = false;
 
     const page = makePage(`# Overlap Stress\n\n${"word ".repeat(600).trim()}\n`);
     const chunks = chunkMirrorPage(page, constrainedConfig, scope);

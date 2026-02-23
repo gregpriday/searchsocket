@@ -58,8 +58,8 @@ describe("IndexPipeline cost estimation", () => {
     });
 
     const stats = await pipeline.run({ changedOnly: true, dryRun: true });
-    expect(stats.chunksChanged).toBe(1);
-    expect(stats.estimatedTokens).toBe(200);
-    expect(stats.estimatedCostUSD).toBe(0.1);
+    expect(stats.chunksChanged).toBe(2); // 1 summary + 1 regular
+    expect(stats.estimatedTokens).toBe(400);
+    expect(stats.estimatedCostUSD).toBe(0.2);
   });
 });

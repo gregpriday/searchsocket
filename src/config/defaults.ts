@@ -44,7 +44,9 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       overlapChars: 200,
       minChars: 250,
       headingPathDepth: 3,
-      dontSplitInside: ["code", "table", "blockquote"]
+      dontSplitInside: ["code", "table", "blockquote"],
+      prependTitle: true,
+      pageSummaryChunk: true
     },
     embeddings: {
       provider: "openai",

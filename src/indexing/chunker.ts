@@ -1,6 +1,7 @@
 import type { Chunk, MirrorPage, ResolvedSearchSocketConfig, Scope } from "../types";
 import { sha1, sha256 } from "../utils/hash";
-import { normalizeText, toSnippet } from "../utils/text";
+import { humanizeUrlPath } from "../utils/path";
+import { extractFirstParagraph, normalizeText, toSnippet } from "../utils/text";
 
 interface Section {
   sectionTitle?: string;
@@ -275,6 +276,30 @@ function splitSection(section: Section, config: ResolvedSearchSocketConfig["chun
   }));
 }
 
+export function buildSummaryChunkText(page: MirrorPage): string {
+  const parts: string[] = [page.title];
+
+  const humanized = humanizeUrlPath(page.url);
+  if (humanized) parts.push(humanized);
+
+  const body = page.description ?? extractFirstParagraph(page.markdown);
+  if (body) parts.push(body);
+
+  if (page.keywords && page.keywords.length > 0) {
+    parts.push(page.keywords.join(", "));
+  }
+
+  return parts.join("\n\n");
+}
+
+export function buildEmbeddingText(chunk: Chunk, prependTitle: boolean): string {
+  if (!prependTitle) return chunk.chunkText;
+  const prefix = chunk.sectionTitle
+    ? `${chunk.title} — ${chunk.sectionTitle}`
+    : chunk.title;
+  return `${prefix}\n\n${chunk.chunkText}`;
+}
+
 export function chunkMirrorPage(
   page: MirrorPage,
   config: ResolvedSearchSocketConfig,
@@ -283,16 +308,46 @@ export function chunkMirrorPage(
   const sections = parseHeadingSections(page.markdown, config.chunking.headingPathDepth);
   const rawChunks = sections.flatMap((section) => splitSection(section, config.chunking));
 
-  return rawChunks.map((entry, index) => {
+  const chunks: Chunk[] = [];
+
+  if (config.chunking.pageSummaryChunk) {
+    const summaryText = buildSummaryChunkText(page);
+    const summaryChunkKey = sha1(`${scope.scopeName}|${page.url}|__summary__`);
+
+    const summaryChunk: Chunk = {
+      chunkKey: summaryChunkKey,
+      ordinal: 0,
+      url: page.url,
+      path: page.url,
+      title: page.title,
+      sectionTitle: undefined,
+      headingPath: [],
+      chunkText: summaryText,
+      snippet: toSnippet(summaryText),
+      depth: page.depth,
+      incomingLinks: page.incomingLinks,
+      routeFile: page.routeFile,
+      tags: page.tags,
+      contentHash: ""
+    };
+
+    const embeddingText = buildEmbeddingText(summaryChunk, config.chunking.prependTitle);
+    summaryChunk.contentHash = sha256(normalizeText(embeddingText));
+    chunks.push(summaryChunk);
+  }
+
+  const ordinalOffset = config.chunking.pageSummaryChunk ? 1 : 0;
+
+  for (let index = 0; index < rawChunks.length; index++) {
+    const entry = rawChunks[index]!;
     const sectionTitleNormalized = normalizeText(entry.sectionTitle ?? "").toLowerCase();
-    const chunkTextNormalized = normalizeText(entry.chunkText);
     const chunkKey = sha1(
       `${scope.scopeName}|${page.url}|${index}|${sectionTitleNormalized}`
     );
 
-    return {
+    const chunk: Chunk = {
       chunkKey,
-      ordinal: index,
+      ordinal: index + ordinalOffset,
       url: page.url,
       path: page.url,
       title: page.title,
@@ -304,7 +359,13 @@ export function chunkMirrorPage(
       incomingLinks: page.incomingLinks,
       routeFile: page.routeFile,
       tags: page.tags,
-      contentHash: sha256(chunkTextNormalized)
-    } satisfies Chunk;
-  });
+      contentHash: ""
+    };
+
+    const embeddingText = buildEmbeddingText(chunk, config.chunking.prependTitle);
+    chunk.contentHash = sha256(normalizeText(embeddingText));
+    chunks.push(chunk);
+  }
+
+  return chunks;
 }

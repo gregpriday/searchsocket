@@ -50,6 +50,16 @@ export function extractFromHtml(
     return null;
   }
 
+  const description =
+    $("meta[name='description']").attr("content")?.trim() ||
+    $("meta[property='og:description']").attr("content")?.trim() ||
+    undefined;
+
+  const keywordsRaw = $("meta[name='keywords']").attr("content")?.trim();
+  const keywords = keywordsRaw
+    ? keywordsRaw.split(",").map((k) => k.trim()).filter(Boolean)
+    : undefined;
+
   const root = $(config.extract.mainSelector).first().length
     ? $(config.extract.mainSelector).first().clone()
     : $("body").first().clone();
@@ -120,7 +130,9 @@ export function extractFromHtml(
     markdown,
     outgoingLinks: [...new Set(outgoingLinks)],
     noindex: false,
-    tags
+    tags,
+    description,
+    keywords
   };
 }
 
@@ -147,6 +159,15 @@ export function extractFromMarkdown(url: string, markdown: string, title?: strin
 
   const resolvedTitle = title ?? (typeof frontmatter.title === "string" ? frontmatter.title : undefined) ?? normalizeUrlPath(url);
 
+  const fmDescription = typeof frontmatter.description === "string" ? frontmatter.description.trim() || undefined : undefined;
+  let fmKeywords: string[] | undefined;
+  if (Array.isArray(frontmatter.keywords)) {
+    fmKeywords = frontmatter.keywords.filter((k): k is string => typeof k === "string" && k.trim().length > 0).map((k) => k.trim());
+  } else if (typeof frontmatter.keywords === "string" && frontmatter.keywords.trim()) {
+    fmKeywords = frontmatter.keywords.split(",").map((k) => k.trim()).filter(Boolean);
+  }
+  if (fmKeywords && fmKeywords.length === 0) fmKeywords = undefined;
+
   return {
     url: normalizeUrlPath(url),
     title: resolvedTitle,
@@ -156,6 +177,8 @@ export function extractFromMarkdown(url: string, markdown: string, title?: strin
     tags: normalizeUrlPath(url)
       .split("/")
       .filter(Boolean)
-      .slice(0, 1)
+      .slice(0, 1),
+    description: fmDescription,
+    keywords: fmKeywords
   };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultConfig } from "../src/config/defaults";
-import { extractFromHtml } from "../src/indexing/extractor";
+import { extractFromHtml, extractFromMarkdown } from "../src/indexing/extractor";
 
 const config = createDefaultConfig("searchsocket-test");
 
@@ -47,5 +47,124 @@ describe("extractFromHtml", () => {
 
     const extracted = extractFromHtml("/hidden", html, config);
     expect(extracted).toBeNull();
+  });
+
+  it("extracts meta description", () => {
+    const html = `
+      <html>
+        <head>
+          <title>Page</title>
+          <meta name="description" content="A great page about things." />
+        </head>
+        <body><main><p>Content</p></main></body>
+      </html>
+    `;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.description).toBe("A great page about things.");
+  });
+
+  it("falls back to og:description", () => {
+    const html = `
+      <html>
+        <head>
+          <title>Page</title>
+          <meta property="og:description" content="OG description here." />
+        </head>
+        <body><main><p>Content</p></main></body>
+      </html>
+    `;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.description).toBe("OG description here.");
+  });
+
+  it("prefers meta description over og:description", () => {
+    const html = `
+      <html>
+        <head>
+          <title>Page</title>
+          <meta name="description" content="Meta desc." />
+          <meta property="og:description" content="OG desc." />
+        </head>
+        <body><main><p>Content</p></main></body>
+      </html>
+    `;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.description).toBe("Meta desc.");
+  });
+
+  it("extracts and splits meta keywords", () => {
+    const html = `
+      <html>
+        <head>
+          <title>Page</title>
+          <meta name="keywords" content="security, authentication, OWASP" />
+        </head>
+        <body><main><p>Content</p></main></body>
+      </html>
+    `;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.keywords).toEqual(["security", "authentication", "OWASP"]);
+  });
+
+  it("returns undefined for missing description and keywords", () => {
+    const html = `
+      <html>
+        <head><title>Page</title></head>
+        <body><main><p>Content</p></main></body>
+      </html>
+    `;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.description).toBeUndefined();
+    expect(extracted?.keywords).toBeUndefined();
+  });
+});
+
+describe("extractFromMarkdown description/keywords", () => {
+  it("extracts description from frontmatter", () => {
+    const md = `---
+title: Test
+description: A markdown page description.
+---
+
+# Hello
+
+Content here.`;
+    const extracted = extractFromMarkdown("/test", md);
+    expect(extracted?.description).toBe("A markdown page description.");
+  });
+
+  it("extracts keywords array from frontmatter", () => {
+    const md = `---
+title: Test
+keywords:
+  - auth
+  - security
+---
+
+Content.`;
+    const extracted = extractFromMarkdown("/test", md);
+    expect(extracted?.keywords).toEqual(["auth", "security"]);
+  });
+
+  it("extracts keywords comma-separated string from frontmatter", () => {
+    const md = `---
+title: Test
+keywords: auth, security, OWASP
+---
+
+Content.`;
+    const extracted = extractFromMarkdown("/test", md);
+    expect(extracted?.keywords).toEqual(["auth", "security", "OWASP"]);
+  });
+
+  it("returns undefined for missing frontmatter fields", () => {
+    const md = `---
+title: Test
+---
+
+Content.`;
+    const extracted = extractFromMarkdown("/test", md);
+    expect(extracted?.description).toBeUndefined();
+    expect(extracted?.keywords).toBeUndefined();
   });
 });

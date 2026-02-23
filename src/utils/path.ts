@@ -53,6 +53,16 @@ export function getUrlDepth(urlPath: string): number {
     .filter(Boolean).length;
 }
 
+export function humanizeUrlPath(urlPath: string): string {
+  const normalized = normalizeUrlPath(urlPath);
+  if (normalized === "/") return "";
+  return normalized
+    .slice(1)
+    .split("/")
+    .map((segment) => segment.replace(/[-_]/g, " "))
+    .join(" / ");
+}
+
 export function ensureLeadingSlash(value: string): string {
   return value.startsWith("/") ? value : `/${value}`;
 }

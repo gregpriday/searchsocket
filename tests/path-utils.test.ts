@@ -4,6 +4,7 @@ import {
   urlPathToMirrorRelative,
   staticHtmlFileToUrl,
   getUrlDepth,
+  humanizeUrlPath,
   ensureLeadingSlash,
   joinUrl
 } from "../src/utils/path";
@@ -71,6 +72,28 @@ describe("getUrlDepth", () => {
     expect(getUrlDepth("/docs")).toBe(1);
     expect(getUrlDepth("/docs/getting-started")).toBe(2);
     expect(getUrlDepth("/a/b/c/d")).toBe(4);
+  });
+});
+
+describe("humanizeUrlPath", () => {
+  it("returns empty string for root path", () => {
+    expect(humanizeUrlPath("/")).toBe("");
+  });
+
+  it("replaces hyphens with spaces", () => {
+    expect(humanizeUrlPath("/getting-started")).toBe("getting started");
+  });
+
+  it("replaces underscores with spaces", () => {
+    expect(humanizeUrlPath("/my_page")).toBe("my page");
+  });
+
+  it("joins segments with ' / '", () => {
+    expect(humanizeUrlPath("/docs/getting-started")).toBe("docs / getting started");
+  });
+
+  it("handles deeply nested paths", () => {
+    expect(humanizeUrlPath("/a/b-c/d_e")).toBe("a / b c / d e");
   });
 });
 
