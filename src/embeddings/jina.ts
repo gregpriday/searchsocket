@@ -1,11 +1,11 @@
-import OpenAI from "openai";
 import pLimit from "p-limit";
 import type { EmbeddingsProvider } from "../types";
 
-export interface OpenAIEmbeddingsProviderOptions {
+export interface JinaEmbeddingsProviderOptions {
   apiKey: string;
   batchSize: number;
   concurrency: number;
+  task?: string;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -14,12 +14,13 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-export class OpenAIEmbeddingsProvider implements EmbeddingsProvider {
-  private readonly client: OpenAI;
+export class JinaEmbeddingsProvider implements EmbeddingsProvider {
+  private readonly apiKey: string;
   private readonly batchSize: number;
   private readonly concurrency: number;
+  private readonly defaultTask: string;
 
-  constructor(options: OpenAIEmbeddingsProviderOptions) {
+  constructor(options: JinaEmbeddingsProviderOptions) {
     if (!Number.isInteger(options.batchSize) || options.batchSize <= 0) {
       throw new Error(`Invalid batchSize: ${options.batchSize}. batchSize must be a positive integer.`);
     }
@@ -28,11 +29,10 @@ export class OpenAIEmbeddingsProvider implements EmbeddingsProvider {
       throw new Error(`Invalid concurrency: ${options.concurrency}. concurrency must be a positive integer.`);
     }
 
-    this.client = new OpenAI({
-      apiKey: options.apiKey
-    });
+    this.apiKey = options.apiKey;
     this.batchSize = options.batchSize;
     this.concurrency = options.concurrency;
+    this.defaultTask = options.task ?? "retrieval.passage";
   }
 
   estimateTokens(text: string): number {
@@ -51,7 +51,7 @@ export class OpenAIEmbeddingsProvider implements EmbeddingsProvider {
     return Math.max(1, Math.max(charEstimate, lexicalEstimate));
   }
 
-  async embedTexts(texts: string[], modelId: string): Promise<number[][]> {
+  async embedTexts(texts: string[], modelId: string, task?: string): Promise<number[][]> {
     if (texts.length === 0) {
       return [];
     }
@@ -70,7 +70,7 @@ export class OpenAIEmbeddingsProvider implements EmbeddingsProvider {
     await Promise.all(
       batches.map((batch, position) =>
         limit(async () => {
-          outputs[position] = await this.embedWithRetry(batch.values, modelId);
+          outputs[position] = await this.embedWithRetry(batch.values, modelId, task ?? this.defaultTask);
         })
       )
     );
@@ -78,31 +78,54 @@ export class OpenAIEmbeddingsProvider implements EmbeddingsProvider {
     return outputs.flat();
   }
 
-  private async embedWithRetry(texts: string[], modelId: string): Promise<number[][]> {
+  private async embedWithRetry(texts: string[], modelId: string, task: string): Promise<number[][]> {
     const maxAttempts = 5;
     let attempt = 0;
 
     while (attempt < maxAttempts) {
       attempt += 1;
+
+      let response: Response;
       try {
-        const response = await this.client.embeddings.create({
-          model: modelId,
-          input: texts,
-          encoding_format: "float"
+        response = await fetch("https://api.jina.ai/v1/embeddings", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${this.apiKey}`
+          },
+          body: JSON.stringify({
+            model: modelId,
+            input: texts,
+            task
+          })
         });
-
-        return response.data.map((entry) => entry.embedding);
       } catch (error) {
-        const status = (error as { status?: number }).status;
-        const retryable = status === 429 || (typeof status === "number" && status >= 500);
-
-        if (!retryable || attempt >= maxAttempts) {
+        if (attempt >= maxAttempts) {
           throw error;
         }
-
-        const delay = Math.min(2 ** attempt * 300, 5_000);
-        await sleep(delay);
+        await sleep(Math.min(2 ** attempt * 300, 5_000));
+        continue;
       }
+
+      if (!response.ok) {
+        const retryable = response.status === 429 || response.status >= 500;
+        if (!retryable || attempt >= maxAttempts) {
+          const errorBody = await response.text();
+          throw new Error(`Jina embeddings failed (${response.status}): ${errorBody}`);
+        }
+        await sleep(Math.min(2 ** attempt * 300, 5_000));
+        continue;
+      }
+
+      const payload = (await response.json()) as {
+        data?: Array<{ embedding: number[] }>;
+      };
+
+      if (!payload.data || !Array.isArray(payload.data)) {
+        throw new Error("Invalid Jina embeddings response format");
+      }
+
+      return payload.data.map((entry) => entry.embedding);
     }
 
     throw new Error("Unreachable retry state");

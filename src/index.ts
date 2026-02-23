@@ -16,7 +16,8 @@ export type {
   VectorStore
 } from "./types";
 
-export { loadConfig, mergeConfig } from "./config/load";
+export { loadConfig, mergeConfig, mergeConfigServerless } from "./config/load";
+export { isServerless } from "./core/serverless";
 export { resolveScope } from "./core/scope";
 export { createEmbeddingsProvider } from "./embeddings";
 export { createReranker, JinaReranker } from "./rerank";

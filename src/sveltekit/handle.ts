@@ -1,7 +1,8 @@
-import { loadConfig } from "../config/load";
+import { loadConfig, mergeConfig } from "../config/load";
+import { isServerless } from "../core/serverless";
 import { SearchSocketError, toErrorPayload } from "../errors";
 import { SearchEngine } from "../search/engine";
-import type { ResolvedSearchSocketConfig, SearchRequest } from "../types";
+import type { ResolvedSearchSocketConfig, SearchRequest, SearchSocketConfig } from "../types";
 
 interface RateBucket {
   count: number;
@@ -48,6 +49,12 @@ export interface SearchSocketHandleOptions {
   maxBodyBytes?: number;
   /** Pass a pre-resolved config object to avoid filesystem loading at runtime. */
   config?: ResolvedSearchSocketConfig;
+  /**
+   * Pass a partial config object (same shape as `searchsocket.config.ts`).
+   * Resolved via `mergeConfig()` at startup — avoids jiti/filesystem config loading,
+   * making this the recommended option for serverless deployments (Vercel, Netlify, etc.).
+   */
+  rawConfig?: SearchSocketConfig;
 }
 
 export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
@@ -58,17 +65,24 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
   const getConfig = async (): Promise<ResolvedSearchSocketConfig> => {
     if (!configPromise) {
-      const configP = options.config
-        ? Promise.resolve(options.config)
-        : loadConfig({
-            cwd: options.cwd,
-            configPath: options.configPath
-          });
+      let configP: Promise<ResolvedSearchSocketConfig>;
+
+      if (options.config) {
+        configP = Promise.resolve(options.config);
+      } else if (options.rawConfig) {
+        const cwd = options.cwd ?? process.cwd();
+        configP = Promise.resolve(mergeConfig(cwd, options.rawConfig));
+      } else {
+        configP = loadConfig({
+          cwd: options.cwd,
+          configPath: options.configPath
+        });
+      }
 
       configPromise = configP.then((config) => {
         apiPath = apiPath ?? config.api.path;
 
-        if (config.api.rateLimit) {
+        if (config.api.rateLimit && !isServerless()) {
           rateLimiter = new InMemoryRateLimiter(config.api.rateLimit.windowMs, config.api.rateLimit.max);
         }
 
@@ -81,10 +95,9 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
   const getEngine = async (): Promise<SearchEngine> => {
     if (!enginePromise) {
-      const config = options.config;
+      const config = await getConfig();
       enginePromise = SearchEngine.create({
         cwd: options.cwd,
-        configPath: options.configPath,
         config
       });
     }

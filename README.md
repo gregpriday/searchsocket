@@ -6,9 +6,9 @@ Semantic site search and MCP retrieval for SvelteKit content projects.
 
 ## Features
 
-- **Embeddings**: OpenAI `text-embedding-3-small` (configurable)
+- **Embeddings**: Jina AI `jina-embeddings-v3` with task-specific LoRA adapters (configurable)
 - **Vector Backend**: Turso/libSQL with vector search (local file DB for development, remote for production)
-- **Rerank**: Optional Jina reranker for improved relevance
+- **Rerank**: Optional Jina reranker — same API key, one boolean to enable
 - **Page Aggregation**: Group results by page with score-weighted chunk decay
 - **Meta Extraction**: Automatically extracts `<meta name="description">` and `<meta name="keywords">` for improved relevance
 - **SvelteKit Integrations**:
@@ -48,7 +48,7 @@ Minimal config (`searchsocket.config.ts`):
 
 ```ts
 export default {
-  embeddings: { apiKeyEnv: "OPENAI_API_KEY" }
+  embeddings: { apiKeyEnv: "JINA_API_KEY" }
 };
 ```
 
@@ -74,12 +74,12 @@ The CLI automatically loads `.env` from the working directory on startup, so you
 
 Development (`.env`):
 ```bash
-OPENAI_API_KEY=sk-...
+JINA_API_KEY=jina_...
 ```
 
 Production (add these for remote Turso):
 ```bash
-OPENAI_API_KEY=sk-...
+JINA_API_KEY=jina_...
 TURSO_DATABASE_URL=libsql://your-db.turso.io
 TURSO_AUTH_TOKEN=eyJ...
 ```
@@ -101,7 +101,7 @@ The indexing pipeline:
 - Chunks text with semantic heading boundaries
 - Prepends page title to each chunk for embedding context
 - Generates a synthetic summary chunk per page for identity matching
-- Generates embeddings via OpenAI
+- Generates embeddings via Jina AI (with task-specific LoRA adapters for indexing vs search)
 - Stores vectors in Turso/libSQL with cosine similarity index
 
 ### 6. Query
@@ -163,7 +163,7 @@ pnpm searchsocket search --q "getting started" --top-k 5 --path-prefix /docs
   "meta": {
     "timingsMs": { "embed": 120, "vector": 15, "rerank": 0, "total": 135 },
     "usedRerank": false,
-    "modelId": "text-embedding-3-small"
+    "modelId": "jina-embeddings-v3"
   }
 }
 ```
@@ -327,28 +327,76 @@ For production, switch to **Turso's hosted service**:
 
 ### Why Turso?
 
-- **Single backend** — no more choosing between Pinecone, Milvus, or local JSON
+- **Single backend** — one unified Turso/libSQL store for vectors, metadata, and state
 - **Local-first development** — zero external dependencies for local dev
 - **Production-ready** — same codebase scales to remote hosted DB
 - **Cost-effective** — Turso free tier includes 9GB storage, 500M row reads/month
 - **Vector search native** — `F32_BLOB` vectors, cosine similarity index, `vector_top_k` ANN queries
 
-## Embeddings: OpenAI
+## Serverless Deployment (Vercel, Netlify, etc.)
 
-SearchSocket uses **OpenAI's embedding models** to convert text into semantic vectors.
+SearchSocket works on serverless platforms with a few adjustments:
+
+### Requirements
+
+1. **Remote Turso database** — local SQLite is not available in serverless (no persistent filesystem). Set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as platform environment variables.
+
+2. **Inline config via `rawConfig`** — the default config loader uses `jiti` to import `searchsocket.config.ts` from disk, which isn't bundled in serverless. Use `rawConfig` to pass config inline:
+
+```ts
+// hooks.server.ts (Vercel / Netlify)
+import { searchsocketHandle } from "searchsocket/sveltekit";
+
+export const handle = searchsocketHandle({
+  rawConfig: {
+    project: { id: "my-docs-site" },
+    source: { mode: "static-output" },
+    embeddings: { apiKeyEnv: "JINA_API_KEY" },
+  }
+});
+```
+
+3. **Environment variables** — set these on your platform dashboard:
+   - `JINA_API_KEY`
+   - `TURSO_DATABASE_URL`
+   - `TURSO_AUTH_TOKEN`
+
+### Rate Limiting
+
+The built-in `InMemoryRateLimiter` auto-disables on serverless platforms (it resets on every cold start). Use your platform's WAF or edge rate-limiting instead.
+
+### What Only Applies to Indexing
+
+The following features are only used during `searchsocket index` (CLI), not the search handler:
+- `ensureStateDirs` — creates `.searchsocket/` state directories
+- Markdown mirror — writes `.searchsocket/mirror/` files
+- Local SQLite fallback — only needed when `TURSO_DATABASE_URL` is not set
+
+### Adapter Guidance
+
+| Platform | Adapter | Notes |
+|----------|---------|-------|
+| Vercel | `adapter-auto` (default) | Serverless — use `rawConfig` + remote Turso |
+| Netlify | `adapter-netlify` | Serverless — same as Vercel |
+| VPS / Docker | `adapter-node` | Long-lived process — no limitations, local SQLite works |
+
+## Embeddings: Jina AI
+
+SearchSocket uses **Jina AI's embedding models** to convert text into semantic vectors. A single `JINA_API_KEY` powers both embeddings and optional reranking.
 
 ### Default Model
 
-- **Model**: `text-embedding-3-small`
-- **Dimensions**: 1536
-- **Cost**: ~$0.00002 per 1K tokens (~4K chars)
+- **Model**: `jina-embeddings-v3`
+- **Dimensions**: 1024 (default)
+- **Cost**: ~$0.00002 per 1K tokens (generous 10M token free tier)
+- **Task adapters**: Uses `retrieval.passage` for indexing, `retrieval.query` for search queries (LoRA task-specific adapters for better retrieval quality)
 
 ### How It Works
 
 1. **Chunking**: Text is split into semantic chunks (default 2200 chars, 200 overlap)
 2. **Title Prepend**: Page title is prepended to each chunk for better context (`chunking.prependTitle`, default: true)
 3. **Summary Chunk**: A synthetic identity chunk is generated per page with title, URL, and first paragraph (`chunking.pageSummaryChunk`, default: true)
-4. **Embedding**: Each chunk is sent to OpenAI's embedding API
+4. **Embedding**: Each chunk is sent to Jina's embedding API with the `retrieval.passage` task adapter
 5. **Batching**: Requests batched (64 texts per request) for efficiency
 6. **Storage**: Vectors stored in Turso with metadata (URL, title, tags, depth, etc.)
 
@@ -369,17 +417,14 @@ estimated tokens: 32,400
 estimated cost (USD): $0.000648
 ```
 
-### Custom Model
+### Reranking
 
-Override in config:
+Since embeddings and reranking share the same Jina API key, enabling reranking is one boolean:
+
 ```ts
 export default {
-  embeddings: {
-    provider: "openai",
-    model: "text-embedding-3-large",  // 3072 dims, higher quality
-    apiKeyEnv: "OPENAI_API_KEY",
-    pricePer1kTokens: 0.00013
-  }
+  embeddings: { apiKeyEnv: "JINA_API_KEY" },
+  rerank: { enabled: true }
 };
 ```
 
@@ -534,7 +579,7 @@ pnpm searchsocket status
 # Output:
 # project: my-site
 # resolved scope: main
-# embedding model: text-embedding-3-small
+# embedding model: jina-embeddings-v3
 # vector backend: turso/libsql (local (.searchsocket/vectors.db))
 # vector health: ok
 # last indexed (main): 2025-02-23T10:30:00Z
@@ -597,7 +642,7 @@ pnpm searchsocket doctor
 
 # Output:
 # PASS config parse
-# PASS env OPENAI_API_KEY
+# PASS env JINA_API_KEY
 # PASS turso/libsql (local file: .searchsocket/vectors.db)
 # PASS source: build manifest
 # PASS source: vite binary
@@ -699,8 +744,8 @@ The CLI automatically loads `.env` from the working directory on startup. Existi
 
 ### Required
 
-**OpenAI:**
-- `OPENAI_API_KEY` — OpenAI API key for embeddings
+**Jina AI:**
+- `JINA_API_KEY` — Jina AI API key for embeddings and reranking
 
 ### Optional (Turso)
 
@@ -709,11 +754,6 @@ The CLI automatically loads `.env` from the working directory on startup. Existi
 - `TURSO_AUTH_TOKEN` — Turso auth token
 
 If not set, uses local file DB at `.searchsocket/vectors.db`.
-
-### Optional (Rerank)
-
-**Jina:**
-- `JINA_API_KEY` — Jina reranker API key (if using `rerank: { provider: "jina" }`)
 
 ### Optional (Scope/Build)
 
@@ -787,15 +827,15 @@ export default {
   },
 
   embeddings: {
-    provider: "openai",
-    model: "text-embedding-3-small",
-    apiKeyEnv: "OPENAI_API_KEY",
+    provider: "jina",
+    model: "jina-embeddings-v3",
+    apiKeyEnv: "JINA_API_KEY",
     batchSize: 64,
     concurrency: 4
   },
 
   vector: {
-    dimension: 1536,  // optional, inferred from first embedding
+    dimension: 1024,  // optional, inferred from first embedding
     turso: {
       urlEnv: "TURSO_DATABASE_URL",
       authTokenEnv: "TURSO_AUTH_TOKEN",
@@ -804,12 +844,9 @@ export default {
   },
 
   rerank: {
-    provider: "jina",  // "none" | "jina"
+    enabled: true,
     topN: 20,
-    jina: {
-      apiKeyEnv: "JINA_API_KEY",
-      model: "jina-reranker-v2-base-multilingual"
-    }
+    model: "jina-reranker-v2-base-multilingual"
   },
 
   ranking: {

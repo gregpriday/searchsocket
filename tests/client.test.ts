@@ -51,7 +51,7 @@ describe("createSearchClient", () => {
       meta: {
         timingsMs: { embed: 10, vector: 20, rerank: 0, total: 30 },
         usedRerank: false,
-        modelId: "text-embedding-3-small"
+        modelId: "jina-embeddings-v3"
       }
     };
 

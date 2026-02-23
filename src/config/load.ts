@@ -130,11 +130,7 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
     },
     rerank: {
       ...defaults.rerank,
-      ...parsed.rerank,
-      jina: {
-        ...defaults.rerank.jina,
-        ...parsed.rerank?.jina
-      }
+      ...parsed.rerank
     },
     ranking: {
       ...defaults.ranking,
@@ -203,6 +199,29 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
   return merged;
 }
 
+/**
+ * Resolve a partial config for serverless environments where filesystem lookups
+ * (package.json, static output dir) are unavailable. Validates that `project.id`
+ * and `source.mode` are explicitly set, then delegates to `mergeConfig()`.
+ */
+export function mergeConfigServerless(rawConfig: SearchSocketConfig): ResolvedSearchSocketConfig {
+  if (!rawConfig.project?.id) {
+    throw new SearchSocketError(
+      "CONFIG_MISSING",
+      "`project.id` is required for serverless config (cannot infer from package.json)."
+    );
+  }
+
+  if (!rawConfig.source?.mode) {
+    throw new SearchSocketError(
+      "CONFIG_MISSING",
+      "`source.mode` is required for serverless config (cannot auto-detect from filesystem)."
+    );
+  }
+
+  return mergeConfig(process.cwd(), rawConfig);
+}
+
 export async function loadConfig(options: LoadConfigOptions = {}): Promise<ResolvedSearchSocketConfig> {
   const cwd = path.resolve(options.cwd ?? process.cwd());
   const configPath = path.resolve(cwd, options.configPath ?? "searchsocket.config.ts");
@@ -236,7 +255,7 @@ export function writeMinimalConfig(cwd: string): string {
   }
 
   const content = `export default {
-  embeddings: { apiKeyEnv: "OPENAI_API_KEY" }
+  embeddings: { apiKeyEnv: "JINA_API_KEY" }
 };
 `;
 

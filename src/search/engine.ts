@@ -104,7 +104,7 @@ export class SearchEngine {
       : Math.max(50, topK);
 
     const embedStart = process.hrtime.bigint();
-    const queryEmbeddings = await this.embeddings.embedTexts([input.q], this.config.embeddings.model);
+    const queryEmbeddings = await this.embeddings.embedTexts([input.q], this.config.embeddings.model, "retrieval.query");
     const queryVector = queryEmbeddings[0];
     if (!queryVector || queryVector.length === 0 || queryVector.some((value) => !Number.isFinite(value))) {
       throw new SearchSocketError("VECTOR_BACKEND_UNAVAILABLE", "Unable to create query embedding.");
@@ -253,10 +253,10 @@ export class SearchEngine {
     ranked: RankedHit[],
     topK: number
   ): Promise<RankedHit[]> {
-    if (this.config.rerank.provider !== "jina") {
+    if (!this.config.rerank.enabled) {
       throw new SearchSocketError(
         "INVALID_REQUEST",
-        "rerank=true requested but rerank.provider is not configured as 'jina'.",
+        "rerank=true requested but rerank.enabled is not set to true.",
         400
       );
     }
@@ -264,7 +264,7 @@ export class SearchEngine {
     if (!this.reranker) {
       throw new SearchSocketError(
         "CONFIG_MISSING",
-        `rerank=true requested but ${this.config.rerank.jina.apiKeyEnv} is not set.`,
+        `rerank=true requested but ${this.config.embeddings.apiKeyEnv} is not set.`,
         400
       );
     }

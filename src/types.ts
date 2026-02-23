@@ -1,7 +1,6 @@
 export type ScopeMode = "fixed" | "git" | "env";
 export type SourceMode = "static-output" | "crawl" | "content-files" | "build";
-export type EmbeddingProvider = "openai";
-export type RerankProvider = "none" | "jina";
+export type EmbeddingProvider = "jina";
 
 export interface SearchSocketConfig {
   project?: {
@@ -74,12 +73,9 @@ export interface SearchSocketConfig {
     };
   };
   rerank?: {
-    provider?: RerankProvider;
+    enabled?: boolean;
     topN?: number;
-    jina?: {
-      apiKeyEnv?: string;
-      model?: string;
-    };
+    model?: string;
   };
   ranking?: {
     enableIncomingLinkBoost?: boolean;
@@ -190,12 +186,9 @@ export interface ResolvedSearchSocketConfig {
     };
   };
   rerank: {
-    provider: RerankProvider;
+    enabled: boolean;
     topN: number;
-    jina: {
-      apiKeyEnv: string;
-      model: string;
-    };
+    model: string;
   };
   ranking: {
     enableIncomingLinkBoost: boolean;
@@ -382,7 +375,7 @@ export interface VectorStore {
 }
 
 export interface EmbeddingsProvider {
-  embedTexts(texts: string[], modelId: string): Promise<number[][]>;
+  embedTexts(texts: string[], modelId: string, task?: string): Promise<number[][]>;
   estimateTokens(text: string): number;
 }
 

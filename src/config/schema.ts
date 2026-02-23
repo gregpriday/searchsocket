@@ -74,7 +74,7 @@ export const searchSocketConfigSchema = z.object({
     .optional(),
   embeddings: z
     .object({
-      provider: z.literal("openai").optional(),
+      provider: z.literal("jina").optional(),
       model: z.string().min(1).optional(),
       apiKeyEnv: z.string().min(1).optional(),
       batchSize: z.number().int().positive().optional(),
@@ -96,14 +96,9 @@ export const searchSocketConfigSchema = z.object({
     .optional(),
   rerank: z
     .object({
-      provider: z.enum(["none", "jina"]).optional(),
+      enabled: z.boolean().optional(),
       topN: z.number().int().positive().optional(),
-      jina: z
-        .object({
-          apiKeyEnv: z.string().optional(),
-          model: z.string().optional()
-        })
-        .optional()
+      model: z.string().optional()
     })
     .optional(),
   ranking: z

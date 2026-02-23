@@ -205,10 +205,12 @@ async function runIndexCommand(opts: {
   source?: "static-output" | "crawl" | "content-files" | "build";
   maxPages?: number;
   maxChunks?: number;
+  quiet?: boolean;
   verbose?: boolean;
   json?: boolean;
 }): Promise<void> {
   const logger = new Logger({
+    quiet: opts.quiet,
     verbose: opts.verbose,
     json: opts.json
   });
@@ -235,7 +237,9 @@ async function runIndexCommand(opts: {
     return;
   }
 
-  printIndexSummary(stats);
+  if (!opts.quiet) {
+    printIndexSummary(stats);
+  }
 }
 
 const program = new Command();
@@ -283,6 +287,7 @@ program
   .option("--source <mode>", "source mode override: static-output|crawl|content-files|build")
   .option("--max-pages <n>", "limit pages processed")
   .option("--max-chunks <n>", "limit chunks processed")
+  .option("--quiet", "suppress all output except errors and warnings", false)
   .option("--verbose", "verbose output", false)
   .option("--json", "emit JSON logs and summary", false)
   .action(async (opts, command) => {
@@ -299,6 +304,7 @@ program
       source: opts.source,
       maxPages: opts.maxPages ? parsePositiveInt(opts.maxPages, "--max-pages") : undefined,
       maxChunks: opts.maxChunks ? parsePositiveInt(opts.maxChunks, "--max-chunks") : undefined,
+      quiet: opts.quiet,
       verbose: opts.verbose,
       json: opts.json
     });
@@ -633,15 +639,6 @@ program
           name: "turso/libsql",
           ok: true,
           details: tursoUrl ? `remote: ${tursoUrl}` : `local file: ${config.vector.turso.localPath}`
-        });
-      }
-
-      if (config.rerank.provider === "jina") {
-        const jinaKey = process.env[config.rerank.jina.apiKeyEnv];
-        checks.push({
-          name: `env ${config.rerank.jina.apiKeyEnv}`,
-          ok: Boolean(jinaKey),
-          details: jinaKey ? undefined : "missing"
         });
       }
 

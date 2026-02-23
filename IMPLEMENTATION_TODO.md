@@ -1,6 +1,6 @@
 # SearchSocket Detailed Implementation TODO
 
-This checklist is derived from `spec.md`.
+This checklist tracks implementation progress.
 
 ## Phase 1: Package + Tooling
 
@@ -56,7 +56,7 @@ This checklist is derived from `spec.md`.
 
 ## Phase 6: Embeddings + Cache + Cost
 
-- [x] Implement OpenAI embeddings provider
+- [x] Implement Jina AI embeddings provider
 - [x] Add batching + concurrency limits
 - [x] Add retries with exponential backoff on 429/5xx
 - [x] Improve token estimation beyond char/4 fallback
@@ -67,8 +67,7 @@ This checklist is derived from `spec.md`.
 ## Phase 7: Vector Backends
 
 - [x] Define `VectorStore` interface per spec
-- [x] Implement Milvus/Zilliz Cloud adapter (primary)
-- [x] Implement Pinecone adapter
+- [x] Implement Turso/libSQL vector adapter (primary)
 - [x] Implement local sqlite vector adapter
 - [x] Store record metadata required by search/MCP
 - [x] Implement `pathPrefix` filtering
@@ -115,8 +114,7 @@ This checklist is derived from `spec.md`.
 - [x] Unit: route mapping correctness
 - [x] Unit: embedding cache behavior
 - [x] Contract: local vector adapter filter behavior
-- [x] Contract: Milvus adapter behavior (mocked client)
-- [x] Contract: Pinecone adapter behavior (mocked client)
+- [x] Contract: Turso/libSQL adapter behavior
 - [x] Integration smoke: index -> search using local backend
 
 ## Phase 12: Docs + Examples

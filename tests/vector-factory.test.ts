@@ -8,6 +8,7 @@ import { createVectorStore } from "../src/vector/factory";
 const tempDirs: string[] = [];
 
 afterEach(async () => {
+  delete process.env.VERCEL;
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -33,6 +34,21 @@ describe("createVectorStore", () => {
 
     const store = await createVectorStore(config, cwd);
     expect(await store.health()).toEqual({ ok: true });
+  });
+
+  it("throws clear error on serverless when no remote URL is set", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "searchsocket-vector-factory-"));
+    tempDirs.push(cwd);
+
+    const config = createDefaultConfig("factory-test");
+    config.vector.turso.urlEnv = "SEARCHSOCKET_TEST_UNSET_URL";
+    delete process.env.SEARCHSOCKET_TEST_UNSET_URL;
+
+    process.env.VERCEL = "1";
+
+    await expect(createVectorStore(config, cwd)).rejects.toThrow(
+      "Local SQLite storage is not available in serverless environments"
+    );
   });
 
   it("uses HTTP client for remote URL", async () => {

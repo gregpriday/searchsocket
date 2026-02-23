@@ -3,6 +3,7 @@ import type { JsonLogEntry } from "../types";
 export interface LoggerOptions {
   json?: boolean;
   verbose?: boolean;
+  quiet?: boolean;
   /** When true, all output (including info/event) is written to stderr instead of stdout. */
   stderrOnly?: boolean;
 }
@@ -10,16 +11,18 @@ export interface LoggerOptions {
 export class Logger {
   private readonly json: boolean;
   private readonly verbose: boolean;
+  private readonly quiet: boolean;
   private readonly stderrOnly: boolean;
 
   constructor(opts: LoggerOptions = {}) {
     this.json = opts.json ?? false;
     this.verbose = opts.verbose ?? false;
+    this.quiet = opts.quiet ?? false;
     this.stderrOnly = opts.stderrOnly ?? false;
   }
 
   info(message: string): void {
-    if (this.json) {
+    if (this.quiet || this.json) {
       return;
     }
 
@@ -36,7 +39,7 @@ export class Logger {
       return;
     }
 
-    this.writeOut(`${message}\n`);
+    this.writeOut(`  ${message}\n`);
   }
 
   warn(message: string): void {
@@ -67,7 +70,7 @@ export class Logger {
       return;
     }
 
-    this.writeOut(`[${event}] ${data ? JSON.stringify(data) : ""}\n`);
+    this.writeOut(`  [${event}] ${data ? JSON.stringify(data) : ""}\n`);
   }
 
   private writeOut(text: string): void {

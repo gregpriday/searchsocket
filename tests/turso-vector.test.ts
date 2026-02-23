@@ -27,7 +27,7 @@ function makeRecord(id: string, vector: number[], overrides: Partial<VectorRecor
       headingPath: overrides.headingPath ?? [],
       snippet: overrides.snippet ?? "snippet text",
       contentHash: overrides.contentHash ?? "abc123",
-      modelId: overrides.modelId ?? "text-embedding-3-small",
+      modelId: overrides.modelId ?? "jina-embeddings-v3",
       depth: overrides.depth ?? 0,
       incomingLinks: overrides.incomingLinks ?? 0,
       routeFile: overrides.routeFile ?? "+page.svelte",
@@ -120,7 +120,7 @@ describe("TursoVectorStore", () => {
     await store.recordScope({
       projectId: "proj",
       scopeName: "main",
-      modelId: "text-embedding-3-small",
+      modelId: "jina-embeddings-v3",
       lastIndexedAt: new Date().toISOString(),
       vectorCount: 1
     });
@@ -138,7 +138,7 @@ describe("TursoVectorStore", () => {
     const info: ScopeInfo = {
       projectId: "proj",
       scopeName: "main",
-      modelId: "text-embedding-3-small",
+      modelId: "jina-embeddings-v3",
       lastIndexedAt: "2025-01-01T00:00:00Z",
       vectorCount: 42
     };
@@ -255,13 +255,13 @@ describe("TursoVectorStore", () => {
     await store.recordScope({
       projectId: "proj",
       scopeName: "main",
-      modelId: "text-embedding-3-small",
+      modelId: "jina-embeddings-v3",
       lastIndexedAt: "2026-01-01T00:00:00.000Z",
       vectorCount: 10
     });
 
     const modelId = await store.getScopeModelId(scopeA);
-    expect(modelId).toBe("text-embedding-3-small");
+    expect(modelId).toBe("jina-embeddings-v3");
   });
 
   it("getScopeModelId returns null when scope not in registry", async () => {
@@ -273,7 +273,7 @@ describe("TursoVectorStore", () => {
     const info: ScopeInfo = {
       projectId: "proj",
       scopeName: "main",
-      modelId: "text-embedding-3-small",
+      modelId: "jina-embeddings-v3",
       lastIndexedAt: "2026-01-01T00:00:00.000Z",
       vectorCount: 42,
       lastEstimateTokens: 1000,

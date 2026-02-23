@@ -1,2 +1,2 @@
 export { createEmbeddingsProvider } from "./factory";
-export { OpenAIEmbeddingsProvider } from "./openai";
+export { JinaEmbeddingsProvider } from "./jina";

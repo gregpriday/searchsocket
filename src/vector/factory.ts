@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { isServerless } from "../core/serverless";
+import { SearchSocketError } from "../errors";
 import type { ResolvedSearchSocketConfig, VectorStore } from "../types";
 import { TursoVectorStore } from "./turso";
 
@@ -24,6 +26,15 @@ export async function createVectorStore(config: ResolvedSearchSocketConfig, cwd:
   }
 
   // Local file DB — uses native libsql addon (requires Node with native module support)
+  if (isServerless()) {
+    throw new SearchSocketError(
+      "VECTOR_BACKEND_UNAVAILABLE",
+      `No remote vector database URL found (checked env var "${turso.urlEnv}"). ` +
+        "Local SQLite storage is not available in serverless environments. " +
+        `Set ${turso.urlEnv} to your Turso database URL.`
+    );
+  }
+
   const { createClient } = await import("@libsql/client");
   const localPath = path.resolve(cwd, turso.localPath);
   fs.mkdirSync(path.dirname(localPath), { recursive: true });

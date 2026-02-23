@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadConfig, mergeConfig } from "../src/config/load";
+import { loadConfig, mergeConfig, mergeConfigServerless } from "../src/config/load";
 import { createDefaultConfig } from "../src/config/defaults";
 
 const tempDirs: string[] = [];
@@ -23,7 +23,7 @@ describe("createDefaultConfig", () => {
     expect(config.project.id).toBe("my-project");
     expect(config.scope.mode).toBe("fixed");
     expect(config.scope.fixed).toBe("main");
-    expect(config.embeddings.model).toBe("text-embedding-3-small");
+    expect(config.embeddings.model).toBe("jina-embeddings-v3");
     expect(config.chunking.maxChars).toBe(2200);
     expect(config.chunking.overlapChars).toBe(200);
     expect(config.chunking.minChars).toBe(250);
@@ -51,7 +51,7 @@ describe("mergeConfig", () => {
     expect(merged.vector.turso.urlEnv).toBe("TURSO_DATABASE_URL");
     expect(merged.chunking.maxChars).toBe(3000);
     expect(merged.chunking.overlapChars).toBe(200); // default preserved
-    expect(merged.embeddings.model).toBe("text-embedding-3-small");
+    expect(merged.embeddings.model).toBe("jina-embeddings-v3");
   });
 
   it("infers project id from package.json name", async () => {
@@ -197,6 +197,37 @@ describe("mergeConfig", () => {
 
     expect(merged.vector.turso.localPath).toBe("custom/vectors.db");
     expect(merged.vector.turso.urlEnv).toBe("TURSO_DATABASE_URL"); // default preserved
+  });
+});
+
+describe("mergeConfigServerless", () => {
+  it("throws when project.id is missing", () => {
+    expect(() =>
+      mergeConfigServerless({
+        source: { mode: "static-output" }
+      })
+    ).toThrow("project.id");
+  });
+
+  it("throws when source.mode is missing", () => {
+    expect(() =>
+      mergeConfigServerless({
+        project: { id: "my-site" }
+      })
+    ).toThrow("source.mode");
+  });
+
+  it("resolves correctly when required fields are present", () => {
+    const config = mergeConfigServerless({
+      project: { id: "my-site" },
+      source: { mode: "static-output" },
+      embeddings: { apiKeyEnv: "JINA_API_KEY" }
+    });
+
+    expect(config.project.id).toBe("my-site");
+    expect(config.source.mode).toBe("static-output");
+    expect(config.embeddings.apiKeyEnv).toBe("JINA_API_KEY");
+    expect(config.vector.turso.urlEnv).toBe("TURSO_DATABASE_URL");
   });
 });
 

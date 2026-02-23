@@ -33,9 +33,7 @@ import type {
 } from "../types";
 
 const EMBEDDING_PRICE_PER_1K_TOKENS_USD: Record<string, number> = {
-  "text-embedding-3-small": 0.00002,
-  "text-embedding-3-large": 0.00013,
-  "text-embedding-ada-002": 0.0001
+  "jina-embeddings-v3": 0.00002
 };
 const DEFAULT_EMBEDDING_PRICE_PER_1K = 0.00002;
 
@@ -105,8 +103,16 @@ export class IndexPipeline {
     const scope = resolveScope(this.config, options.scopeOverride);
     const { statePath } = ensureStateDirs(this.cwd, this.config.state.dir, scope);
 
+    const sourceMode = options.sourceOverride ?? this.config.source.mode;
+    this.logger.info(`Indexing scope "${scope.scopeName}" (source: ${sourceMode}, model: ${this.config.embeddings.model})`);
+
     if (options.force) {
+      this.logger.info("Force mode enabled — full rebuild");
       await cleanMirrorForScope(statePath, scope);
+    }
+
+    if (options.dryRun) {
+      this.logger.info("Dry run — no writes will be performed");
     }
 
     const manifestStart = stageStart();
@@ -125,9 +131,10 @@ export class IndexPipeline {
     }
 
     stageEnd("manifest", manifestStart);
+    this.logger.debug(`Manifest: ${existingHashes.size} existing chunk hashes loaded`);
 
     const sourceStart = stageStart();
-    const sourceMode = options.sourceOverride ?? this.config.source.mode;
+    this.logger.info(`Loading pages (source: ${sourceMode})...`);
     let sourcePages;
 
     if (sourceMode === "static-output") {
@@ -140,12 +147,15 @@ export class IndexPipeline {
       sourcePages = await loadContentFilesPages(this.cwd, this.config, options.maxPages);
     }
     stageEnd("source", sourceStart);
+    this.logger.info(`Loaded ${sourcePages.length} page${sourcePages.length === 1 ? "" : "s"} (${stageTimingsMs["source"]}ms)`);
 
     const routeStart = stageStart();
     const routePatterns = await buildRoutePatterns(this.cwd);
     stageEnd("route_map", routeStart);
+    this.logger.debug(`Route mapping: ${routePatterns.length} pattern${routePatterns.length === 1 ? "" : "s"} discovered (${stageTimingsMs["route_map"]}ms)`);
 
     const extractStart = stageStart();
+    this.logger.info("Extracting content...");
     const extractedPages: ExtractedPage[] = [];
 
     for (const sourcePage of sourcePages) {
@@ -181,6 +191,8 @@ export class IndexPipeline {
       uniquePages.push(page);
     }
     stageEnd("extract", extractStart);
+    const skippedPages = sourcePages.length - uniquePages.length;
+    this.logger.info(`Extracted ${uniquePages.length} page${uniquePages.length === 1 ? "" : "s"}${skippedPages > 0 ? ` (${skippedPages} skipped)` : ""} (${stageTimingsMs["extract"]}ms)`);
 
     const linkStart = stageStart();
     const pageSet = new Set(uniquePages.map((page) => normalizeUrlPath(page.url)));
@@ -200,8 +212,10 @@ export class IndexPipeline {
       }
     }
     stageEnd("links", linkStart);
+    this.logger.debug(`Link analysis: computed incoming links for ${incomingLinkCount.size} pages (${stageTimingsMs["links"]}ms)`);
 
     const mirrorStart = stageStart();
+    this.logger.info("Writing mirror pages...");
     const mirrorPages: MirrorPage[] = [];
     let routeExact = 0;
     let routeBestEffort = 0;
@@ -282,8 +296,10 @@ export class IndexPipeline {
     }
 
     stageEnd("mirror", mirrorStart);
+    this.logger.info(`Mirrored ${mirrorPages.length} page${mirrorPages.length === 1 ? "" : "s"} (${routeExact} exact, ${routeBestEffort} best-effort) (${stageTimingsMs["mirror"]}ms)`);
 
     const chunkStart = stageStart();
+    this.logger.info("Chunking pages...");
     let chunks: Chunk[] = mirrorPages.flatMap((page) => chunkMirrorPage(page, this.config, scope));
 
     const maxChunks = typeof options.maxChunks === "number" ? Math.max(0, Math.floor(options.maxChunks)) : undefined;
@@ -299,6 +315,7 @@ export class IndexPipeline {
     }
 
     stageEnd("chunk", chunkStart);
+    this.logger.info(`Chunked into ${chunks.length} chunk${chunks.length === 1 ? "" : "s"} (${stageTimingsMs["chunk"]}ms)`);
 
     const currentChunkMap = new Map<string, Chunk>();
     for (const chunk of chunks) {
@@ -324,6 +341,8 @@ export class IndexPipeline {
 
     const deletes = [...existingHashes.keys()].filter((chunkKey) => !currentChunkMap.has(chunkKey));
 
+    this.logger.info(`Changes detected: ${changedChunks.length} changed, ${deletes.length} deleted, ${chunks.length - changedChunks.length} unchanged`);
+
     const embedStart = stageStart();
 
     const chunkTokenEstimates = new Map<string, number>();
@@ -346,9 +365,11 @@ export class IndexPipeline {
     const vectorsByChunk = new Map<string, number[]>();
 
     if (!options.dryRun && changedChunks.length > 0) {
+      this.logger.info(`Embedding ${changedChunks.length} chunk${changedChunks.length === 1 ? "" : "s"} (~${estimatedTokens.toLocaleString()} tokens, ~$${estimatedCostUSD.toFixed(6)})...`);
       const embeddings = await this.embeddings.embedTexts(
         changedChunks.map((chunk) => buildEmbeddingText(chunk, this.config.chunking.prependTitle)),
-        this.config.embeddings.model
+        this.config.embeddings.model,
+        "retrieval.passage"
       );
 
       if (embeddings.length !== changedChunks.length) {
@@ -374,9 +395,15 @@ export class IndexPipeline {
     }
 
     stageEnd("embedding", embedStart);
+    if (changedChunks.length > 0) {
+      this.logger.info(`Embedded ${newEmbeddings} chunk${newEmbeddings === 1 ? "" : "s"} (${stageTimingsMs["embedding"]}ms)`);
+    } else {
+      this.logger.info("No chunks to embed — all up to date");
+    }
 
     const syncStart = stageStart();
     if (!options.dryRun) {
+      this.logger.info("Syncing vectors...");
       const upserts: VectorRecord[] = [];
       for (const chunk of changedChunks) {
         const vector = vectorsByChunk.get(chunk.chunkKey);
@@ -418,6 +445,7 @@ export class IndexPipeline {
     }
 
     stageEnd("sync", syncStart);
+    this.logger.debug(`Sync complete (${stageTimingsMs["sync"]}ms)`);
 
     const finalizeStart = stageStart();
 
@@ -441,6 +469,8 @@ export class IndexPipeline {
     }
 
     stageEnd("finalize", finalizeStart);
+
+    this.logger.info("Done.");
 
     return {
       pagesProcessed: mirrorPages.length,

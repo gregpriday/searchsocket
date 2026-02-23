@@ -26,9 +26,9 @@ jobs:
       - run: pnpm build
       - run: pnpm searchsocket index --changed-only
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          MILVUS_URI: ${{ secrets.MILVUS_URI }}
-          MILVUS_TOKEN: ${{ secrets.MILVUS_TOKEN }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
 ```
 
 ## 2. PR Cost Preview (Dry Run)
@@ -56,7 +56,7 @@ jobs:
       - run: pnpm build
       - run: pnpm searchsocket index --dry-run --changed-only
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 ```
 
 ## 3. Preview Branch Scope Indexing
@@ -69,9 +69,9 @@ Example with `scope.mode = "env"`:
 - run: pnpm searchsocket index --changed-only
   env:
     SEARCHSOCKET_SCOPE: ${{ github.head_ref || github.ref_name }}
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-    MILVUS_URI: ${{ secrets.MILVUS_URI }}
-    MILVUS_TOKEN: ${{ secrets.MILVUS_TOKEN }}
+    JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+    TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+    TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
 ```
 
 ## 4. Scheduled Prune Job
@@ -107,9 +107,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm searchsocket prune --older-than 30d --apply
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          MILVUS_URI: ${{ secrets.MILVUS_URI }}
-          MILVUS_TOKEN: ${{ secrets.MILVUS_TOKEN }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
 ```
 
 ## 5. Vercel Build-Triggered Indexing
@@ -117,7 +117,7 @@ jobs:
 Use the build plugin + env flags:
 
 - Set `SEARCHSOCKET_AUTO_INDEX=1` in Vercel project env
-- Set provider credentials (`OPENAI_API_KEY` + vector backend env vars)
+- Set provider credentials (`JINA_API_KEY` + vector backend env vars)
 
 Your Vite plugin setup:
 

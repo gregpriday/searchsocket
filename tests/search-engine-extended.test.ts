@@ -97,7 +97,7 @@ function makeHit(id: string, url: string): VectorHit {
       headingPath: [],
       snippet: "Snippet",
       contentHash: `hash-${id}`,
-      modelId: "text-embedding-3-small",
+      modelId: "jina-embeddings-v3",
       depth: 1,
       incomingLinks: 0,
       routeFile: "src/routes/+page.svelte",
@@ -155,10 +155,10 @@ describe("SearchEngine - adversarial cases", () => {
     });
   });
 
-  it("rejects rerank=true when rerank provider is disabled", async () => {
+  it("rejects rerank=true when rerank is disabled", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.rerank.provider = "none";
+    config.rerank.enabled = false;
 
     const engine = await SearchEngine.create({
       cwd,
@@ -173,11 +173,11 @@ describe("SearchEngine - adversarial cases", () => {
     });
   });
 
-  it("rejects rerank=true when jina is configured but API key is missing", async () => {
+  it("rejects rerank=true when rerank is enabled but API key is missing", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.rerank.provider = "jina";
-    config.rerank.jina.apiKeyEnv = "SEARCHSOCKET_TEST_MISSING_JINA_KEY";
+    config.rerank.enabled = true;
+    config.embeddings.apiKeyEnv = "SEARCHSOCKET_TEST_MISSING_JINA_KEY";
     delete process.env.SEARCHSOCKET_TEST_MISSING_JINA_KEY;
 
     const engine = await SearchEngine.create({
@@ -309,7 +309,7 @@ describe("SearchEngine - adversarial cases", () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
 
-    const store = new FakeStore().withScopeModelId("text-embedding-3-large");
+    const store = new FakeStore().withScopeModelId("jina-embeddings-v2-base-en");
 
     const engine = await SearchEngine.create({
       cwd,

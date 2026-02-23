@@ -37,7 +37,7 @@ function makeStore(
       {
         projectId: "searchsocket-resync",
         scopeName: "main",
-        modelId: "text-embedding-3-small",
+        modelId: "jina-embeddings-v3",
         lastIndexedAt: "2026-01-01T00:00:00.000Z",
         vectorCount: existingHashes.size
       } satisfies ScopeInfo
@@ -48,7 +48,7 @@ function makeStore(
     upsertPages: async () => undefined,
     getPage: async () => null,
     deletePages: async () => undefined,
-    getScopeModelId: async () => "text-embedding-3-small"
+    getScopeModelId: async () => "jina-embeddings-v3"
   };
 }
 

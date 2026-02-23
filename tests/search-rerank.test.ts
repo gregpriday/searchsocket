@@ -56,7 +56,7 @@ class FakeStore implements VectorStore {
           headingPath: [],
           snippet: "alpha",
           contentHash: "a",
-          modelId: "text-embedding-3-small",
+          modelId: "jina-embeddings-v3",
           depth: 1,
           incomingLinks: 1,
           routeFile: "src/routes/a/+page.svelte",
@@ -76,7 +76,7 @@ class FakeStore implements VectorStore {
           headingPath: [],
           snippet: "beta",
           contentHash: "b",
-          modelId: "text-embedding-3-small",
+          modelId: "jina-embeddings-v3",
           depth: 1,
           incomingLinks: 1,
           routeFile: "src/routes/b/+page.svelte",
@@ -137,7 +137,7 @@ describe("SearchEngine rerank", () => {
     tempDirs.push(cwd);
 
     const config = createDefaultConfig("searchsocket-rerank");
-    config.rerank.provider = "jina";
+    config.rerank.enabled = true;
 
     const engine = await SearchEngine.create({
       cwd,
@@ -158,7 +158,7 @@ describe("SearchEngine rerank", () => {
     tempDirs.push(cwd);
 
     const config = createDefaultConfig("searchsocket-rerank");
-    config.rerank.provider = "jina";
+    config.rerank.enabled = true;
 
     const engine = await SearchEngine.create({
       cwd,

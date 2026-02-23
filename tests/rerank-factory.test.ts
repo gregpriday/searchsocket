@@ -8,26 +8,26 @@ afterEach(() => {
 });
 
 describe("createReranker", () => {
-  it("returns null when provider is none", () => {
+  it("returns null when rerank is disabled", () => {
     const config = createDefaultConfig("rerank-factory");
-    config.rerank.provider = "none";
+    config.rerank.enabled = false;
 
     expect(createReranker(config)).toBeNull();
   });
 
-  it("returns null when jina is configured but key is missing", () => {
+  it("returns null when rerank is enabled but key is missing", () => {
     const config = createDefaultConfig("rerank-factory");
-    config.rerank.provider = "jina";
-    config.rerank.jina.apiKeyEnv = "SEARCHSOCKET_TEST_MISSING_JINA";
+    config.rerank.enabled = true;
+    config.embeddings.apiKeyEnv = "SEARCHSOCKET_TEST_MISSING_JINA";
     delete process.env.SEARCHSOCKET_TEST_MISSING_JINA;
 
     expect(createReranker(config)).toBeNull();
   });
 
-  it("returns a reranker when jina key is present", () => {
+  it("returns a reranker when enabled and key is present", () => {
     const config = createDefaultConfig("rerank-factory");
-    config.rerank.provider = "jina";
-    config.rerank.jina.apiKeyEnv = "SEARCHSOCKET_TEST_JINA";
+    config.rerank.enabled = true;
+    config.embeddings.apiKeyEnv = "SEARCHSOCKET_TEST_JINA";
     process.env.SEARCHSOCKET_TEST_JINA = "test-key";
 
     const reranker = createReranker(config);

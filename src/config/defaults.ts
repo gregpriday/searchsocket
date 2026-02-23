@@ -49,9 +49,9 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       pageSummaryChunk: true
     },
     embeddings: {
-      provider: "openai",
-      model: "text-embedding-3-small",
-      apiKeyEnv: "OPENAI_API_KEY",
+      provider: "jina",
+      model: "jina-embeddings-v3",
+      apiKeyEnv: "JINA_API_KEY",
       batchSize: 64,
       concurrency: 4
     },
@@ -63,12 +63,9 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       }
     },
     rerank: {
-      provider: "none",
+      enabled: false,
       topN: 20,
-      jina: {
-        apiKeyEnv: "JINA_API_KEY",
-        model: "jina-reranker-v2-base-multilingual"
-      }
+      model: "jina-reranker-v2-base-multilingual"
     },
     ranking: {
       enableIncomingLinkBoost: true,

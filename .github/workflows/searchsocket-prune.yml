@@ -54,10 +54,9 @@ jobs:
           cat /tmp/prune-preview.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          MILVUS_URI: ${{ secrets.MILVUS_URI }}
-          MILVUS_TOKEN: ${{ secrets.MILVUS_TOKEN }}
-          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
 
       # Apply deletions (skipped on manual dry-run)
       - name: Apply prune
@@ -66,7 +65,6 @@ jobs:
           OLDER_THAN="${{ inputs.older-than || '30d' }}"
           pnpm searchsocket prune --older-than "$OLDER_THAN" --apply
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          MILVUS_URI: ${{ secrets.MILVUS_URI }}
-          MILVUS_TOKEN: ${{ secrets.MILVUS_TOKEN }}
-          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}

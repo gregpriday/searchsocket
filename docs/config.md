@@ -4,8 +4,7 @@ Configuration file: `searchsocket.config.ts`
 
 ```ts
 export default {
-  embeddings: { apiKeyEnv: "OPENAI_API_KEY" },
-  vector: { provider: "milvus" }
+  embeddings: { apiKeyEnv: "JINA_API_KEY" }
 };
 ```
 
@@ -55,39 +54,27 @@ export default {
 
 ## Embeddings
 
-- `embeddings.provider` (`openai`)
-- `embeddings.model` (default `text-embedding-3-small`)
-- `embeddings.apiKeyEnv` (default `OPENAI_API_KEY`)
+- `embeddings.provider` (`jina`)
+- `embeddings.model` (default `jina-embeddings-v3`)
+- `embeddings.apiKeyEnv` (default `JINA_API_KEY`)
 - `embeddings.batchSize` (default `64`)
-- `embeddings.concurrency` (default `8`)
+- `embeddings.concurrency` (default `4`)
 
-## Vector Backends
+## Vector Backend
 
-### Milvus / Zilliz Cloud
+### Turso / libSQL
 
-- `vector.provider = "milvus"`
-- `vector.milvus.uriEnv` (default `MILVUS_URI`)
-- `vector.milvus.tokenEnv` (default `MILVUS_TOKEN`)
-- `vector.milvus.collection` (default `${projectId}_chunks`)
-
-### Pinecone
-
-- `vector.provider = "pinecone"`
-- `vector.pinecone.apiKeyEnv` (default `PINECONE_API_KEY`)
-- `vector.pinecone.index` (default `${projectId}`)
-- `vector.pinecone.namespaceMode` (`scope`)
-
-### Local
-
-- `vector.provider = "local"`
-- `vector.local.path` (default `.searchsocket/local-vectors.json`)
+- `vector.turso.urlEnv` (default `TURSO_DATABASE_URL`)
+- `vector.turso.authTokenEnv` (default `TURSO_AUTH_TOKEN`)
+- `vector.turso.localPath` (default `.searchsocket/vectors.db`)
 
 ## Reranking
 
-- `rerank.provider` (`none` | `jina`, default `none`)
+- `rerank.enabled` (default `false`)
 - `rerank.topN` (default `20`)
-- `rerank.jina.apiKeyEnv` (default `JINA_API_KEY`)
-- `rerank.jina.model` (default `jina-reranker-v2-base-multilingual`)
+- `rerank.model` (default `jina-reranker-v2-base-multilingual`)
+
+Reranking uses the same `JINA_API_KEY` from `embeddings.apiKeyEnv`.
 
 ## Ranking
 
@@ -114,11 +101,9 @@ export default {
 
 Common env variables:
 
-- `OPENAI_API_KEY`
-- `MILVUS_URI`
-- `MILVUS_TOKEN`
-- `PINECONE_API_KEY`
 - `JINA_API_KEY`
+- `TURSO_DATABASE_URL`
+- `TURSO_AUTH_TOKEN`
 - `SEARCHSOCKET_SCOPE` (only with `scope.mode = "env"`)
 - `SEARCHSOCKET_AUTO_INDEX` (build plugin trigger)
 - `SEARCHSOCKET_DISABLE_AUTO_INDEX` (build plugin kill switch)

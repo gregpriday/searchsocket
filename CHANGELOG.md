@@ -19,7 +19,7 @@ Initial public release.
 
 - **Indexing pipeline** with incremental updates, content hashing, and cost tracking
 - **Four source modes**: `static-output`, `build`, `crawl`, and `content-files`
-- **Semantic search** with OpenAI embeddings (`text-embedding-3-small`/`text-embedding-3-large`)
+- **Semantic search** with Jina AI embeddings (`jina-embeddings-v3`) with task-specific LoRA adapters
 - **Vector storage** via Turso/libSQL (local and remote)
 - **Reranking** with Jina AI for improved result relevance
 - **Page-level score aggregation** with score-weighted decay

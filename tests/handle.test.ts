@@ -50,6 +50,7 @@ function makeEvent(options: {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  delete process.env.VERCEL;
 });
 
 describe("searchsocketHandle", () => {
@@ -114,7 +115,7 @@ describe("searchsocketHandle", () => {
           total: 2
         },
         usedRerank: false,
-        modelId: "text-embedding-3-small"
+        modelId: "jina-embeddings-v3"
       }
     });
 
@@ -213,7 +214,7 @@ describe("searchsocketHandle", () => {
         meta: {
           timingsMs: { embed: 0, vector: 0, rerank: 0, total: 0 },
           usedRerank: false,
-          modelId: "text-embedding-3-small"
+          modelId: "jina-embeddings-v3"
         }
       })
     } as unknown as SearchEngine);
@@ -351,7 +352,7 @@ describe("searchsocketHandle", () => {
         meta: {
           timingsMs: { embed: 0, vector: 0, rerank: 0, total: 0 },
           usedRerank: false,
-          modelId: "text-embedding-3-small"
+          modelId: "jina-embeddings-v3"
         }
       })
     } as unknown as SearchEngine);
@@ -400,5 +401,80 @@ describe("searchsocketHandle", () => {
         message: "Malformed JSON request body"
       }
     });
+  });
+
+  it("resolves rawConfig and serves search results", async () => {
+    const search = vi.fn().mockResolvedValue({
+      q: "deploy",
+      scope: "main",
+      results: [],
+      meta: {
+        timingsMs: { embed: 0, vector: 0, rerank: 0, total: 0 },
+        usedRerank: false,
+        modelId: "jina-embeddings-v3"
+      }
+    });
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({
+      rawConfig: {
+        project: { id: "test-site" },
+        source: { mode: "static-output" }
+      }
+    });
+
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search",
+      method: "POST",
+      body: { q: "deploy" }
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(200);
+    expect(search).toHaveBeenCalledTimes(1);
+  });
+
+  it("auto-disables rate limiter on serverless", async () => {
+    process.env.VERCEL = "1";
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn().mockResolvedValue({
+        q: "ok",
+        scope: "main",
+        results: [],
+        meta: {
+          timingsMs: { embed: 0, vector: 0, rerank: 0, total: 0 },
+          usedRerank: false,
+          modelId: "jina-embeddings-v3"
+        }
+      })
+    } as unknown as SearchEngine);
+
+    const config = makeConfig({
+      api: {
+        path: "/api/search",
+        cors: { allowOrigins: [] },
+        rateLimit: { windowMs: 60_000, max: 1 }
+      }
+    });
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search",
+      method: "POST",
+      body: { q: "test" }
+    });
+
+    const first = await handle({ event, resolve });
+    const second = await handle({ event, resolve });
+
+    // Both succeed because rate limiter is disabled on serverless
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
   });
 });

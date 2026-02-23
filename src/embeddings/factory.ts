@@ -1,9 +1,9 @@
 import type { EmbeddingsProvider, ResolvedSearchSocketConfig } from "../types";
 import { SearchSocketError } from "../errors";
-import { OpenAIEmbeddingsProvider } from "./openai";
+import { JinaEmbeddingsProvider } from "./jina";
 
 export function createEmbeddingsProvider(config: ResolvedSearchSocketConfig): EmbeddingsProvider {
-  if (config.embeddings.provider !== "openai") {
+  if (config.embeddings.provider !== "jina") {
     throw new SearchSocketError(
       "CONFIG_MISSING",
       `Unsupported embeddings provider ${config.embeddings.provider}`
@@ -18,7 +18,7 @@ export function createEmbeddingsProvider(config: ResolvedSearchSocketConfig): Em
     );
   }
 
-  return new OpenAIEmbeddingsProvider({
+  return new JinaEmbeddingsProvider({
     apiKey,
     batchSize: config.embeddings.batchSize,
     concurrency: config.embeddings.concurrency
