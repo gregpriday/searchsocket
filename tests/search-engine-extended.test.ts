@@ -428,10 +428,10 @@ describe("SearchEngine - adversarial cases", () => {
 
     await engine.search({ q: "test", topK: 2 });
 
-    // Default is page mode: Math.max(100, 2 * 8) = 100
+    // Default is page mode: Math.max(2 * 10, 50) = 50
     expect(query).toHaveBeenCalledWith(
       [1, 0, 0],
-      expect.objectContaining({ topK: 100 }),
+      expect.objectContaining({ topK: 50 }),
       expect.any(Object)
     );
   });
@@ -509,6 +509,33 @@ describe("SearchEngine - adversarial cases", () => {
     expect(aboutResult!.chunks).toBeUndefined();
   });
 
+  it("filters sub-chunks below minChunkScoreRatio", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minChunkScoreRatio = 0.8; // strict: chunks must be >= 80% of best
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/page"), score: 1.0 },
+      { ...makeHit("chunk-2", "/page"), score: 0.85 },  // 85% of best — passes
+      { ...makeHit("chunk-3", "/page"), score: 0.5 },   // 50% of best — filtered
+      { ...makeHit("chunk-4", "/page"), score: 0.3 }    // 30% of best — filtered
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      embeddingsProvider: new FakeEmbeddings(),
+      vectorStore: new FakeStore(hits)
+    });
+
+    const result = await engine.search({ q: "test", topK: 10 });
+    const pageResult = result.results[0]!;
+
+    // Only 2 chunks pass the 80% threshold, so chunks should be included (2 > 1)
+    expect(pageResult.chunks).toBeDefined();
+    expect(pageResult.chunks!.length).toBe(2);
+  });
+
   it("groupBy chunk returns raw chunk results without deduplication", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
@@ -565,10 +592,10 @@ describe("SearchEngine - adversarial cases", () => {
 
     await engine.search({ q: "test", topK: 80 });
 
-    // Page mode: Math.max(100, 80 * 8) = 640
+    // Page mode: Math.max(80 * 10, 50) = 800
     expect(query).toHaveBeenCalledWith(
       [1, 0, 0],
-      expect.objectContaining({ topK: 640 }),
+      expect.objectContaining({ topK: 800 }),
       expect.any(Object)
     );
   });

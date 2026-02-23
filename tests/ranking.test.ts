@@ -179,25 +179,38 @@ describe("aggregateByPage", () => {
     expect(homeResult!.bestChunk.finalScore).toBe(0.9);
   });
 
-  it("page with many weak matches outranks page with one strong match", () => {
-    // Single strong chunk on /focused
+  it("page with several relevant matches outranks page with one strong match", () => {
     const ranked: RankedHit[] = [
       makeRankedHit("/focused", 0.92),
-      // Homepage with 8 weaker chunks
+      // Homepage with 5 solid chunks — score-weighted decay still gives a boost
       makeRankedHit("/home", 0.88),
       makeRankedHit("/home", 0.85),
       makeRankedHit("/home", 0.83),
       makeRankedHit("/home", 0.80),
-      makeRankedHit("/home", 0.78),
-      makeRankedHit("/home", 0.75),
-      makeRankedHit("/home", 0.72),
-      makeRankedHit("/home", 0.70)
+      makeRankedHit("/home", 0.78)
     ];
 
     const pages = aggregateByPage(ranked, config);
-    // /home should rank higher due to aggregation boost from 8 matching chunks
     expect(pages[0]!.url).toBe("/home");
     expect(pages[1]!.url).toBe("/focused");
+  });
+
+  it("caps aggregation so chunk-heavy pages do not dominate", () => {
+    // A page with 5 chunks and a page with 20 chunks at same scores
+    // should get very similar aggregation bonuses due to the cap
+    const fiveChunks: RankedHit[] = Array.from({ length: 5 }, (_, i) =>
+      makeRankedHit("/five", 0.8 - i * 0.02)
+    );
+    const twentyChunks: RankedHit[] = Array.from({ length: 20 }, (_, i) =>
+      makeRankedHit("/twenty", 0.8 - i * 0.02)
+    );
+
+    const pagesFromFive = aggregateByPage(fiveChunks, config);
+    const pagesFromTwenty = aggregateByPage(twentyChunks, config);
+
+    // With cap=5, both should have the same page score since
+    // only the top 5 chunks contribute to aggregation
+    expect(pagesFromFive[0]!.pageScore).toBeCloseTo(pagesFromTwenty[0]!.pageScore, 6);
   });
 
   it("page weights multiply the score correctly", () => {
@@ -237,7 +250,7 @@ describe("aggregateByPage", () => {
     expect(pages[1]!.url).toBe("/b");
     expect(pages[0]!.matchingChunks.length).toBe(1);
     expect(pages[1]!.matchingChunks.length).toBe(1);
-    // log(1) = 0, so pageScore should equal the chunk score exactly
+    // No additional chunks means zero aggregation bonus
     expect(pages[0]!.pageScore).toBe(0.9);
     expect(pages[1]!.pageScore).toBe(0.8);
   });

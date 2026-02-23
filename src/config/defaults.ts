@@ -72,6 +72,9 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       enableIncomingLinkBoost: true,
       enableDepthBoost: true,
       pageWeights: {},
+      aggregationCap: 5,
+      aggregationDecay: 0.5,
+      minChunkScoreRatio: 0.5,
       weights: {
         incomingLinks: 0.05,
         depth: 0.03,

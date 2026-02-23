@@ -100,7 +100,7 @@ export class SearchEngine {
     const wantsRerank = Boolean(input.rerank);
     const groupByPage = (input.groupBy ?? "page") === "page";
     const candidateK = groupByPage
-      ? Math.max(100, topK * 8)
+      ? Math.max(topK * 10, 50)
       : Math.max(50, topK);
 
     const embedStart = process.hrtime.bigint();
@@ -139,22 +139,30 @@ export class SearchEngine {
 
     if (groupByPage) {
       const pages = aggregateByPage(ordered, this.config);
-      results = pages.slice(0, topK).map((page) => ({
-        url: page.url,
-        title: page.title,
-        sectionTitle: page.bestChunk.hit.metadata.sectionTitle || undefined,
-        snippet: page.bestChunk.hit.metadata.snippet,
-        score: Number(page.pageScore.toFixed(6)),
-        routeFile: page.routeFile,
-        chunks: page.matchingChunks.length > 1
-          ? page.matchingChunks.slice(0, 5).map((c) => ({
-              sectionTitle: c.hit.metadata.sectionTitle || undefined,
-              snippet: c.hit.metadata.snippet,
-              headingPath: c.hit.metadata.headingPath,
-              score: Number(c.finalScore.toFixed(6))
-            }))
-          : undefined
-      }));
+      const minRatio = this.config.ranking.minChunkScoreRatio;
+      results = pages.slice(0, topK).map((page) => {
+        const bestScore = page.bestChunk.finalScore;
+        const minScore = Number.isFinite(bestScore) ? bestScore * minRatio : Number.NEGATIVE_INFINITY;
+        const meaningful = page.matchingChunks
+          .filter((c) => c.finalScore >= minScore)
+          .slice(0, 5);
+        return {
+          url: page.url,
+          title: page.title,
+          sectionTitle: page.bestChunk.hit.metadata.sectionTitle || undefined,
+          snippet: page.bestChunk.hit.metadata.snippet,
+          score: Number(page.pageScore.toFixed(6)),
+          routeFile: page.routeFile,
+          chunks: meaningful.length > 1
+            ? meaningful.map((c) => ({
+                sectionTitle: c.hit.metadata.sectionTitle || undefined,
+                snippet: c.hit.metadata.snippet,
+                headingPath: c.hit.metadata.headingPath,
+                score: Number(c.finalScore.toFixed(6))
+              }))
+            : undefined
+        };
+      });
     } else {
       results = ordered.slice(0, topK).map(({ hit, finalScore }) => ({
         url: hit.metadata.url,

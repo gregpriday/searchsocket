@@ -77,6 +77,9 @@ export interface SearchSocketConfig {
     enableIncomingLinkBoost?: boolean;
     enableDepthBoost?: boolean;
     pageWeights?: Record<string, number>;
+    aggregationCap?: number;
+    aggregationDecay?: number;
+    minChunkScoreRatio?: number;
     weights?: {
       incomingLinks?: number;
       depth?: number;
@@ -182,6 +185,9 @@ export interface ResolvedSearchSocketConfig {
     enableIncomingLinkBoost: boolean;
     enableDepthBoost: boolean;
     pageWeights: Record<string, number>;
+    aggregationCap: number;
+    aggregationDecay: number;
+    minChunkScoreRatio: number;
     weights: {
       incomingLinks: number;
       depth: number;

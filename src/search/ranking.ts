@@ -88,7 +88,8 @@ export function aggregateByPage(
     else groups.set(url, [hit]);
   }
 
-  // 2. For each group, compute page score
+  // 2. For each group, compute page score using score-weighted decay
+  const { aggregationCap, aggregationDecay } = config.ranking;
   const pages: PageResult[] = [];
   for (const [url, chunks] of groups) {
     // Sort chunks by score desc within the group (NaN-safe)
@@ -98,13 +99,20 @@ export function aggregateByPage(
     });
     const best = chunks[0]!;
     const maxScore = Number.isFinite(best.finalScore) ? best.finalScore : Number.NEGATIVE_INFINITY;
-    const matchCount = chunks.length;
 
-    // page_score = max_chunk_score + log(matching_chunks) * aggregation_weight
-    // log(1) = 0 so single-chunk pages get zero aggregation bonus
-    let pageScore = maxScore + Math.log(matchCount) * config.ranking.weights.aggregation;
+    // Score-weighted aggregation with exponential decay on top-N chunks.
+    // Only additional chunks (i >= 1) contribute; single-chunk pages get zero bonus.
+    const topChunks = chunks.slice(0, aggregationCap);
+    let aggregationBonus = 0;
+    for (let i = 1; i < topChunks.length; i++) {
+      const chunkScore = Number.isFinite(topChunks[i]!.finalScore) ? topChunks[i]!.finalScore : 0;
+      aggregationBonus += chunkScore * Math.pow(aggregationDecay, i);
+    }
+    let pageScore = maxScore + aggregationBonus * config.ranking.weights.aggregation;
 
-    // Apply page weight if configured
+    // Apply page weight if configured.
+    // Note: page weights are multiplicative on the already-boosted score,
+    // so they compound with aggregation. Use gentle values (1.05–1.2x).
     const pageWeight = findPageWeight(url, config.ranking.pageWeights);
     if (pageWeight !== 1) {
       pageScore *= pageWeight;
