@@ -5,6 +5,7 @@ import { Logger } from "../core/logger";
 interface MinimalVitePlugin {
   name: string;
   apply?: "build" | "serve";
+  config?: () => Record<string, unknown>;
   closeBundle?: () => Promise<void> | void;
 }
 
@@ -51,13 +52,32 @@ function shouldRunAutoIndex(options: SearchSocketAutoIndexOptions): boolean {
   return false;
 }
 
+export function searchsocketViteConfig(): MinimalVitePlugin {
+  return {
+    name: "searchsocket:config",
+    config() {
+      return {
+        ssr: {
+          external: ["@libsql/client", "libsql"]
+        }
+      };
+    }
+  };
+}
+
 export function searchsocketVitePlugin(options: SearchSocketAutoIndexOptions = {}): MinimalVitePlugin {
   let executed = false;
   let running = false;
 
   return {
     name: "searchsocket:auto-index",
-    apply: "build",
+    config() {
+      return {
+        ssr: {
+          external: ["@libsql/client", "libsql"]
+        }
+      };
+    },
     async closeBundle() {
       if (executed || running) {
         return;

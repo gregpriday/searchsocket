@@ -1,3 +1,3 @@
 export { searchsocketHandle } from "./sveltekit/handle";
-export { searchsocketVitePlugin } from "./sveltekit/plugin";
+export { searchsocketViteConfig, searchsocketVitePlugin } from "./sveltekit/plugin";
 export type { SearchSocketAutoIndexOptions } from "./sveltekit/plugin";

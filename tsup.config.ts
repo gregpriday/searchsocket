@@ -21,15 +21,12 @@ export default defineConfig([
     entry: {
       cli: "src/cli.ts"
     },
-    format: ["cjs"],
+    format: ["esm"],
     dts: false,
     outDir: "dist",
     sourcemap: true,
     clean: false,
     target: "node20",
-    outExtension() {
-      return { js: ".cjs" };
-    },
     banner: {
       js: "#!/usr/bin/env node"
     }
