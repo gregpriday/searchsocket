@@ -8,18 +8,30 @@ export async function createVectorStore(config: ResolvedSearchSocketConfig, cwd:
   const remoteUrl = process.env[turso.urlEnv];
 
   if (remoteUrl) {
+    // Use HTTP-only client for remote URLs — avoids native libsql/node:sqlite dependency.
+    // This makes SearchSocket work on serverless platforms (Vercel, Cloudflare, etc.)
+    // regardless of Node version.
+    const { createClient } = await import("@libsql/client/http");
     const authToken = process.env[turso.authTokenEnv];
-    return new TursoVectorStore({
+    const client = createClient({
       url: remoteUrl,
-      authToken,
+      authToken
+    });
+    return new TursoVectorStore({
+      client,
       dimension: config.vector.dimension
     });
   }
 
+  // Local file DB — uses native libsql addon (requires Node with native module support)
+  const { createClient } = await import("@libsql/client");
   const localPath = path.resolve(cwd, turso.localPath);
   fs.mkdirSync(path.dirname(localPath), { recursive: true });
+  const client = createClient({
+    url: `file:${localPath}`
+  });
   return new TursoVectorStore({
-    url: `file:${localPath}`,
+    client,
     dimension: config.vector.dimension
   });
 }

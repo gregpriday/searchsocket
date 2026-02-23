@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createClient } from "@libsql/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TursoVectorStore } from "../src/vector/turso";
 import type { Scope, ScopeInfo, VectorRecord } from "../src/types";
@@ -39,7 +40,8 @@ function makeRecord(id: string, vector: number[], overrides: Partial<VectorRecor
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "turso-vector-test-"));
   const dbPath = path.join(tmpDir, "test.db");
-  store = new TursoVectorStore({ url: `file:${dbPath}`, dimension: DIM });
+  const client = createClient({ url: `file:${dbPath}` });
+  store = new TursoVectorStore({ client, dimension: DIM });
 });
 
 afterEach(async () => {

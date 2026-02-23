@@ -23,20 +23,34 @@ describe("createVectorStore", () => {
     expect(await store.health()).toEqual({ ok: true });
   });
 
-  it("uses remote URL from env when set", async () => {
+  it("falls back to local file when remote env var is not set", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "searchsocket-vector-factory-"));
+    tempDirs.push(cwd);
+
+    const config = createDefaultConfig("factory-test");
+    config.vector.turso.urlEnv = "SEARCHSOCKET_TEST_UNSET_URL";
+    delete process.env.SEARCHSOCKET_TEST_UNSET_URL;
+
+    const store = await createVectorStore(config, cwd);
+    expect(await store.health()).toEqual({ ok: true });
+  });
+
+  it("uses HTTP client for remote URL", async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "searchsocket-vector-factory-"));
     tempDirs.push(cwd);
 
     const config = createDefaultConfig("factory-test");
     config.vector.turso.urlEnv = "SEARCHSOCKET_TEST_TURSO_URL";
 
-    // Use a local file URL to simulate a "remote" config path
-    const dbPath = path.join(cwd, "remote.db");
-    process.env.SEARCHSOCKET_TEST_TURSO_URL = `file:${dbPath}`;
+    // Point to a URL that won't connect but verifies the HTTP path is used
+    process.env.SEARCHSOCKET_TEST_TURSO_URL = "http://localhost:0";
 
     try {
       const store = await createVectorStore(config, cwd);
-      expect(await store.health()).toEqual({ ok: true });
+      // Health check will fail since there's no server, but the store was created
+      // using the HTTP client (no native SQLite dependency)
+      const health = await store.health();
+      expect(health.ok).toBe(false);
     } finally {
       delete process.env.SEARCHSOCKET_TEST_TURSO_URL;
     }

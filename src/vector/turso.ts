@@ -1,9 +1,8 @@
-import { createClient, type Client, type InStatement } from "@libsql/client";
+import type { Client, InStatement } from "@libsql/client";
 import type { QueryOpts, Scope, ScopeInfo, VectorHit, VectorRecord, VectorStore } from "../types";
 
 export interface TursoVectorStoreOptions {
-  url?: string;
-  authToken?: string;
+  client: Client;
   dimension?: number;
 }
 
@@ -13,12 +12,9 @@ export class TursoVectorStore implements VectorStore {
   private chunksReady = false;
   private registryReady = false;
 
-  constructor(opts: TursoVectorStoreOptions = {}) {
+  constructor(opts: TursoVectorStoreOptions) {
+    this.client = opts.client;
     this.dimension = opts.dimension;
-    this.client = createClient({
-      url: opts.url ?? "file:vectors.db",
-      authToken: opts.authToken
-    });
   }
 
   private async ensureRegistry(): Promise<void> {
