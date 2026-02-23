@@ -1,5 +1,5 @@
 import type { Client, InStatement } from "@libsql/client";
-import type { QueryOpts, Scope, ScopeInfo, VectorHit, VectorRecord, VectorStore } from "../types";
+import type { PageRecord, QueryOpts, Scope, ScopeInfo, VectorHit, VectorRecord, VectorStore } from "../types";
 
 export interface TursoVectorStoreOptions {
   client: Client;
@@ -11,6 +11,7 @@ export class TursoVectorStore implements VectorStore {
   private readonly dimension: number | undefined;
   private chunksReady = false;
   private registryReady = false;
+  private pagesReady = false;
 
   constructor(opts: TursoVectorStoreOptions) {
     this.client = opts.client;
@@ -26,9 +27,30 @@ export class TursoVectorStore implements VectorStore {
         scope_name  TEXT NOT NULL,
         model_id    TEXT NOT NULL,
         last_indexed_at TEXT NOT NULL,
-        vector_count INTEGER
+        vector_count INTEGER,
+        last_estimate_tokens INTEGER,
+        last_estimate_cost_usd REAL,
+        last_estimate_changed_chunks INTEGER
       )
     `);
+
+    // Migrate existing tables: add estimate columns if missing
+    const estimateCols = [
+      { name: "last_estimate_tokens", def: "INTEGER" },
+      { name: "last_estimate_cost_usd", def: "REAL" },
+      { name: "last_estimate_changed_chunks", def: "INTEGER" }
+    ];
+    for (const col of estimateCols) {
+      try {
+        await this.client.execute(`ALTER TABLE registry ADD COLUMN ${col.name} ${col.def}`);
+      } catch (error) {
+        // Only ignore duplicate column errors, rethrow others
+        if (error instanceof Error && !error.message.includes("duplicate column")) {
+          throw error;
+        }
+      }
+    }
+
     this.registryReady = true;
   }
 
@@ -56,6 +78,41 @@ export class TursoVectorStore implements VectorStore {
       `CREATE INDEX IF NOT EXISTS idx ON chunks (libsql_vector_idx(embedding, 'metric=cosine'))`
     ]);
     this.chunksReady = true;
+  }
+
+  private async ensurePages(): Promise<void> {
+    if (this.pagesReady) return;
+    await this.client.execute(`
+      CREATE TABLE IF NOT EXISTS pages (
+        project_id       TEXT NOT NULL,
+        scope_name       TEXT NOT NULL,
+        url              TEXT NOT NULL,
+        title            TEXT NOT NULL,
+        markdown         TEXT NOT NULL,
+        route_file       TEXT NOT NULL DEFAULT '',
+        route_resolution TEXT NOT NULL DEFAULT 'exact',
+        incoming_links   INTEGER NOT NULL DEFAULT 0,
+        outgoing_links   INTEGER NOT NULL DEFAULT 0,
+        depth            INTEGER NOT NULL DEFAULT 0,
+        tags             TEXT NOT NULL DEFAULT '[]',
+        indexed_at       TEXT NOT NULL,
+        PRIMARY KEY (project_id, scope_name, url)
+      )
+    `);
+    this.pagesReady = true;
+  }
+
+  private async chunksTableExists(): Promise<boolean> {
+    try {
+      await this.client.execute("SELECT 1 FROM chunks LIMIT 0");
+      return true;
+    } catch (error) {
+      // Only return false for "no such table" errors, rethrow everything else
+      if (error instanceof Error && error.message.includes("no such table")) {
+        return false;
+      }
+      throw error;
+    }
   }
 
   async upsert(records: VectorRecord[], _scope: Scope): Promise<void> {
@@ -169,7 +226,7 @@ export class TursoVectorStore implements VectorStore {
     return hits.slice(0, opts.topK);
   }
 
-  async deleteByIds(ids: string[], _scope: Scope): Promise<void> {
+  async deleteByIds(ids: string[], scope: Scope): Promise<void> {
     if (ids.length === 0) return;
 
     const BATCH_SIZE = 500;
@@ -177,8 +234,8 @@ export class TursoVectorStore implements VectorStore {
       const batch = ids.slice(i, i + BATCH_SIZE);
       const placeholders = batch.map(() => "?").join(", ");
       await this.client.execute({
-        sql: `DELETE FROM chunks WHERE id IN (${placeholders})`,
-        args: batch
+        sql: `DELETE FROM chunks WHERE project_id = ? AND scope_name = ? AND id IN (${placeholders})`,
+        args: [scope.projectId, scope.scopeName, ...batch]
       });
     }
   }
@@ -192,8 +249,24 @@ export class TursoVectorStore implements VectorStore {
         sql: `DELETE FROM chunks WHERE project_id = ? AND scope_name = ?`,
         args: [scope.projectId, scope.scopeName]
       });
-    } catch {
-      // chunks table doesn't exist yet, that's fine
+    } catch (error) {
+      // Only ignore "no such table" errors
+      if (error instanceof Error && !error.message.includes("no such table")) {
+        throw error;
+      }
+    }
+
+    // Delete pages - table may not exist yet for a fresh DB
+    try {
+      await this.client.execute({
+        sql: `DELETE FROM pages WHERE project_id = ? AND scope_name = ?`,
+        args: [scope.projectId, scope.scopeName]
+      });
+    } catch (error) {
+      // Only ignore "no such table" errors
+      if (error instanceof Error && !error.message.includes("no such table")) {
+        throw error;
+      }
     }
 
     await this.client.execute({
@@ -205,7 +278,8 @@ export class TursoVectorStore implements VectorStore {
   async listScopes(scopeProjectId: string): Promise<ScopeInfo[]> {
     await this.ensureRegistry();
     const rs = await this.client.execute({
-      sql: `SELECT project_id, scope_name, model_id, last_indexed_at, vector_count
+      sql: `SELECT project_id, scope_name, model_id, last_indexed_at, vector_count,
+                   last_estimate_tokens, last_estimate_cost_usd, last_estimate_changed_chunks
             FROM registry WHERE project_id = ?`,
       args: [scopeProjectId]
     });
@@ -215,7 +289,10 @@ export class TursoVectorStore implements VectorStore {
       scopeName: row.scope_name as string,
       modelId: row.model_id as string,
       lastIndexedAt: row.last_indexed_at as string,
-      vectorCount: row.vector_count as number | undefined
+      vectorCount: row.vector_count as number | undefined,
+      lastEstimateTokens: row.last_estimate_tokens as number | undefined,
+      lastEstimateCostUSD: row.last_estimate_cost_usd as number | undefined,
+      lastEstimateChangedChunks: row.last_estimate_changed_chunks as number | undefined
     }));
   }
 
@@ -224,10 +301,109 @@ export class TursoVectorStore implements VectorStore {
     const key = `${info.projectId}:${info.scopeName}`;
     await this.client.execute({
       sql: `INSERT OR REPLACE INTO registry
-            (scope_key, project_id, scope_name, model_id, last_indexed_at, vector_count)
-            VALUES (?, ?, ?, ?, ?, ?)`,
-      args: [key, info.projectId, info.scopeName, info.modelId, info.lastIndexedAt, info.vectorCount ?? null]
+            (scope_key, project_id, scope_name, model_id, last_indexed_at, vector_count,
+             last_estimate_tokens, last_estimate_cost_usd, last_estimate_changed_chunks)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        key, info.projectId, info.scopeName, info.modelId, info.lastIndexedAt,
+        info.vectorCount ?? null,
+        info.lastEstimateTokens ?? null,
+        info.lastEstimateCostUSD ?? null,
+        info.lastEstimateChangedChunks ?? null
+      ]
     });
+  }
+
+  async getContentHashes(scope: Scope): Promise<Map<string, string>> {
+    const exists = await this.chunksTableExists();
+    if (!exists) return new Map();
+
+    const rs = await this.client.execute({
+      sql: `SELECT id, content_hash FROM chunks WHERE project_id = ? AND scope_name = ?`,
+      args: [scope.projectId, scope.scopeName]
+    });
+
+    const map = new Map<string, string>();
+    for (const row of rs.rows) {
+      map.set(row.id as string, row.content_hash as string);
+    }
+    return map;
+  }
+
+  async upsertPages(pages: PageRecord[], scope: Scope): Promise<void> {
+    if (pages.length === 0) return;
+    await this.ensurePages();
+
+    // Validate all pages match the provided scope
+    for (const page of pages) {
+      if (page.projectId !== scope.projectId || page.scopeName !== scope.scopeName) {
+        throw new Error(
+          `Page scope mismatch: page has ${page.projectId}:${page.scopeName} but scope is ${scope.projectId}:${scope.scopeName}`
+        );
+      }
+    }
+
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < pages.length; i += BATCH_SIZE) {
+      const batch = pages.slice(i, i + BATCH_SIZE);
+      const stmts: InStatement[] = batch.map((p) => ({
+        sql: `INSERT OR REPLACE INTO pages
+              (project_id, scope_name, url, title, markdown, route_file,
+               route_resolution, incoming_links, outgoing_links, depth, tags, indexed_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          p.projectId, p.scopeName, p.url, p.title, p.markdown, p.routeFile,
+          p.routeResolution, p.incomingLinks, p.outgoingLinks, p.depth,
+          JSON.stringify(p.tags), p.indexedAt
+        ]
+      }));
+      await this.client.batch(stmts);
+    }
+  }
+
+  async getPage(url: string, scope: Scope): Promise<PageRecord | null> {
+    await this.ensurePages();
+    const rs = await this.client.execute({
+      sql: `SELECT * FROM pages WHERE project_id = ? AND scope_name = ? AND url = ?`,
+      args: [scope.projectId, scope.scopeName, url]
+    });
+
+    if (rs.rows.length === 0) return null;
+
+    const row = rs.rows[0]!;
+    return {
+      url: row.url as string,
+      title: row.title as string,
+      markdown: row.markdown as string,
+      projectId: row.project_id as string,
+      scopeName: row.scope_name as string,
+      routeFile: row.route_file as string,
+      routeResolution: row.route_resolution as "exact" | "best-effort",
+      incomingLinks: row.incoming_links as number,
+      outgoingLinks: row.outgoing_links as number,
+      depth: row.depth as number,
+      tags: JSON.parse((row.tags as string) || "[]"),
+      indexedAt: row.indexed_at as string
+    };
+  }
+
+  async deletePages(scope: Scope): Promise<void> {
+    await this.ensurePages();
+    await this.client.execute({
+      sql: `DELETE FROM pages WHERE project_id = ? AND scope_name = ?`,
+      args: [scope.projectId, scope.scopeName]
+    });
+  }
+
+  async getScopeModelId(scope: Scope): Promise<string | null> {
+    await this.ensureRegistry();
+    const rs = await this.client.execute({
+      sql: `SELECT model_id FROM registry WHERE project_id = ? AND scope_name = ?`,
+      args: [scope.projectId, scope.scopeName]
+    });
+
+    if (rs.rows.length === 0) return null;
+    return rs.rows[0]!.model_id as string;
   }
 
   async health(): Promise<{ ok: boolean; details?: string }> {

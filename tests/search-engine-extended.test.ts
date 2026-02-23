@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SearchEngine } from "../src/search/engine";
 import { createDefaultConfig } from "../src/config/defaults";
-import type { EmbeddingsProvider, VectorHit, VectorStore } from "../src/types";
+import type { EmbeddingsProvider, PageRecord, VectorHit, VectorStore } from "../src/types";
 
 const tempDirs: string[] = [];
 
@@ -19,7 +19,20 @@ class FakeEmbeddings implements EmbeddingsProvider {
 }
 
 class FakeStore implements VectorStore {
+  private pages = new Map<string, PageRecord>();
+  private scopeModelId: string | null = null;
+
   constructor(private readonly hits: VectorHit[] = []) {}
+
+  withPage(page: PageRecord): FakeStore {
+    this.pages.set(`${page.projectId}:${page.scopeName}:${page.url}`, page);
+    return this;
+  }
+
+  withScopeModelId(modelId: string): FakeStore {
+    this.scopeModelId = modelId;
+    return this;
+  }
 
   async upsert(): Promise<void> {
     return;
@@ -47,6 +60,26 @@ class FakeStore implements VectorStore {
 
   async health() {
     return { ok: true };
+  }
+
+  async getContentHashes() {
+    return new Map<string, string>();
+  }
+
+  async upsertPages(): Promise<void> {
+    return;
+  }
+
+  async getPage(url: string, scope: { projectId: string; scopeName: string }): Promise<PageRecord | null> {
+    return this.pages.get(`${scope.projectId}:${scope.scopeName}:${url}`) ?? null;
+  }
+
+  async deletePages(): Promise<void> {
+    return;
+  }
+
+  async getScopeModelId(): Promise<string | null> {
+    return this.scopeModelId;
   }
 }
 
@@ -163,29 +196,27 @@ describe("SearchEngine - adversarial cases", () => {
   it("normalizes full URLs when loading indexed pages", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    const pagePath = path.join(cwd, ".searchsocket", "pages", "main", "docs", "getting-started.md");
 
-    await fs.mkdir(path.dirname(pagePath), { recursive: true });
-    await fs.writeFile(
-      pagePath,
-      `---
-url: "/docs/getting-started"
-title: "Getting Started"
-routeFile: "src/routes/docs/getting-started/+page.svelte"
----
-
-## Install
-
-Run pnpm add searchsocket.
-`,
-      "utf8"
-    );
+    const store = new FakeStore().withPage({
+      url: "/docs/getting-started",
+      title: "Getting Started",
+      markdown: "## Install\n\nRun pnpm add searchsocket.",
+      projectId: config.project.id,
+      scopeName: "main",
+      routeFile: "src/routes/docs/getting-started/+page.svelte",
+      routeResolution: "exact",
+      incomingLinks: 0,
+      outgoingLinks: 0,
+      depth: 2,
+      tags: [],
+      indexedAt: "2026-01-01T00:00:00.000Z"
+    });
 
     const engine = await SearchEngine.create({
       cwd,
       config,
       embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: new FakeStore()
+      vectorStore: store
     });
 
     const page = await engine.getPage("https://example.com/docs/getting-started?ref=nav#install");
@@ -198,27 +229,27 @@ Run pnpm add searchsocket.
   it("normalizes query/hash suffixes for path-style getPage inputs", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    const pagePath = path.join(cwd, ".searchsocket", "pages", "main", "docs", "faq.md");
 
-    await fs.mkdir(path.dirname(pagePath), { recursive: true });
-    await fs.writeFile(
-      pagePath,
-      `---
-url: "/docs/faq"
-title: "FAQ"
-routeFile: "src/routes/docs/faq/+page.svelte"
----
-
-Frequently asked questions.
-`,
-      "utf8"
-    );
+    const store = new FakeStore().withPage({
+      url: "/docs/faq",
+      title: "FAQ",
+      markdown: "Frequently asked questions.",
+      projectId: config.project.id,
+      scopeName: "main",
+      routeFile: "src/routes/docs/faq/+page.svelte",
+      routeResolution: "exact",
+      incomingLinks: 0,
+      outgoingLinks: 0,
+      depth: 2,
+      tags: [],
+      indexedAt: "2026-01-01T00:00:00.000Z"
+    });
 
     const engine = await SearchEngine.create({
       cwd,
       config,
       embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: new FakeStore()
+      vectorStore: store
     });
 
     const page = await engine.getPage("/docs/faq?ref=nav#pricing");
@@ -243,36 +274,17 @@ Frequently asked questions.
     });
   });
 
-  it("fails fast when manifest model does not match active embedding model", async () => {
+  it("fails fast when scope model does not match active embedding model", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    const stateDir = path.join(cwd, config.state.dir);
-    await fs.mkdir(stateDir, { recursive: true });
-    await fs.writeFile(
-      path.join(stateDir, "manifest.json"),
-      JSON.stringify(
-        {
-          version: 1,
-          scopes: {
-            main: {
-              projectId: config.project.id,
-              scopeName: "main",
-              embeddingModel: "text-embedding-3-large",
-              chunks: {}
-            }
-          }
-        },
-        null,
-        2
-      ),
-      "utf8"
-    );
+
+    const store = new FakeStore().withScopeModelId("text-embedding-3-large");
 
     const engine = await SearchEngine.create({
       cwd,
       config,
       embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: new FakeStore()
+      vectorStore: store
     });
 
     await expect(engine.search({ q: "test" })).rejects.toMatchObject({
@@ -292,7 +304,12 @@ Frequently asked questions.
       deleteScope: async () => undefined,
       listScopes: async () => [],
       recordScope: async () => undefined,
-      health: async () => ({ ok: true })
+      health: async () => ({ ok: true }),
+      getContentHashes: async () => new Map(),
+      upsertPages: async () => undefined,
+      getPage: async () => null,
+      deletePages: async () => undefined,
+      getScopeModelId: async () => null
     };
 
     const embeddings: EmbeddingsProvider = {

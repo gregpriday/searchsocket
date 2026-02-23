@@ -8,11 +8,7 @@ import pkg from "../package.json";
 import { writeMinimalConfig, loadConfig, mergeConfig } from "./config/load";
 import { Logger } from "./core/logger";
 import { resolveScope } from "./core/scope";
-import {
-  ensureStateDirs,
-  readManifest,
-  readRegistry
-} from "./core/state";
+import { ensureStateDirs } from "./core/state";
 import { createEmbeddingsProvider } from "./embeddings";
 import { SearchSocketError } from "./errors";
 import { IndexPipeline } from "./indexing/pipeline";
@@ -20,7 +16,7 @@ import { runMcpServer } from "./mcp/server";
 import { SearchEngine } from "./search/engine";
 import { createVectorStore } from "./vector";
 import { sanitizeScopeName } from "./utils/text";
-import type { IndexStats, ResolvedSearchSocketConfig, Scope, VectorStore } from "./types";
+import type { IndexStats, ResolvedSearchSocketConfig, Scope, ScopeInfo, VectorStore } from "./types";
 
 interface RootCommandOptions {
   cwd?: string;
@@ -312,22 +308,37 @@ program
 
     const config = await loadConfig({ cwd, configPath: rootOpts?.config });
     const scope = resolveScope(config, opts.scope);
-    const { statePath } = ensureStateDirs(cwd, config.state.dir, scope);
 
-    const manifest = readManifest(statePath);
-    const scopeManifest = manifest.scopes[scope.scopeName];
-    const registry = readRegistry(statePath);
-    const scopeRegistry = registry.scopes.filter((entry) => entry.projectId === scope.projectId);
-
+    let vectorStore: VectorStore;
     let health: { ok: boolean; details?: string } = { ok: false, details: "not checked" };
     try {
-      const vector = await createVectorStore(config, cwd);
-      health = await vector.health();
+      vectorStore = await createVectorStore(config, cwd);
+      health = await vectorStore.health();
     } catch (error) {
       health = {
         ok: false,
         details: error instanceof Error ? error.message : "unknown error"
       };
+      process.stdout.write(`project: ${config.project.id}\n`);
+      process.stdout.write(`vector health: error (${health.details})\n`);
+      process.exitCode = 1;
+      return;
+    }
+
+    let scopeRegistry: ScopeInfo[] = [];
+    let scopeInfo: ScopeInfo | undefined;
+    let hashes: Map<string, string> = new Map();
+
+    try {
+      scopeRegistry = await vectorStore.listScopes(config.project.id);
+      scopeInfo = scopeRegistry.find((entry) => entry.scopeName === scope.scopeName);
+      hashes = await vectorStore.getContentHashes(scope);
+    } catch (error) {
+      process.stdout.write(`project: ${config.project.id}\n`);
+      process.stdout.write(`resolved scope: ${scope.scopeName}\n`);
+      process.stdout.write(`vector health: error (${error instanceof Error ? error.message : "unknown error"})\n`);
+      process.exitCode = 1;
+      return;
     }
 
     process.stdout.write(`project: ${config.project.id}\n`);
@@ -338,12 +349,14 @@ program
     process.stdout.write(`vector backend: turso/libsql (${vectorMode})\n`);
     process.stdout.write(`vector health: ${health.ok ? "ok" : `error (${health.details ?? "n/a"})`}\n`);
 
-    if (scopeManifest) {
-      process.stdout.write(`last indexed (${scope.scopeName}): ${scopeManifest.lastIndexedAt ?? "never"}\n`);
-      process.stdout.write(`tracked chunks: ${Object.keys(scopeManifest.chunks).length}\n`);
-      if (scopeManifest.lastEstimate) {
-        process.stdout.write(`last estimated tokens: ${scopeManifest.lastEstimate.estimatedTokens}\n`);
-        process.stdout.write(`last estimated cost: ${formatUsd(scopeManifest.lastEstimate.estimatedCostUSD)}\n`);
+    if (scopeInfo) {
+      process.stdout.write(`last indexed (${scope.scopeName}): ${scopeInfo.lastIndexedAt ?? "never"}\n`);
+      process.stdout.write(`tracked chunks: ${hashes.size}\n`);
+      if (scopeInfo.lastEstimateTokens != null) {
+        process.stdout.write(`last estimated tokens: ${scopeInfo.lastEstimateTokens}\n`);
+      }
+      if (scopeInfo.lastEstimateCostUSD != null) {
+        process.stdout.write(`last estimated cost: ${formatUsd(scopeInfo.lastEstimateCostUSD)}\n`);
       }
     } else {
       process.stdout.write(`last indexed (${scope.scopeName}): never\n`);
@@ -480,30 +493,21 @@ program
 
     const config = await loadConfig({ cwd, configPath: rootOpts?.config });
     const baseScope = resolveScope(config);
-    const vectorStore = await createVectorStore(config, cwd);
-    let scopes = [] as Array<{
-      projectId: string;
-      scopeName: string;
-      modelId: string;
-      lastIndexedAt: string;
-      vectorCount?: number;
-    }>;
-    let registrySource = "remote registry";
 
+    let vectorStore: VectorStore;
+    let scopes: ScopeInfo[];
     try {
+      vectorStore = await createVectorStore(config, cwd);
       scopes = await vectorStore.listScopes(config.project.id);
     } catch (error) {
-      registrySource = "local fallback registry";
-      process.stdout.write(
-        `warning: failed to list remote scopes (${error instanceof Error ? error.message : String(error)}), falling back to local registry\n`
+      process.stderr.write(
+        `error: failed to access Turso vector store: ${error instanceof Error ? error.message : String(error)}\n`
       );
-
-      const { statePath } = ensureStateDirs(cwd, config.state.dir, baseScope);
-      const localRegistry = readRegistry(statePath);
-      scopes = localRegistry.scopes.filter((entry) => entry.projectId === config.project.id);
+      process.exitCode = 1;
+      return;
     }
 
-    process.stdout.write(`using ${registrySource}\n`);
+    process.stdout.write(`using remote registry\n`);
 
     let keepScopes = new Set<string>();
     if (opts.scopesFile) {

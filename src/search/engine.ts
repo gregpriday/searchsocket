@@ -1,15 +1,12 @@
-import fs from "node:fs";
 import path from "node:path";
-import matter from "gray-matter";
 import { z } from "zod";
 import { createEmbeddingsProvider } from "../embeddings";
 import { SearchSocketError } from "../errors";
 import { loadConfig } from "../config/load";
 import { resolveScope } from "../core/scope";
-import { readManifest } from "../core/state";
 import { createReranker } from "../rerank";
 import { hrTimeMs } from "../utils/time";
-import { normalizeUrlPath, urlPathToMirrorRelative } from "../utils/path";
+import { normalizeUrlPath } from "../utils/path";
 import { createVectorStore } from "../vector/factory";
 import { rankHits } from "./ranking";
 import type { RankedHit } from "./ranking";
@@ -17,6 +14,7 @@ import type {
   EmbeddingsProvider,
   Reranker,
   ResolvedSearchSocketConfig,
+  Scope,
   SearchRequest,
   SearchResponse,
   VectorStore
@@ -92,7 +90,7 @@ export class SearchEngine {
     const totalStart = process.hrtime.bigint();
 
     const resolvedScope = resolveScope(this.config, input.scope);
-    this.assertModelCompatibility(resolvedScope.scopeName);
+    await this.assertModelCompatibility(resolvedScope);
 
     const topK = input.topK ?? 10;
     const wantsRerank = Boolean(input.rerank);
@@ -161,25 +159,26 @@ export class SearchEngine {
   }> {
     const resolvedScope = resolveScope(this.config, scope);
     const urlPath = this.resolveInputPath(pathOrUrl);
-    const mirrorPath = path.join(
-      this.cwd,
-      this.config.state.dir,
-      "pages",
-      resolvedScope.scopeName,
-      urlPathToMirrorRelative(urlPath)
-    );
+    const page = await this.vectorStore.getPage(urlPath, resolvedScope);
 
-    if (!fs.existsSync(mirrorPath)) {
+    if (!page) {
       throw new SearchSocketError("INVALID_REQUEST", `Indexed page not found for ${urlPath}`, 404);
     }
 
-    const raw = fs.readFileSync(mirrorPath, "utf8");
-    const parsed = matter(raw);
-
     return {
-      url: urlPath,
-      frontmatter: parsed.data as Record<string, unknown>,
-      markdown: parsed.content.trim()
+      url: page.url,
+      frontmatter: {
+        url: page.url,
+        title: page.title,
+        routeFile: page.routeFile,
+        routeResolution: page.routeResolution,
+        incomingLinks: page.incomingLinks,
+        outgoingLinks: page.outgoingLinks,
+        depth: page.depth,
+        tags: page.tags,
+        indexedAt: page.indexedAt
+      },
+      markdown: page.markdown
     };
   }
 
@@ -200,22 +199,12 @@ export class SearchEngine {
     return normalizeUrlPath(withoutQueryOrHash);
   }
 
-  private assertModelCompatibility(scopeName: string): void {
-    const manifestPath = path.join(this.cwd, this.config.state.dir, "manifest.json");
-    if (!fs.existsSync(manifestPath)) {
-      return;
-    }
-
-    const manifest = readManifest(path.join(this.cwd, this.config.state.dir));
-    const scopeManifest = manifest.scopes[scopeName];
-    if (!scopeManifest) {
-      return;
-    }
-
-    if (scopeManifest.embeddingModel !== this.config.embeddings.model) {
+  private async assertModelCompatibility(scope: Scope): Promise<void> {
+    const modelId = await this.vectorStore.getScopeModelId(scope);
+    if (modelId && modelId !== this.config.embeddings.model) {
       throw new SearchSocketError(
         "EMBEDDING_MODEL_MISMATCH",
-        `Scope ${scopeName} was indexed with ${scopeManifest.embeddingModel}. Current config uses ${this.config.embeddings.model}. Re-index with --force.`
+        `Scope ${scope.scopeName} was indexed with ${modelId}. Current config uses ${this.config.embeddings.model}. Re-index with --force.`
       );
     }
   }

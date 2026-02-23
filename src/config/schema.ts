@@ -139,7 +139,8 @@ export const searchSocketConfigSchema = z.object({
     .optional(),
   state: z
     .object({
-      dir: z.string().optional()
+      dir: z.string().optional(),
+      writeMirror: z.boolean().optional()
     })
     .optional()
 });

@@ -96,6 +96,26 @@ class FakeStore implements VectorStore {
   async health() {
     return { ok: true };
   }
+
+  async getContentHashes() {
+    return new Map<string, string>();
+  }
+
+  async upsertPages(): Promise<void> {
+    return;
+  }
+
+  async getPage() {
+    return null;
+  }
+
+  async deletePages(): Promise<void> {
+    return;
+  }
+
+  async getScopeModelId() {
+    return null;
+  }
 }
 
 afterEach(async () => {

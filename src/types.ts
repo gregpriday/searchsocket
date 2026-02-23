@@ -102,6 +102,7 @@ export interface SearchSocketConfig {
   };
   state?: {
     dir?: string;
+    writeMirror?: boolean;
   };
 }
 
@@ -204,6 +205,7 @@ export interface ResolvedSearchSocketConfig {
   };
   state: {
     dir: string;
+    writeMirror: boolean;
   };
 }
 
@@ -306,12 +308,30 @@ export interface VectorHit {
   metadata: VectorRecord["metadata"];
 }
 
+export interface PageRecord {
+  url: string;
+  title: string;
+  markdown: string;
+  projectId: string;
+  scopeName: string;
+  routeFile: string;
+  routeResolution: "exact" | "best-effort";
+  incomingLinks: number;
+  outgoingLinks: number;
+  depth: number;
+  tags: string[];
+  indexedAt: string;
+}
+
 export interface ScopeInfo {
   projectId: string;
   scopeName: string;
   modelId: string;
   lastIndexedAt: string;
   vectorCount?: number;
+  lastEstimateTokens?: number;
+  lastEstimateCostUSD?: number;
+  lastEstimateChangedChunks?: number;
 }
 
 export interface VectorStore {
@@ -322,6 +342,11 @@ export interface VectorStore {
   listScopes(scopeProjectId: string): Promise<ScopeInfo[]>;
   recordScope(info: ScopeInfo): Promise<void>;
   health(): Promise<{ ok: boolean; details?: string }>;
+  getContentHashes(scope: Scope): Promise<Map<string, string>>;
+  upsertPages(pages: PageRecord[], scope: Scope): Promise<void>;
+  getPage(url: string, scope: Scope): Promise<PageRecord | null>;
+  deletePages(scope: Scope): Promise<void>;
+  getScopeModelId(scope: Scope): Promise<string | null>;
 }
 
 export interface EmbeddingsProvider {
@@ -370,29 +395,6 @@ export interface SearchResponse {
     usedRerank: boolean;
     modelId: string;
   };
-}
-
-export interface ScopeManifest {
-  projectId: string;
-  scopeName: string;
-  embeddingModel: string;
-  lastIndexedAt?: string;
-  lastEstimate?: {
-    estimatedTokens: number;
-    estimatedCostUSD: number;
-    changedChunks: number;
-  };
-  chunks: Record<string, { contentHash: string; url: string }>;
-}
-
-export interface ManifestFile {
-  version: 1;
-  scopes: Record<string, ScopeManifest>;
-}
-
-export interface RegistryFile {
-  version: 1;
-  scopes: ScopeInfo[];
 }
 
 export interface IndexStats {

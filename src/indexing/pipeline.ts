@@ -1,13 +1,7 @@
 import path from "node:path";
 import { loadConfig } from "../config/load";
 import { resolveScope } from "../core/scope";
-import {
-  ensureStateDirs,
-  getScopeManifest,
-  readManifest,
-  upsertRegistryScope,
-  writeManifest
-} from "../core/state";
+import { ensureStateDirs } from "../core/state";
 import { createEmbeddingsProvider } from "../embeddings";
 import { SearchSocketError } from "../errors";
 import { createVectorStore } from "../vector";
@@ -28,6 +22,7 @@ import type {
   IndexOptions,
   IndexStats,
   MirrorPage,
+  PageRecord,
   ResolvedSearchSocketConfig,
   Scope,
   ScopeInfo,
@@ -113,52 +108,18 @@ export class IndexPipeline {
     }
 
     const manifestStart = stageStart();
-    const manifestFile = readManifest(statePath);
-    const scopeManifest = getScopeManifest(manifestFile, scope, this.config.embeddings.model);
+    const existingHashes = options.force ? new Map<string, string>() : await this.vectorStore.getContentHashes(scope);
+    const existingModelId = await this.vectorStore.getScopeModelId(scope);
 
     if (
-      scopeManifest.embeddingModel &&
-      scopeManifest.embeddingModel !== this.config.embeddings.model &&
+      existingModelId &&
+      existingModelId !== this.config.embeddings.model &&
       !options.force
     ) {
       throw new SearchSocketError(
         "EMBEDDING_MODEL_MISMATCH",
-        `Scope ${scope.scopeName} uses model ${scopeManifest.embeddingModel}. Re-run with --force to migrate.`
+        `Scope ${scope.scopeName} uses model ${existingModelId}. Re-run with --force to migrate.`
       );
-    }
-
-    if (options.force) {
-      scopeManifest.chunks = {};
-    }
-
-    // Preflight: detect manifest vs remote desynchronization.
-    // If the local manifest has chunks but the remote registry shows vectorCount=0,
-    // the remote was likely wiped externally and we need a full re-sync.
-    const manifestChunkCount = Object.keys(scopeManifest.chunks).length;
-    if (manifestChunkCount > 0 && !options.force && !options.dryRun) {
-      try {
-        const remoteScopes = await this.vectorStore.listScopes(scope.projectId);
-        const remoteScope = remoteScopes.find(
-          (s) => s.scopeName === scope.scopeName
-        );
-
-        if (remoteScope && remoteScope.vectorCount === 0) {
-          this.logger.warn(
-            `Local manifest has ${manifestChunkCount} chunks but remote reports 0 vectors. ` +
-              "The remote index may have been wiped. Re-running with --force to re-sync."
-          );
-          scopeManifest.chunks = {};
-        } else if (!remoteScope && manifestChunkCount > 0) {
-          this.logger.warn(
-            `Local manifest has ${manifestChunkCount} chunks but no remote registry entry found. ` +
-              "The remote index may have been wiped. Re-running with --force to re-sync."
-          );
-          scopeManifest.chunks = {};
-        }
-      } catch {
-        // If we cannot reach the remote to verify, proceed normally.
-        // The worst case is unchanged chunks are skipped (existing behavior).
-      }
     }
 
     stageEnd("manifest", manifestStart);
@@ -273,9 +234,33 @@ export class IndexPipeline {
       };
 
       mirrorPages.push(mirror);
-      await writeMirrorPage(statePath, scope, mirror);
+      if (this.config.state.writeMirror) {
+        await writeMirrorPage(statePath, scope, mirror);
+      }
       this.logger.event("markdown_written", { url: page.url });
     }
+
+    // Store pages in Turso (replace entire scope to remove stale pages)
+    if (!options.dryRun) {
+      const pageRecords: PageRecord[] = mirrorPages.map((mp) => ({
+        url: mp.url,
+        title: mp.title,
+        markdown: mp.markdown,
+        projectId: scope.projectId,
+        scopeName: scope.scopeName,
+        routeFile: mp.routeFile,
+        routeResolution: mp.routeResolution,
+        incomingLinks: mp.incomingLinks,
+        outgoingLinks: mp.outgoingLinks,
+        depth: mp.depth,
+        tags: mp.tags,
+        indexedAt: mp.generatedAt
+      }));
+      // Delete old pages first, then insert new ones to avoid stale data
+      await this.vectorStore.deletePages(scope);
+      await this.vectorStore.upsertPages(pageRecords, scope);
+    }
+
     stageEnd("mirror", mirrorStart);
 
     const chunkStart = stageStart();
@@ -305,8 +290,8 @@ export class IndexPipeline {
         return true;
       }
 
-      const existing = scopeManifest.chunks[chunk.chunkKey];
-      if (!existing) {
+      const existingHash = existingHashes.get(chunk.chunkKey);
+      if (!existingHash) {
         return true;
       }
 
@@ -314,10 +299,10 @@ export class IndexPipeline {
         return true;
       }
 
-      return existing.contentHash !== chunk.contentHash;
+      return existingHash !== chunk.contentHash;
     });
 
-    const deletes = Object.keys(scopeManifest.chunks).filter((chunkKey) => !currentChunkMap.has(chunkKey));
+    const deletes = [...existingHashes.keys()].filter((chunkKey) => !currentChunkMap.has(chunkKey));
 
     const embedStart = stageStart();
 
@@ -417,37 +402,17 @@ export class IndexPipeline {
     const finalizeStart = stageStart();
 
     if (!options.dryRun) {
-      const nextChunkMap: Record<string, { contentHash: string; url: string }> = {};
-
-      for (const chunk of chunks) {
-        nextChunkMap[chunk.chunkKey] = {
-          contentHash: chunk.contentHash,
-          url: chunk.url
-        };
-      }
-
-      scopeManifest.projectId = scope.projectId;
-      scopeManifest.scopeName = scope.scopeName;
-      scopeManifest.embeddingModel = this.config.embeddings.model;
-      scopeManifest.lastIndexedAt = nowIso();
-      scopeManifest.lastEstimate = {
-        changedChunks: changedChunks.length,
-        estimatedTokens,
-        estimatedCostUSD: Number(estimatedCostUSD.toFixed(8))
-      };
-      scopeManifest.chunks = nextChunkMap;
-
-      writeManifest(statePath, manifestFile);
-
       const scopeInfo: ScopeInfo = {
         projectId: scope.projectId,
         scopeName: scope.scopeName,
         modelId: this.config.embeddings.model,
-        lastIndexedAt: scopeManifest.lastIndexedAt,
-        vectorCount: chunks.length
+        lastIndexedAt: nowIso(),
+        vectorCount: chunks.length,
+        lastEstimateTokens: estimatedTokens,
+        lastEstimateCostUSD: Number(estimatedCostUSD.toFixed(8)),
+        lastEstimateChangedChunks: changedChunks.length
       };
 
-      upsertRegistryScope(statePath, scopeInfo);
       await this.vectorStore.recordScope(scopeInfo);
       this.logger.event("registry_updated", {
         scope: scope.scopeName,

@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import matter from "gray-matter";
 import { afterEach, describe, expect, it } from "vitest";
 import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
@@ -86,20 +85,21 @@ describe("IndexPipeline link graph", () => {
   it("counts incoming links from relative href targets", async () => {
     const { cwd, config } = await createProjectFixture();
     const embeddings = new FakeEmbeddingsProvider();
+    const vectorStore = await createVectorStore(config, cwd);
 
     const pipeline = await IndexPipeline.create({
       cwd,
       config,
       embeddingsProvider: embeddings,
-      vectorStore: await createVectorStore(config, cwd)
+      vectorStore
     });
 
     await pipeline.run({ changedOnly: true });
 
-    const advancedMirror = path.join(cwd, ".searchsocket", "pages", "main", "docs", "advanced.md");
-    const raw = await fs.readFile(advancedMirror, "utf8");
-    const parsed = matter(raw);
+    const scope = { projectId: "searchsocket-links", scopeName: "main", scopeId: "searchsocket-links:main" };
+    const page = await vectorStore.getPage("/docs/advanced", scope);
 
-    expect(parsed.data.incomingLinks).toBe(1);
+    expect(page).not.toBeNull();
+    expect(page!.incomingLinks).toBe(1);
   });
 });
