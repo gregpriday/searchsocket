@@ -70,6 +70,8 @@ This exposes `POST /api/search` with automatic scope resolution.
 
 ### 4. Set Environment Variables
 
+The CLI automatically loads `.env` from the working directory on startup, so your existing `.env` file works out of the box — no wrapper scripts or shell exports needed.
+
 Development (`.env`):
 ```bash
 OPENAI_API_KEY=sk-...
@@ -627,17 +629,41 @@ pnpm searchsocket search --q "turso vector search" --top-k 5 --rerank
 
 ## MCP (Model Context Protocol)
 
-SearchSocket provides an **MCP server** for integration with Claude Desktop and other AI tools.
+SearchSocket provides an **MCP server** for integration with Claude Code, Claude Desktop, and other MCP-compatible AI tools. This gives AI assistants direct access to your indexed site content for semantic search and page retrieval.
 
 ### Tools
 
 **`search(query, opts?)`**
 - Semantic search across indexed content
-- Returns ranked results with snippets and metadata
+- Returns ranked results with URL, title, snippet, score, and routeFile
+- Options: `scope`, `topK` (1-100), `pathPrefix`, `tags`, `groupBy` (`"page"` | `"chunk"`)
 
 **`get_page(pathOrUrl, opts?)`**
-- Retrieve full page content from markdown mirror
-- Returns markdown with frontmatter
+- Retrieve full indexed page content as markdown with frontmatter
+- Options: `scope`
+
+### Setup (Claude Code)
+
+Add a `.mcp.json` file to your project root (safe to commit — no secrets needed since the CLI auto-loads `.env`):
+
+```json
+{
+  "mcpServers": {
+    "searchsocket": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["searchsocket", "mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+Restart Claude Code. The `search` and `get_page` tools will be available automatically. Verify with:
+
+```bash
+claude mcp list
+```
 
 ### Setup (Claude Desktop)
 
@@ -647,7 +673,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "searchsocket": {
-      "command": "pnpm",
+      "command": "npx",
       "args": ["searchsocket", "mcp"],
       "cwd": "/path/to/your/project"
     }
@@ -657,7 +683,19 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 Restart Claude Desktop. The tools appear in the MCP menu.
 
+### HTTP Transport
+
+For non-stdio clients, run the MCP server over HTTP:
+
+```bash
+npx searchsocket mcp --transport http --port 3338
+```
+
+This starts a stateless server at `http://127.0.0.1:3338/mcp`. Each POST request creates a fresh server instance with no session persistence.
+
 ## Environment Variables
+
+The CLI automatically loads `.env` from the working directory on startup. Existing `process.env` values take precedence over `.env` file values. This only applies to CLI commands (`searchsocket index`, `searchsocket mcp`, etc.) — library imports like `searchsocketHandle()` rely on your framework's own `.env` handling (Vite/SvelteKit).
 
 ### Required
 

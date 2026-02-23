@@ -2,6 +2,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { config as dotenvConfig } from "dotenv";
 import chokidar from "chokidar";
 import { Command } from "commander";
 import pkg from "../package.json";
@@ -838,6 +839,11 @@ program
   });
 
 async function main(): Promise<void> {
+  // Load .env from working directory before any config/factory calls.
+  // process.env values take precedence (dotenv's default).
+  // Only runs in CLI — library imports (searchsocketHandle, etc.) are not affected.
+  dotenvConfig({ path: path.resolve(process.cwd(), ".env") });
+
   await program.parseAsync(process.argv);
 }
 
