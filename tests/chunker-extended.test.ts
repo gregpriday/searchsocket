@@ -172,4 +172,47 @@ describe("chunkMirrorPage - extended", () => {
       }
     }
   });
+
+  it("treats tilde-fenced code blocks as protected chunks", () => {
+    const constrainedConfig = createDefaultConfig("test");
+    constrainedConfig.chunking.maxChars = 160;
+    constrainedConfig.chunking.minChars = 40;
+    constrainedConfig.chunking.overlapChars = 20;
+    constrainedConfig.chunking.dontSplitInside = ["code", "table", "blockquote"];
+
+    const codeLines = Array.from({ length: 40 }, (_, i) => `line_${i}: console.log(${i});`).join("\n");
+    const page = makePage(`# Tilde Fence\n\n~~~ts\n${codeLines}\n~~~\n`);
+    const chunks = chunkMirrorPage(page, constrainedConfig, scope);
+
+    const codeChunks = chunks.filter((chunk) => chunk.chunkText.includes("~~~ts"));
+    expect(codeChunks.length).toBe(1);
+    expect(codeChunks[0]?.chunkText).toContain("line_39: console.log(39);");
+  });
+
+  it("does not treat headings inside tilde-fenced code as real sections", () => {
+    const page = makePage(
+      "# Intro\n\n~~~md\n## not-a-heading\ncontent in code\n~~~\n\n## Real Heading\nVisible text.\n"
+    );
+    const chunks = chunkMirrorPage(page, config, scope);
+    const sectionTitles = chunks.map((chunk) => chunk.sectionTitle);
+
+    expect(sectionTitles).toContain("Intro");
+    expect(sectionTitles).toContain("Real Heading");
+    expect(sectionTitles).not.toContain("not-a-heading");
+  });
+
+  it("terminates chunking when overlapChars is larger than maxChars", () => {
+    const constrainedConfig = createDefaultConfig("test");
+    constrainedConfig.chunking.maxChars = 140;
+    constrainedConfig.chunking.overlapChars = 500;
+    constrainedConfig.chunking.minChars = 20;
+
+    const page = makePage(`# Overlap Stress\n\n${"word ".repeat(600).trim()}\n`);
+    const chunks = chunkMirrorPage(page, constrainedConfig, scope);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.chunkText.length).toBeLessThanOrEqual(constrainedConfig.chunking.maxChars);
+    }
+  });
 });

@@ -38,4 +38,12 @@ describe("route mapping", () => {
     expect(mapUrlToRoute("/docs", patterns).routeFile).toBe("src/routes/docs/+page.svelte");
     expect(mapUrlToRoute("/docs/hello", patterns).routeFile).toBe("src/routes/docs/[slug]/+page.svelte");
   });
+
+  it("returns default best-effort fallback when no route patterns exist", () => {
+    const result = mapUrlToRoute("/unknown", []);
+    expect(result).toEqual({
+      routeFile: "src/routes/+page.svelte",
+      routeResolution: "best-effort"
+    });
+  });
 });

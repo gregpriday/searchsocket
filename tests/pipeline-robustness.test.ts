@@ -24,6 +24,16 @@ class MismatchedEmbeddingsProvider implements EmbeddingsProvider {
   }
 }
 
+class NonFiniteEmbeddingsProvider implements EmbeddingsProvider {
+  estimateTokens(text: string): number {
+    return text.length;
+  }
+
+  async embedTexts(texts: string[]): Promise<number[][]> {
+    return texts.map(() => [0.12, Number.NaN, 0.34]);
+  }
+}
+
 async function createProjectFixture(): Promise<{ cwd: string; config: ResolvedSearchSocketConfig }> {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "searchsocket-pipeline-robust-"));
   tempDirs.push(cwd);
@@ -66,5 +76,18 @@ describe("IndexPipeline robustness", () => {
     });
 
     await expect(pipeline.run({ changedOnly: true })).rejects.toThrow(/embedding/i);
+  });
+
+  it("throws when embeddings provider returns non-finite vector values", async () => {
+    const { cwd, config } = await createProjectFixture();
+
+    const pipeline = await IndexPipeline.create({
+      cwd,
+      config,
+      embeddingsProvider: new NonFiniteEmbeddingsProvider(),
+      vectorStore: await createVectorStore(config, cwd)
+    });
+
+    await expect(pipeline.run({ changedOnly: true })).rejects.toThrow(/invalid vector/i);
   });
 });

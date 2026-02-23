@@ -27,6 +27,15 @@ class FakeReranker implements Reranker {
   }
 }
 
+class NonFiniteScoreReranker implements Reranker {
+  async rerank(): Promise<Array<{ id: string; score: number }>> {
+    return [
+      { id: "first", score: Number.NaN },
+      { id: "second", score: 0.5 }
+    ];
+  }
+}
+
 class FakeStore implements VectorStore {
   async upsert(): Promise<void> {
     return;
@@ -142,5 +151,29 @@ describe("SearchEngine rerank", () => {
 
     expect(result.meta.usedRerank).toBe(true);
     expect(result.results[0]?.url).toBe("/b");
+  });
+
+  it("ignores non-finite rerank scores instead of corrupting result order", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "searchsocket-rerank-"));
+    tempDirs.push(cwd);
+
+    const config = createDefaultConfig("searchsocket-rerank");
+    config.rerank.provider = "jina";
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      embeddingsProvider: new FakeEmbeddings(),
+      vectorStore: new FakeStore(),
+      reranker: new NonFiniteScoreReranker()
+    });
+
+    const result = await engine.search({ q: "test", topK: 2, rerank: true });
+
+    expect(result.results[0]?.url).toBe("/a");
+    expect(result.results[1]?.url).toBe("/b");
+    for (const entry of result.results) {
+      expect(Number.isFinite(entry.score)).toBe(true);
+    }
   });
 });

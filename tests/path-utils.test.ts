@@ -28,6 +28,10 @@ describe("normalizeUrlPath", () => {
   it("trims whitespace", () => {
     expect(normalizeUrlPath("  /docs  ")).toBe("/docs");
   });
+
+  it("normalizes empty input to root", () => {
+    expect(normalizeUrlPath("")).toBe("/");
+  });
 });
 
 describe("urlPathToMirrorRelative", () => {
@@ -87,5 +91,9 @@ describe("joinUrl", () => {
 
   it("handles trailing slash on base", () => {
     expect(joinUrl("http://localhost:4173/", "/docs")).toBe("http://localhost:4173/docs");
+  });
+
+  it("adds a trailing slash when joining an empty route", () => {
+    expect(joinUrl("https://example.com/docs", "")).toBe("https://example.com/docs/");
   });
 });

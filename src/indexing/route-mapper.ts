@@ -14,12 +14,16 @@ function segmentToRegex(segment: string): { regex: string; score: number } {
     return { regex: "", score: 0 };
   }
 
+  if (/^\[\[\.\.\.[^\]]+\]\]$/.test(segment)) {
+    return { regex: "(?:/.+)?", score: -2 };
+  }
+
   if (/^\[\.\.\.[^\]]+\]$/.test(segment)) {
-    return { regex: "/.+", score: 1 };
+    return { regex: "/.+", score: 0 };
   }
 
   if (/^\[\[[^\]]+\]\]$/.test(segment)) {
-    return { regex: "(?:/[^/]+)?", score: 2 };
+    return { regex: "(?:/[^/]+)?", score: -1 };
   }
 
   if (/^\[[^\]]+\]$/.test(segment)) {

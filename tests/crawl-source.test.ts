@@ -207,4 +207,189 @@ describe("loadCrawledPages", () => {
     expect(pages).toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  it("handles cyclic sitemap indexes without infinite recursion", async () => {
+    const config = createDefaultConfig("crawl-test");
+    config.source.mode = "crawl";
+    config.source.crawl = {
+      baseUrl: "https://example.com",
+      routes: [],
+      sitemapUrl: "/sitemap.xml"
+    };
+
+    let sitemapFetches = 0;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input);
+
+      if (url === "https://example.com/sitemap.xml") {
+        sitemapFetches += 1;
+        if (sitemapFetches > 3) {
+          throw new Error("cyclic sitemap recursion was not stopped");
+        }
+
+        return {
+          ok: true,
+          text: async () => `
+            <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+              <sitemap><loc>/sitemap.xml</loc></sitemap>
+              <sitemap><loc>/leaf.xml</loc></sitemap>
+            </sitemapindex>
+          `
+        } as Response;
+      }
+
+      if (url === "https://example.com/leaf.xml") {
+        return {
+          ok: true,
+          text: async () => `
+            <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+              <url><loc>https://example.com/docs</loc></url>
+            </urlset>
+          `
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        text: async () => "<html><body><main><h1>docs</h1></main></body></html>"
+      } as Response;
+    });
+
+    const pages = await loadCrawledPages(config);
+    expect(pages.map((page) => page.url)).toEqual(["/docs"]);
+    expect(sitemapFetches).toBe(1);
+  });
+
+  it("fetches duplicate child sitemaps only once", async () => {
+    const config = createDefaultConfig("crawl-test");
+    config.source.mode = "crawl";
+    config.source.crawl = {
+      baseUrl: "https://example.com",
+      routes: [],
+      sitemapUrl: "/index.xml"
+    };
+
+    let childFetches = 0;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input);
+
+      if (url === "https://example.com/index.xml") {
+        return {
+          ok: true,
+          text: async () => `
+            <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+              <sitemap><loc>/child.xml</loc></sitemap>
+              <sitemap><loc>https://example.com/child.xml</loc></sitemap>
+            </sitemapindex>
+          `
+        } as Response;
+      }
+
+      if (url === "https://example.com/child.xml") {
+        childFetches += 1;
+        return {
+          ok: true,
+          text: async () => `
+            <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+              <url><loc>https://example.com/docs</loc></url>
+            </urlset>
+          `
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        text: async () => "<html><body><main>Docs</main></body></html>"
+      } as Response;
+    });
+
+    const pages = await loadCrawledPages(config);
+    expect(pages.map((page) => page.url)).toEqual(["/docs"]);
+    expect(childFetches).toBe(1);
+  });
+
+  it("falls back to crawling root when no routes or sitemap are configured", async () => {
+    const config = createDefaultConfig("crawl-test");
+    config.source.mode = "crawl";
+    config.source.crawl = {
+      baseUrl: "https://example.com",
+      routes: [],
+      sitemapUrl: undefined
+    };
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: string | URL | Request) => {
+      expect(String(input)).toBe("https://example.com/");
+      return {
+        ok: true,
+        text: async () => "<html><body><main><h1>Home</h1></main></body></html>"
+      } as Response;
+    });
+
+    const pages = await loadCrawledPages(config);
+    expect(pages.map((page) => page.url)).toEqual(["/"]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("floors maxPages to an integer before route selection", async () => {
+    const config = createDefaultConfig("crawl-test");
+    config.source.mode = "crawl";
+    config.source.crawl = {
+      baseUrl: "https://example.com",
+      routes: ["/a", "/b", "/c"],
+      sitemapUrl: undefined
+    };
+
+    const seen: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: string | URL | Request) => {
+      seen.push(String(input));
+      return {
+        ok: true,
+        text: async () => "<html><body><main><h1>ok</h1></main></body></html>"
+      } as Response;
+    });
+
+    const pages = await loadCrawledPages(config, 1.9);
+    expect(pages.map((page) => page.url)).toEqual(["/a"]);
+    expect(seen).toEqual(["https://example.com/a"]);
+  });
+
+  it("ignores non-http(s) sitemap loc entries", async () => {
+    const config = createDefaultConfig("crawl-test");
+    config.source.mode = "crawl";
+    config.source.crawl = {
+      baseUrl: "https://example.com",
+      routes: [],
+      sitemapUrl: "/sitemap.xml"
+    };
+
+    const requested: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input);
+      requested.push(url);
+
+      if (url === "https://example.com/sitemap.xml") {
+        return {
+          ok: true,
+          text: async () => `
+            <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+              <url><loc>https://example.com/docs</loc></url>
+              <url><loc>ftp://example.com/private</loc></url>
+              <url><loc>mailto:admin@example.com</loc></url>
+            </urlset>
+          `
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        text: async () => "<html><body><main>ok</main></body></html>"
+      } as Response;
+    });
+
+    const pages = await loadCrawledPages(config);
+    expect(pages.map((page) => page.url)).toEqual(["/docs"]);
+    expect(requested).toEqual(["https://example.com/sitemap.xml", "https://example.com/docs"]);
+  });
 });

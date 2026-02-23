@@ -8,6 +8,8 @@ interface Section {
   text: string;
 }
 
+const FENCE_LINE_RE = /^(```|~~~)/;
+
 function parseHeadingSections(markdown: string, headingPathDepth: number): Section[] {
   const lines = markdown.split("\n");
   const sections: Section[] = [];
@@ -32,7 +34,7 @@ function parseHeadingSections(markdown: string, headingPathDepth: number): Secti
   };
 
   for (const line of lines) {
-    if (/^```/.test(line.trim())) {
+    if (FENCE_LINE_RE.test(line.trim())) {
       inFence = !inFence;
     }
 
@@ -88,7 +90,7 @@ function blockify(text: string, config: ResolvedSearchSocketConfig["chunking"]):
     const line = lines[i] ?? "";
     const trimmed = line.trim();
 
-    if (/^```/.test(trimmed)) {
+    if (FENCE_LINE_RE.test(trimmed)) {
       inFence = !inFence;
       current.push(line);
       continue;
@@ -145,7 +147,7 @@ function isProtectedBlock(block: string, config: ResolvedSearchSocketConfig["chu
   const first = (lines[0] ?? "").trim();
   const last = (lines[lines.length - 1] ?? "").trim();
 
-  const isCodeBlock = /^```/.test(first) && /^```/.test(last);
+  const isCodeBlock = FENCE_LINE_RE.test(first) && FENCE_LINE_RE.test(last);
   if (isCodeBlock && config.dontSplitInside.includes("code")) {
     return true;
   }

@@ -274,6 +274,37 @@ describe("SearchEngine - adversarial cases", () => {
     });
   });
 
+  it("resolves bare origin URLs to the root indexed page", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+
+    const store = new FakeStore().withPage({
+      url: "/",
+      title: "Home",
+      markdown: "Welcome home.",
+      projectId: config.project.id,
+      scopeName: "main",
+      routeFile: "src/routes/+page.svelte",
+      routeResolution: "exact",
+      incomingLinks: 0,
+      outgoingLinks: 2,
+      depth: 0,
+      tags: [],
+      indexedAt: "2026-01-01T00:00:00.000Z"
+    });
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      embeddingsProvider: new FakeEmbeddings(),
+      vectorStore: store
+    });
+
+    const page = await engine.getPage("https://example.com");
+    expect(page.url).toBe("/");
+    expect(page.frontmatter.title).toBe("Home");
+  });
+
   it("fails fast when scope model does not match active embedding model", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
@@ -328,5 +359,115 @@ describe("SearchEngine - adversarial cases", () => {
       code: "VECTOR_BACKEND_UNAVAILABLE"
     });
     expect(query).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-finite query embedding values", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+
+    const query = vi.fn().mockResolvedValue([]);
+    const store: VectorStore = {
+      upsert: async () => undefined,
+      query,
+      deleteByIds: async () => undefined,
+      deleteScope: async () => undefined,
+      listScopes: async () => [],
+      recordScope: async () => undefined,
+      health: async () => ({ ok: true }),
+      getContentHashes: async () => new Map(),
+      upsertPages: async () => undefined,
+      getPage: async () => null,
+      deletePages: async () => undefined,
+      getScopeModelId: async () => null
+    };
+
+    const embeddings: EmbeddingsProvider = {
+      estimateTokens: (text) => text.length,
+      embedTexts: async () => [[0.12, Number.NaN, 0.34]]
+    };
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      embeddingsProvider: embeddings,
+      vectorStore: store
+    });
+
+    await expect(engine.search({ q: "test" })).rejects.toMatchObject({
+      code: "VECTOR_BACKEND_UNAVAILABLE"
+    });
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it("overfetches vector candidates to at least 50 for ranking headroom", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+
+    const query = vi.fn(async () => [] as VectorHit[]);
+    const store: VectorStore = {
+      upsert: async () => undefined,
+      query,
+      deleteByIds: async () => undefined,
+      deleteScope: async () => undefined,
+      listScopes: async () => [],
+      recordScope: async () => undefined,
+      health: async () => ({ ok: true }),
+      getContentHashes: async () => new Map(),
+      upsertPages: async () => undefined,
+      getPage: async () => null,
+      deletePages: async () => undefined,
+      getScopeModelId: async () => null
+    };
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      embeddingsProvider: new FakeEmbeddings(),
+      vectorStore: store
+    });
+
+    await engine.search({ q: "test", topK: 2 });
+
+    expect(query).toHaveBeenCalledWith(
+      [1, 0, 0],
+      expect.objectContaining({ topK: 50 }),
+      expect.any(Object)
+    );
+  });
+
+  it("uses requested topK when it exceeds the candidate floor", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+
+    const query = vi.fn(async () => [] as VectorHit[]);
+    const store: VectorStore = {
+      upsert: async () => undefined,
+      query,
+      deleteByIds: async () => undefined,
+      deleteScope: async () => undefined,
+      listScopes: async () => [],
+      recordScope: async () => undefined,
+      health: async () => ({ ok: true }),
+      getContentHashes: async () => new Map(),
+      upsertPages: async () => undefined,
+      getPage: async () => null,
+      deletePages: async () => undefined,
+      getScopeModelId: async () => null
+    };
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      embeddingsProvider: new FakeEmbeddings(),
+      vectorStore: store
+    });
+
+    await engine.search({ q: "test", topK: 80 });
+
+    expect(query).toHaveBeenCalledWith(
+      [1, 0, 0],
+      expect.objectContaining({ topK: 80 }),
+      expect.any(Object)
+    );
   });
 });

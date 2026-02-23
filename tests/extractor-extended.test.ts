@@ -170,4 +170,21 @@ describe("extractFromMarkdown", () => {
     expect(extracted).not.toBeNull();
     expect(extracted?.markdown).toContain("Visible docs content.");
   });
+
+  it("does not treat noindex comments inside tilde-fenced code blocks as page directives", () => {
+    const extracted = extractFromMarkdown(
+      "/docs/tilde-code-sample",
+      "~~~html\n<!-- noindex -->\n~~~\n\nVisible docs content."
+    );
+    expect(extracted).not.toBeNull();
+    expect(extracted?.markdown).toContain("Visible docs content.");
+  });
+
+  it("respects frontmatter searchsocket.noindex=true", () => {
+    const extracted = extractFromMarkdown(
+      "/docs/private",
+      "---\nsearchsocket:\n  noindex: true\n---\n\nThis should be excluded."
+    );
+    expect(extracted).toBeNull();
+  });
 });

@@ -24,6 +24,14 @@ describe("resolveScope", () => {
     expect(scope.scopeName).toBe("feature-branch-name");
   });
 
+  it("preserves raw scope names when sanitize is disabled", () => {
+    const config = createDefaultConfig("test-proj");
+    config.scope.sanitize = false;
+
+    const scope = resolveScope(config, "Feature/Branch Name");
+    expect(scope.scopeName).toBe("Feature/Branch Name");
+  });
+
   it("uses env var when mode is env", () => {
     const config = createDefaultConfig("test-proj");
     config.scope.mode = "env";

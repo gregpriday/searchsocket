@@ -101,6 +101,22 @@ describe("mergeConfig", () => {
     ).toThrow("globs");
   });
 
+  it("defaults crawl.routes to an empty array when omitted", async () => {
+    const dir = await makeTempDir();
+
+    const merged = mergeConfig(dir, {
+      source: {
+        mode: "crawl",
+        crawl: {
+          baseUrl: "https://example.com"
+        }
+      }
+    });
+
+    expect(merged.source.mode).toBe("crawl");
+    expect(merged.source.crawl?.routes).toEqual([]);
+  });
+
   it("merges turso overrides", async () => {
     const dir = await makeTempDir();
     await fs.mkdir(path.join(dir, "build"), { recursive: true });

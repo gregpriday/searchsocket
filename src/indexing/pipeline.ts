@@ -108,7 +108,7 @@ export class IndexPipeline {
     }
 
     const manifestStart = stageStart();
-    const existingHashes = options.force ? new Map<string, string>() : await this.vectorStore.getContentHashes(scope);
+    const existingHashes = await this.vectorStore.getContentHashes(scope);
     const existingModelId = await this.vectorStore.getScopeModelId(scope);
 
     if (
@@ -341,7 +341,7 @@ export class IndexPipeline {
       for (let i = 0; i < changedChunks.length; i += 1) {
         const chunk = changedChunks[i];
         const embedding = embeddings[i];
-        if (!chunk || !embedding || embedding.length === 0) {
+        if (!chunk || !embedding || embedding.length === 0 || embedding.some((value) => !Number.isFinite(value))) {
           throw new SearchSocketError(
             "VECTOR_BACKEND_UNAVAILABLE",
             `Embedding provider returned an invalid vector for chunk index ${i}.`

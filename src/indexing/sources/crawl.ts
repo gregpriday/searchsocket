@@ -38,15 +38,17 @@ async function fetchSitemapXml(url: string): Promise<string> {
   return res.text();
 }
 
-async function parseSitemap(xml: string, baseUrl: string): Promise<string[]> {
+function resolveSitemapUrl(baseUrl: string, candidate: string): string {
+  return candidate.startsWith("http") ? candidate : joinUrl(baseUrl, candidate);
+}
+
+async function parseSitemap(xml: string, baseUrl: string, visitedSitemaps: Set<string>): Promise<string[]> {
   if (isSitemapIndex(xml)) {
     const childUrls = extractLocs(xml);
     const routes: string[] = [];
 
     for (const childUrl of childUrls) {
-      const resolved = childUrl.startsWith("http") ? childUrl : joinUrl(baseUrl, childUrl);
-      const childXml = await fetchSitemapXml(resolved);
-      const childRoutes = await parseSitemap(childXml, baseUrl);
+      const childRoutes = await parseSitemapFromUrl(childUrl, baseUrl, visitedSitemaps);
       routes.push(...childRoutes);
     }
 
@@ -61,6 +63,9 @@ async function parseSitemap(xml: string, baseUrl: string): Promise<string[]> {
       const parsed = loc.startsWith("http://") || loc.startsWith("https://")
         ? new URL(loc)
         : new URL(loc, baseUrl);
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        continue;
+      }
       routes.push(normalizeUrlPath(parsed.pathname));
     } catch {
       // ignore invalid entry
@@ -68,6 +73,17 @@ async function parseSitemap(xml: string, baseUrl: string): Promise<string[]> {
   }
 
   return [...new Set(routes)];
+}
+
+async function parseSitemapFromUrl(url: string, baseUrl: string, visitedSitemaps: Set<string>): Promise<string[]> {
+  const resolved = resolveSitemapUrl(baseUrl, url);
+  if (visitedSitemaps.has(resolved)) {
+    return [];
+  }
+
+  visitedSitemaps.add(resolved);
+  const xml = await fetchSitemapXml(resolved);
+  return parseSitemap(xml, baseUrl, visitedSitemaps);
 }
 
 async function resolveRoutes(config: ResolvedSearchSocketConfig): Promise<string[]> {
@@ -84,12 +100,7 @@ async function resolveRoutes(config: ResolvedSearchSocketConfig): Promise<string
     return ["/"];
   }
 
-  const sitemapUrl = crawlConfig.sitemapUrl.startsWith("http")
-    ? crawlConfig.sitemapUrl
-    : joinUrl(crawlConfig.baseUrl, crawlConfig.sitemapUrl);
-
-  const xml = await fetchSitemapXml(sitemapUrl);
-  return parseSitemap(xml, crawlConfig.baseUrl);
+  return parseSitemapFromUrl(crawlConfig.sitemapUrl, crawlConfig.baseUrl, new Set<string>());
 }
 
 export async function loadCrawledPages(

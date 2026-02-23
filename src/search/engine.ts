@@ -65,7 +65,9 @@ export class SearchEngine {
 
     const embeddings = options.embeddingsProvider ?? createEmbeddingsProvider(config);
     const vectorStore = options.vectorStore ?? await createVectorStore(config, cwd);
-    const reranker = options.reranker ?? createReranker(config);
+    const reranker = options.reranker === undefined
+      ? createReranker(config)
+      : options.reranker;
 
     return new SearchEngine({
       cwd,
@@ -99,7 +101,7 @@ export class SearchEngine {
     const embedStart = process.hrtime.bigint();
     const queryEmbeddings = await this.embeddings.embedTexts([input.q], this.config.embeddings.model);
     const queryVector = queryEmbeddings[0];
-    if (!queryVector || queryVector.length === 0) {
+    if (!queryVector || queryVector.length === 0 || queryVector.some((value) => !Number.isFinite(value))) {
       throw new SearchSocketError("VECTOR_BACKEND_UNAVAILABLE", "Unable to create query embedding.");
     }
     const embedMs = hrTimeMs(embedStart);
@@ -248,21 +250,28 @@ export class SearchEngine {
     return ranked
       .map((entry) => {
         const rerankScore = rerankScoreById.get(entry.hit.id);
-        if (rerankScore === undefined) {
+        const safeBaseScore = Number.isFinite(entry.finalScore)
+          ? entry.finalScore
+          : Number.NEGATIVE_INFINITY;
+
+        if (!Number.isFinite(rerankScore)) {
           return {
             ...entry,
-            finalScore: entry.finalScore
+            finalScore: safeBaseScore
           };
         }
 
         const combinedScore =
-          rerankScore * this.config.ranking.weights.rerank + entry.finalScore * 0.001;
+          rerankScore * this.config.ranking.weights.rerank + safeBaseScore * 0.001;
 
         return {
           ...entry,
-          finalScore: combinedScore
+          finalScore: Number.isFinite(combinedScore) ? combinedScore : safeBaseScore
         };
       })
-      .sort((a, b) => b.finalScore - a.finalScore);
+      .sort((a, b) => {
+        const delta = b.finalScore - a.finalScore;
+        return Number.isNaN(delta) ? 0 : delta;
+      });
   }
 }

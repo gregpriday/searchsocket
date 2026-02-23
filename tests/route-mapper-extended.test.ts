@@ -110,6 +110,81 @@ describe("route mapper - optional params", () => {
       "src/routes/lang/[[locale]]/+page.svelte"
     );
   });
+
+  it("matches optional rest params [[...slug]] across deep paths", async () => {
+    const cwd = await makeTempProject([
+      "src/routes/docs/[[...slug]]/+page.svelte"
+    ]);
+
+    const patterns = await buildRoutePatterns(cwd);
+
+    expect(mapUrlToRoute("/docs", patterns)).toEqual({
+      routeFile: "src/routes/docs/[[...slug]]/+page.svelte",
+      routeResolution: "exact"
+    });
+    expect(mapUrlToRoute("/docs/getting-started", patterns)).toEqual({
+      routeFile: "src/routes/docs/[[...slug]]/+page.svelte",
+      routeResolution: "exact"
+    });
+    expect(mapUrlToRoute("/docs/guides/advanced/setup", patterns)).toEqual({
+      routeFile: "src/routes/docs/[[...slug]]/+page.svelte",
+      routeResolution: "exact"
+    });
+  });
+
+  it("prefers static routes over optional-param routes on overlapping paths", async () => {
+    const cwd = await makeTempProject([
+      "src/routes/lang/+page.svelte",
+      "src/routes/lang/[[locale]]/+page.svelte"
+    ]);
+
+    const patterns = await buildRoutePatterns(cwd);
+
+    expect(mapUrlToRoute("/lang", patterns)).toEqual({
+      routeFile: "src/routes/lang/+page.svelte",
+      routeResolution: "exact"
+    });
+    expect(mapUrlToRoute("/lang/en", patterns)).toEqual({
+      routeFile: "src/routes/lang/[[locale]]/+page.svelte",
+      routeResolution: "exact"
+    });
+  });
+
+  it("prefers static routes over optional-rest routes on root overlap", async () => {
+    const cwd = await makeTempProject([
+      "src/routes/docs/+page.svelte",
+      "src/routes/docs/[[...slug]]/+page.svelte"
+    ]);
+
+    const patterns = await buildRoutePatterns(cwd);
+
+    expect(mapUrlToRoute("/docs", patterns)).toEqual({
+      routeFile: "src/routes/docs/+page.svelte",
+      routeResolution: "exact"
+    });
+    expect(mapUrlToRoute("/docs/guides/intro", patterns)).toEqual({
+      routeFile: "src/routes/docs/[[...slug]]/+page.svelte",
+      routeResolution: "exact"
+    });
+  });
+
+  it("prefers required rest params over optional rest params when both match", async () => {
+    const cwd = await makeTempProject([
+      "src/routes/docs/[...slug]/+page.svelte",
+      "src/routes/docs/[[...slug]]/+page.svelte"
+    ]);
+
+    const patterns = await buildRoutePatterns(cwd);
+
+    expect(mapUrlToRoute("/docs/a/b", patterns)).toEqual({
+      routeFile: "src/routes/docs/[...slug]/+page.svelte",
+      routeResolution: "exact"
+    });
+    expect(mapUrlToRoute("/docs", patterns)).toEqual({
+      routeFile: "src/routes/docs/[[...slug]]/+page.svelte",
+      routeResolution: "exact"
+    });
+  });
 });
 
 describe("route mapper - resolution types", () => {
