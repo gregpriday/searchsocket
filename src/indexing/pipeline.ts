@@ -150,6 +150,10 @@ export class IndexPipeline {
         : extractFromMarkdown(sourcePage.url, sourcePage.markdown ?? "", sourcePage.title);
 
       if (!extracted) {
+        this.logger.warn(
+          `Page ${sourcePage.url} produced no extractable content and was skipped. ` +
+            "Check extract.mainSelector, extract.dropTags, and extract.dropSelectors settings."
+        );
         continue;
       }
 
