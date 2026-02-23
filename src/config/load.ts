@@ -28,6 +28,10 @@ function detectSourceMode(cwd: string, config: ResolvedSearchSocketConfig, parse
     return parsedInput.source.mode;
   }
 
+  if (parsedInput.source?.build) {
+    return "build";
+  }
+
   if (parsedInput.source?.crawl) {
     return "crawl";
   }
@@ -44,7 +48,7 @@ function detectSourceMode(cwd: string, config: ResolvedSearchSocketConfig, parse
   throw new SearchSocketError(
     "CONFIG_MISSING",
     `Unable to auto-detect source mode because ${staticOutputPath} does not exist. ` +
-      "Set `source.mode` explicitly (static-output, crawl, or content-files)."
+      "Set `source.mode` explicitly (static-output, crawl, content-files, or build)."
   );
 }
 
@@ -90,7 +94,15 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
             ...parsed.source.contentFiles,
             baseDir: parsed.source.contentFiles.baseDir ?? defaults.source.contentFiles?.baseDir ?? cwd
           }
-        : defaults.source.contentFiles
+        : defaults.source.contentFiles,
+      build: parsed.source?.build
+        ? {
+            outputDir: parsed.source.build.outputDir ?? ".svelte-kit/output",
+            paramValues: parsed.source.build.paramValues ?? {},
+            exclude: parsed.source.build.exclude ?? [],
+            previewTimeout: parsed.source.build.previewTimeout ?? 30_000
+          }
+        : undefined
     },
     extract: {
       ...defaults.extract,
@@ -167,6 +179,15 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
 
   merged.project.id = projectId;
   merged.source.mode = detectSourceMode(cwd, merged, parsed);
+
+  if (merged.source.mode === "build" && !merged.source.build) {
+    merged.source.build = {
+      outputDir: ".svelte-kit/output",
+      paramValues: {},
+      exclude: [],
+      previewTimeout: 30_000
+    };
+  }
 
   if (merged.source.mode === "crawl" && !merged.source.crawl?.baseUrl) {
     throw new SearchSocketError("CONFIG_MISSING", "`source.crawl.baseUrl` is required when source.mode is crawl.");

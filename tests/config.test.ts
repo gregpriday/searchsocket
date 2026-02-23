@@ -117,6 +117,74 @@ describe("mergeConfig", () => {
     expect(merged.source.crawl?.routes).toEqual([]);
   });
 
+  it("detects build mode from source.build config", async () => {
+    const dir = await makeTempDir();
+
+    const merged = mergeConfig(dir, {
+      source: {
+        build: {
+          outputDir: ".svelte-kit/output"
+        }
+      }
+    });
+
+    expect(merged.source.mode).toBe("build");
+    expect(merged.source.build).toBeDefined();
+    expect(merged.source.build?.outputDir).toBe(".svelte-kit/output");
+  });
+
+  it("validates build config schema fields", async () => {
+    const dir = await makeTempDir();
+
+    const merged = mergeConfig(dir, {
+      source: {
+        build: {
+          outputDir: ".svelte-kit/output",
+          paramValues: { "/blog/[slug]": ["post-1", "post-2"] },
+          exclude: ["/api/*"],
+          previewTimeout: 60000
+        }
+      }
+    });
+
+    expect(merged.source.build?.paramValues).toEqual({ "/blog/[slug]": ["post-1", "post-2"] });
+    expect(merged.source.build?.exclude).toEqual(["/api/*"]);
+    expect(merged.source.build?.previewTimeout).toBe(60000);
+  });
+
+  it("auto-creates build config defaults when mode is explicitly build", async () => {
+    const dir = await makeTempDir();
+
+    const merged = mergeConfig(dir, {
+      source: { mode: "build" }
+    });
+
+    expect(merged.source.mode).toBe("build");
+    expect(merged.source.build).toBeDefined();
+    expect(merged.source.build?.outputDir).toBe(".svelte-kit/output");
+    expect(merged.source.build?.paramValues).toEqual({});
+    expect(merged.source.build?.exclude).toEqual([]);
+    expect(merged.source.build?.previewTimeout).toBe(30000);
+  });
+
+  it("merges build config with defaults for missing fields", async () => {
+    const dir = await makeTempDir();
+
+    const merged = mergeConfig(dir, {
+      source: {
+        build: {
+          exclude: ["/admin/*"]
+        }
+      }
+    });
+
+    expect(merged.source.mode).toBe("build");
+    expect(merged.source.build?.outputDir).toBe(".svelte-kit/output");
+    expect(merged.source.build?.paramValues).toEqual({});
+    expect(merged.source.build?.exclude).toEqual(["/admin/*"]);
+    expect(merged.source.build?.previewTimeout).toBe(30000);
+  });
+
   it("merges turso overrides", async () => {
     const dir = await makeTempDir();
     await fs.mkdir(path.join(dir, "build"), { recursive: true });

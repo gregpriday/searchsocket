@@ -97,6 +97,11 @@ function collectWatchPaths(config: ResolvedSearchSocketConfig, cwd: string): str
     paths.push("searchsocket.config.ts");
   }
 
+  if (config.source.mode === "build" && config.source.build) {
+    paths.push("searchsocket.config.ts");
+    paths.push(config.source.build.outputDir);
+  }
+
   return paths.map((value) => path.resolve(cwd, value));
 }
 
@@ -196,7 +201,7 @@ async function runIndexCommand(opts: {
   changedOnly: boolean;
   force: boolean;
   dryRun: boolean;
-  source?: "static-output" | "crawl" | "content-files";
+  source?: "static-output" | "crawl" | "content-files" | "build";
   maxPages?: number;
   maxChunks?: number;
   verbose?: boolean;
@@ -274,7 +279,7 @@ program
   .option("--no-changed-only", "re-index regardless of previous manifest")
   .option("--force", "force full mirror rebuild and re-upsert", false)
   .option("--dry-run", "compute plan and cost, no API writes", false)
-  .option("--source <mode>", "source mode override: static-output|crawl|content-files")
+  .option("--source <mode>", "source mode override: static-output|crawl|content-files|build")
   .option("--max-pages <n>", "limit pages processed")
   .option("--max-chunks <n>", "limit chunks processed")
   .option("--verbose", "verbose output", false)
@@ -648,6 +653,33 @@ program
           ok: exists,
           details: exists ? outputDir : `${outputDir} not found (run your build first)`
         });
+      } else if (config.source.mode === "build") {
+        const buildConfig = config.source.build;
+        if (buildConfig) {
+          const manifestPath = path.resolve(cwd, buildConfig.outputDir, "server", "manifest-full.js");
+          const manifestExists = fs.existsSync(manifestPath);
+          checks.push({
+            name: "source: build manifest",
+            ok: manifestExists,
+            details: manifestExists
+              ? manifestPath
+              : `${manifestPath} not found (run \`vite build\` first)`
+          });
+
+          const viteBin = path.resolve(cwd, "node_modules", ".bin", "vite");
+          const viteExists = fs.existsSync(viteBin);
+          checks.push({
+            name: "source: vite binary",
+            ok: viteExists,
+            details: viteExists ? viteBin : `${viteBin} not found (install vite)`
+          });
+        } else {
+          checks.push({
+            name: "source: build config",
+            ok: false,
+            details: "source.build config missing"
+          });
+        }
       } else if (config.source.mode === "content-files") {
         const contentConfig = config.source.contentFiles;
         if (contentConfig) {

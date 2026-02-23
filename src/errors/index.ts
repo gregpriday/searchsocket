@@ -5,7 +5,9 @@ export type SearchSocketErrorCode =
   | "VECTOR_BACKEND_UNAVAILABLE"
   | "RATE_LIMITED"
   | "INVALID_REQUEST"
-  | "INTERNAL_ERROR";
+  | "INTERNAL_ERROR"
+  | "BUILD_MANIFEST_NOT_FOUND"
+  | "BUILD_SERVER_FAILED";
 
 export class SearchSocketError extends Error {
   public readonly code: SearchSocketErrorCode;

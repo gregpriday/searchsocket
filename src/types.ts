@@ -1,5 +1,5 @@
 export type ScopeMode = "fixed" | "git" | "env";
-export type SourceMode = "static-output" | "crawl" | "content-files";
+export type SourceMode = "static-output" | "crawl" | "content-files" | "build";
 export type EmbeddingProvider = "openai";
 export type RerankProvider = "none" | "jina";
 
@@ -26,6 +26,12 @@ export interface SearchSocketConfig {
     contentFiles?: {
       globs: string[];
       baseDir?: string;
+    };
+    build?: {
+      outputDir?: string;
+      paramValues?: Record<string, string[]>;
+      exclude?: string[];
+      previewTimeout?: number;
     };
   };
   extract?: {
@@ -137,6 +143,12 @@ export interface ResolvedSearchSocketConfig {
       globs: string[];
       baseDir: string;
     };
+    build?: {
+      outputDir: string;
+      paramValues: Record<string, string[]>;
+      exclude: string[];
+      previewTimeout: number;
+    };
   };
   extract: {
     mainSelector: string;
@@ -237,6 +249,8 @@ export interface PageSourceRecord {
   sourcePath?: string;
   outgoingLinks: string[];
   tags?: string[];
+  routeFile?: string;
+  routeResolution?: "exact" | "best-effort";
 }
 
 export interface RouteMatch {

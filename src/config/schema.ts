@@ -17,7 +17,7 @@ export const searchSocketConfigSchema = z.object({
     .optional(),
   source: z
     .object({
-      mode: z.enum(["static-output", "crawl", "content-files"]).optional(),
+      mode: z.enum(["static-output", "crawl", "content-files", "build"]).optional(),
       staticOutputDir: z.string().min(1).optional(),
       strictRouteMapping: z.boolean().optional(),
       crawl: z
@@ -31,6 +31,14 @@ export const searchSocketConfigSchema = z.object({
         .object({
           globs: z.array(z.string()).min(1),
           baseDir: z.string().optional()
+        })
+        .optional(),
+      build: z
+        .object({
+          outputDir: z.string().min(1).optional(),
+          paramValues: z.record(z.string(), z.array(z.string())).optional(),
+          exclude: z.array(z.string()).optional(),
+          previewTimeout: z.number().int().positive().optional()
         })
         .optional()
     })

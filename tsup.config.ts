@@ -15,7 +15,11 @@ export default defineConfig([
     target: "node20",
     splitting: false,
     shims: false,
-    treeshake: true
+    treeshake: true,
+    // Bundle turndown and its CJS-only dependency @mixmark-io/domino so that
+    // consuming bundlers (e.g. SvelteKit/Vite) never encounter the bare
+    // `require("@mixmark-io/domino")` call in turndown's ES module.
+    noExternal: ["turndown", "@mixmark-io/domino", "turndown-plugin-gfm"]
   },
   {
     entry: {

@@ -9,6 +9,7 @@ import { buildEmbeddingText, chunkMirrorPage } from "./chunker";
 import { extractFromHtml, extractFromMarkdown } from "./extractor";
 import { cleanMirrorForScope, writeMirrorPage } from "./mirror";
 import { buildRoutePatterns, mapUrlToRoute } from "./route-mapper";
+import { loadBuildPages } from "./sources/build";
 import { loadContentFilesPages } from "./sources/content-files";
 import { loadCrawledPages } from "./sources/crawl";
 import { loadStaticOutputPages } from "./sources/static-output";
@@ -24,6 +25,7 @@ import type {
   MirrorPage,
   PageRecord,
   ResolvedSearchSocketConfig,
+  RouteMatch,
   Scope,
   ScopeInfo,
   VectorRecord,
@@ -132,6 +134,8 @@ export class IndexPipeline {
       sourcePages = await loadStaticOutputPages(this.cwd, this.config, options.maxPages);
     } else if (sourceMode === "crawl") {
       sourcePages = await loadCrawledPages(this.config, options.maxPages);
+    } else if (sourceMode === "build") {
+      sourcePages = await loadBuildPages(this.cwd, this.config, options.maxPages);
     } else {
       sourcePages = await loadContentFilesPages(this.cwd, this.config, options.maxPages);
     }
@@ -202,8 +206,18 @@ export class IndexPipeline {
     let routeExact = 0;
     let routeBestEffort = 0;
 
+    const precomputedRoutes = new Map<string, RouteMatch>();
+    for (const sp of sourcePages) {
+      if (sp.routeFile) {
+        precomputedRoutes.set(normalizeUrlPath(sp.url), {
+          routeFile: sp.routeFile,
+          routeResolution: sp.routeResolution ?? "exact"
+        });
+      }
+    }
+
     for (const page of uniquePages) {
-      const routeMatch = mapUrlToRoute(page.url, routePatterns);
+      const routeMatch = precomputedRoutes.get(normalizeUrlPath(page.url)) ?? mapUrlToRoute(page.url, routePatterns);
 
       if (routeMatch.routeResolution === "best-effort") {
         if (this.config.source.strictRouteMapping) {
