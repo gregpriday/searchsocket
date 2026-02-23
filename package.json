@@ -1,8 +1,27 @@
 {
   "name": "searchsocket",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Semantic site search and MCP retrieval for SvelteKit static sites",
   "license": "MIT",
+  "author": "Greg Priday <greg@siteorigin.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gregpriday/searchsocket.git"
+  },
+  "homepage": "https://github.com/gregpriday/searchsocket",
+  "bugs": {
+    "url": "https://github.com/gregpriday/searchsocket/issues"
+  },
+  "keywords": [
+    "search",
+    "semantic-search",
+    "sveltekit",
+    "mcp",
+    "embeddings",
+    "vector-search",
+    "site-search",
+    "static-site"
+  ],
   "type": "module",
   "files": [
     "dist",
