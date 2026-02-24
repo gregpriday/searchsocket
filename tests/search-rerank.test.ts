@@ -21,8 +21,8 @@ class FakeEmbeddings implements EmbeddingsProvider {
 class FakeReranker implements Reranker {
   async rerank(): Promise<Array<{ id: string; score: number }>> {
     return [
-      { id: "second", score: 0.95 },
-      { id: "first", score: 0.15 }
+      { id: "/b", score: 0.95 },
+      { id: "/a", score: 0.15 }
     ];
   }
 }
@@ -30,8 +30,8 @@ class FakeReranker implements Reranker {
 class NonFiniteScoreReranker implements Reranker {
   async rerank(): Promise<Array<{ id: string; score: number }>> {
     return [
-      { id: "first", score: Number.NaN },
-      { id: "second", score: 0.5 }
+      { id: "/a", score: Number.NaN },
+      { id: "/b", score: 0.5 }
     ];
   }
 }
@@ -55,6 +55,8 @@ class FakeStore implements VectorStore {
           sectionTitle: "",
           headingPath: [],
           snippet: "alpha",
+          chunkText: "Full text of alpha page",
+          ordinal: 0,
           contentHash: "a",
           modelId: "jina-embeddings-v3",
           depth: 1,
@@ -75,6 +77,8 @@ class FakeStore implements VectorStore {
           sectionTitle: "",
           headingPath: [],
           snippet: "beta",
+          chunkText: "Full text of beta page",
+          ordinal: 0,
           contentHash: "b",
           modelId: "jina-embeddings-v3",
           depth: 1,

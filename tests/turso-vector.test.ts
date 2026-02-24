@@ -26,6 +26,8 @@ function makeRecord(id: string, vector: number[], overrides: Partial<VectorRecor
       sectionTitle: overrides.sectionTitle ?? "",
       headingPath: overrides.headingPath ?? [],
       snippet: overrides.snippet ?? "snippet text",
+      chunkText: overrides.chunkText ?? "full chunk text for testing",
+      ordinal: overrides.ordinal ?? 0,
       contentHash: overrides.contentHash ?? "abc123",
       modelId: overrides.modelId ?? "jina-embeddings-v3",
       depth: overrides.depth ?? 0,
@@ -267,6 +269,27 @@ describe("TursoVectorStore", () => {
   it("getScopeModelId returns null when scope not in registry", async () => {
     const modelId = await store.getScopeModelId(scopeA);
     expect(modelId).toBeNull();
+  });
+
+  it("chunk_text and ordinal round-trip through upsert/query", async () => {
+    const records = [
+      makeRecord("ct1", [1, 0, 0, 0], { chunkText: "# Full Markdown\n\nThis is the full chunk text.", ordinal: 0 }),
+      makeRecord("ct2", [0, 1, 0, 0], { chunkText: "## Section Two\n\nMore content here.", ordinal: 1 })
+    ];
+
+    await store.upsert(records, scopeA);
+
+    const hits = await store.query([1, 0, 0, 0], { topK: 5 }, scopeA);
+    const hit1 = hits.find((h) => h.id === "ct1");
+    const hit2 = hits.find((h) => h.id === "ct2");
+
+    expect(hit1).toBeDefined();
+    expect(hit1!.metadata.chunkText).toBe("# Full Markdown\n\nThis is the full chunk text.");
+    expect(hit1!.metadata.ordinal).toBe(0);
+
+    expect(hit2).toBeDefined();
+    expect(hit2!.metadata.chunkText).toBe("## Section Two\n\nMore content here.");
+    expect(hit2!.metadata.ordinal).toBe(1);
   });
 
   it("recordScope and listScopes handle estimate fields", async () => {

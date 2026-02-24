@@ -136,9 +136,13 @@ export class SearchEngine {
     }
 
     let results: SearchResult[];
+    const minScore = this.config.ranking.minScore;
 
     if (groupByPage) {
-      const pages = aggregateByPage(ordered, this.config);
+      let pages = aggregateByPage(ordered, this.config);
+      if (minScore > 0) {
+        pages = pages.filter((p) => p.pageScore >= minScore);
+      }
       const minRatio = this.config.ranking.minChunkScoreRatio;
       results = pages.slice(0, topK).map((page) => {
         const bestScore = page.bestChunk.finalScore;
@@ -164,6 +168,9 @@ export class SearchEngine {
         };
       });
     } else {
+      if (minScore > 0) {
+        ordered = ordered.filter((entry) => entry.finalScore >= minScore);
+      }
       results = ordered.slice(0, topK).map(({ hit, finalScore }) => ({
         url: hit.metadata.url,
         title: hit.metadata.title,
@@ -269,41 +276,54 @@ export class SearchEngine {
       );
     }
 
-    const candidates = ranked.map(({ hit }) => ({
-      id: hit.id,
-      text: [hit.metadata.title, hit.metadata.sectionTitle, hit.metadata.snippet]
-        .filter(Boolean)
-        .join("\n")
-    }));
+    // 1. Group chunks by page URL
+    const pageGroups = new Map<string, RankedHit[]>();
+    for (const entry of ranked) {
+      const url = entry.hit.metadata.url;
+      const group = pageGroups.get(url);
+      if (group) group.push(entry);
+      else pageGroups.set(url, [entry]);
+    }
 
+    // 2. Build page-level documents from chunk texts in ordinal order
+    const pageCandidates: Array<{ id: string; text: string }> = [];
+    for (const [url, chunks] of pageGroups) {
+      const sorted = [...chunks].sort(
+        (a, b) => (a.hit.metadata.ordinal ?? 0) - (b.hit.metadata.ordinal ?? 0)
+      );
+      const title = sorted[0]!.hit.metadata.title;
+      const body = sorted
+        .map((c) => c.hit.metadata.chunkText || c.hit.metadata.snippet)
+        .join("\n\n");
+      pageCandidates.push({ id: url, text: `${title}\n\n${body}` });
+    }
+
+    // 3. Rerank page-level documents
     const reranked = await this.reranker.rerank(
       query,
-      candidates,
+      pageCandidates,
       Math.max(topK, this.config.rerank.topN)
     );
+    const scoreByUrl = new Map(reranked.map((e) => [e.id, e.score]));
 
-    const rerankScoreById = new Map(reranked.map((entry) => [entry.id, entry.score]));
-
+    // 4. Apply page rerank score to all chunks of that page
     return ranked
       .map((entry) => {
-        const rerankScore = rerankScoreById.get(entry.hit.id);
-        const safeBaseScore = Number.isFinite(entry.finalScore)
+        const pageScore = scoreByUrl.get(entry.hit.metadata.url);
+        const base = Number.isFinite(entry.finalScore)
           ? entry.finalScore
           : Number.NEGATIVE_INFINITY;
 
-        if (rerankScore === undefined || !Number.isFinite(rerankScore)) {
-          return {
-            ...entry,
-            finalScore: safeBaseScore
-          };
+        if (pageScore === undefined || !Number.isFinite(pageScore)) {
+          return { ...entry, finalScore: base };
         }
 
-        const combinedScore =
-          (rerankScore as number) * this.config.ranking.weights.rerank + safeBaseScore * 0.001;
+        const combined =
+          (pageScore as number) * this.config.ranking.weights.rerank + base * 0.001;
 
         return {
           ...entry,
-          finalScore: Number.isFinite(combinedScore) ? combinedScore : safeBaseScore
+          finalScore: Number.isFinite(combined) ? combined : base
         };
       })
       .sort((a, b) => {

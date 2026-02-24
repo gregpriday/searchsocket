@@ -74,6 +74,7 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       aggregationCap: 5,
       aggregationDecay: 0.5,
       minChunkScoreRatio: 0.5,
+      minScore: 0,
       weights: {
         incomingLinks: 0.05,
         depth: 0.03,

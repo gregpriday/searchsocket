@@ -81,6 +81,8 @@ export class TursoVectorStore implements VectorStore {
         section_title  TEXT NOT NULL DEFAULT '',
         heading_path   TEXT NOT NULL DEFAULT '[]',
         snippet        TEXT NOT NULL DEFAULT '',
+        chunk_text     TEXT NOT NULL DEFAULT '',
+        ordinal        INTEGER NOT NULL DEFAULT 0,
         content_hash   TEXT NOT NULL DEFAULT '',
         model_id       TEXT NOT NULL DEFAULT '',
         depth          INTEGER NOT NULL DEFAULT 0,
@@ -91,6 +93,22 @@ export class TursoVectorStore implements VectorStore {
       )`,
       `CREATE INDEX IF NOT EXISTS idx ON chunks (libsql_vector_idx(embedding, 'metric=cosine'))`
     ]);
+
+    // Migrate existing tables: add chunk_text and ordinal columns if missing
+    const chunkMigrationCols = [
+      { name: "chunk_text", def: "TEXT NOT NULL DEFAULT ''" },
+      { name: "ordinal", def: "INTEGER NOT NULL DEFAULT 0" }
+    ];
+    for (const col of chunkMigrationCols) {
+      try {
+        await this.client.execute(`ALTER TABLE chunks ADD COLUMN ${col.name} ${col.def}`);
+      } catch (error) {
+        if (error instanceof Error && !error.message.includes("duplicate column")) {
+          throw error;
+        }
+      }
+    }
+
     this.chunksReady = true;
   }
 
@@ -175,9 +193,9 @@ export class TursoVectorStore implements VectorStore {
       const stmts: InStatement[] = batch.map((r) => ({
         sql: `INSERT OR REPLACE INTO chunks
               (id, project_id, scope_name, url, path, title, section_title,
-               heading_path, snippet, content_hash, model_id, depth,
+               heading_path, snippet, chunk_text, ordinal, content_hash, model_id, depth,
                incoming_links, route_file, tags, embedding)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, vector(?))`,
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, vector(?))`,
         args: [
           r.id,
           r.metadata.projectId,
@@ -188,6 +206,8 @@ export class TursoVectorStore implements VectorStore {
           r.metadata.sectionTitle,
           JSON.stringify(r.metadata.headingPath),
           r.metadata.snippet,
+          r.metadata.chunkText,
+          r.metadata.ordinal,
           r.metadata.contentHash,
           r.metadata.modelId,
           r.metadata.depth,
@@ -208,7 +228,8 @@ export class TursoVectorStore implements VectorStore {
     const queryJson = JSON.stringify(queryVector);
     const rs = await this.client.execute({
       sql: `SELECT c.id, c.project_id, c.scope_name, c.url, c.path, c.title,
-                   c.section_title, c.heading_path, c.snippet, c.content_hash,
+                   c.section_title, c.heading_path, c.snippet, c.chunk_text,
+                   c.ordinal, c.content_hash,
                    c.model_id, c.depth, c.incoming_links, c.route_file, c.tags,
                    vector_distance_cos(c.embedding, vector(?)) AS distance
             FROM vector_top_k('idx', vector(?), ?) AS v
@@ -259,6 +280,8 @@ export class TursoVectorStore implements VectorStore {
           sectionTitle: row.section_title as string,
           headingPath: JSON.parse((row.heading_path as string) || "[]"),
           snippet: row.snippet as string,
+          chunkText: (row.chunk_text as string) || "",
+          ordinal: (row.ordinal as number) || 0,
           contentHash: row.content_hash as string,
           modelId: row.model_id as string,
           depth: row.depth as number,

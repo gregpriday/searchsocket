@@ -25,6 +25,8 @@ function makeRecord(id: string, vector: number[], overrides: Partial<VectorRecor
       sectionTitle: overrides.sectionTitle ?? "",
       headingPath: overrides.headingPath ?? [],
       snippet: overrides.snippet ?? "snippet text",
+      chunkText: overrides.chunkText ?? "full chunk text for testing",
+      ordinal: overrides.ordinal ?? 0,
       contentHash: overrides.contentHash ?? "abc123",
       modelId: overrides.modelId ?? "jina-embeddings-v3",
       depth: overrides.depth ?? 0,

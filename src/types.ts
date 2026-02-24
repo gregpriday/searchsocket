@@ -91,6 +91,7 @@ export interface SearchSocketConfig {
     aggregationCap?: number;
     aggregationDecay?: number;
     minChunkScoreRatio?: number;
+    minScore?: number;
     weights?: {
       incomingLinks?: number;
       depth?: number;
@@ -211,6 +212,7 @@ export interface ResolvedSearchSocketConfig {
     aggregationCap: number;
     aggregationDecay: number;
     minChunkScoreRatio: number;
+    minScore: number;
     weights: {
       incomingLinks: number;
       depth: number;
@@ -326,6 +328,8 @@ export interface VectorRecord {
     sectionTitle: string;
     headingPath: string[];
     snippet: string;
+    chunkText: string;
+    ordinal: number;
     contentHash: string;
     modelId: string;
     depth: number;

@@ -423,6 +423,8 @@ export class IndexPipeline {
             sectionTitle: chunk.sectionTitle ?? "",
             headingPath: chunk.headingPath,
             snippet: chunk.snippet,
+            chunkText: chunk.chunkText.slice(0, 4000),
+            ordinal: chunk.ordinal,
             contentHash: chunk.contentHash,
             modelId: this.config.embeddings.model,
             depth: chunk.depth,

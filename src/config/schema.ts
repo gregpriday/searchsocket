@@ -116,6 +116,7 @@ export const searchSocketConfigSchema = z.object({
       aggregationCap: z.number().int().positive().optional(),
       aggregationDecay: z.number().min(0).max(1).optional(),
       minChunkScoreRatio: z.number().min(0).max(1).optional(),
+      minScore: z.number().min(0).max(1).optional(),
       weights: z
         .object({
           incomingLinks: z.number().optional(),

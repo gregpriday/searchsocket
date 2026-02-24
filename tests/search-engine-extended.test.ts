@@ -96,6 +96,8 @@ function makeHit(id: string, url: string): VectorHit {
       sectionTitle: "",
       headingPath: [],
       snippet: "Snippet",
+      chunkText: "Full chunk text",
+      ordinal: 0,
       contentHash: `hash-${id}`,
       modelId: "jina-embeddings-v3",
       depth: 1,
