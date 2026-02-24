@@ -10,11 +10,11 @@ export function createEmbeddingsProvider(config: ResolvedSearchSocketConfig): Em
     );
   }
 
-  const apiKey = process.env[config.embeddings.apiKeyEnv];
+  const apiKey = config.embeddings.apiKey ?? process.env[config.embeddings.apiKeyEnv];
   if (!apiKey) {
     throw new SearchSocketError(
       "CONFIG_MISSING",
-      `Missing embeddings API key env var: ${config.embeddings.apiKeyEnv}`
+      `Missing embeddings API key: provide embeddings.apiKey or set env var ${config.embeddings.apiKeyEnv}`
     );
   }
 

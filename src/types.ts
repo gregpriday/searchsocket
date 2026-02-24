@@ -63,6 +63,7 @@ export interface SearchSocketConfig {
   embeddings?: {
     provider?: EmbeddingProvider;
     model?: string;
+    apiKey?: string;
     apiKeyEnv?: string;
     batchSize?: number;
     concurrency?: number;
@@ -71,6 +72,8 @@ export interface SearchSocketConfig {
   vector?: {
     dimension?: number;
     turso?: {
+      url?: string;
+      authToken?: string;
       urlEnv?: string;
       authTokenEnv?: string;
       localPath?: string;
@@ -180,6 +183,7 @@ export interface ResolvedSearchSocketConfig {
   embeddings: {
     provider: EmbeddingProvider;
     model: string;
+    apiKey?: string;
     apiKeyEnv: string;
     batchSize: number;
     concurrency: number;
@@ -188,6 +192,8 @@ export interface ResolvedSearchSocketConfig {
   vector: {
     dimension?: number;
     turso: {
+      url?: string;
+      authToken?: string;
       urlEnv: string;
       authTokenEnv: string;
       localPath: string;
@@ -380,6 +386,7 @@ export interface VectorStore {
   getPage(url: string, scope: Scope): Promise<PageRecord | null>;
   deletePages(scope: Scope): Promise<void>;
   getScopeModelId(scope: Scope): Promise<string | null>;
+  dropAllTables(): Promise<void>;
 }
 
 export interface EmbeddingsProvider {

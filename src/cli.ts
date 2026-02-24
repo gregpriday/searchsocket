@@ -488,8 +488,8 @@ program
 
     if (opts.remote) {
       const vectorStore = await createVectorStore(config, cwd);
-      await vectorStore.deleteScope(scope);
-      process.stdout.write(`deleted remote vectors for scope ${scope.scopeName}\n`);
+      await vectorStore.dropAllTables();
+      process.stdout.write(`dropped all remote tables (chunks, registry, pages)\n`);
     }
   });
 

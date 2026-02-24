@@ -80,6 +80,7 @@ export const searchSocketConfigSchema = z.object({
     .object({
       provider: z.literal("jina").optional(),
       model: z.string().min(1).optional(),
+      apiKey: z.string().min(1).optional(),
       apiKeyEnv: z.string().min(1).optional(),
       batchSize: z.number().int().positive().optional(),
       concurrency: z.number().int().positive().optional(),
@@ -91,6 +92,8 @@ export const searchSocketConfigSchema = z.object({
       dimension: z.number().int().positive().optional(),
       turso: z
         .object({
+          url: z.string().url().optional(),
+          authToken: z.string().min(1).optional(),
           urlEnv: z.string().optional(),
           authTokenEnv: z.string().optional(),
           localPath: z.string().optional()

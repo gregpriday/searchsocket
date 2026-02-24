@@ -56,6 +56,20 @@ export class TursoVectorStore implements VectorStore {
 
   private async ensureChunks(dim: number): Promise<void> {
     if (this.chunksReady) return;
+
+    // Check if the table exists with a different vector dimension.
+    // This happens when switching embedding models (e.g., OpenAI 1536 → Jina 1024).
+    const exists = await this.chunksTableExists();
+    if (exists) {
+      const currentDim = await this.getChunksDimension();
+      if (currentDim !== null && currentDim !== dim) {
+        await this.client.batch([
+          "DROP INDEX IF EXISTS idx",
+          "DROP TABLE IF EXISTS chunks"
+        ]);
+      }
+    }
+
     await this.client.batch([
       `CREATE TABLE IF NOT EXISTS chunks (
         id             TEXT PRIMARY KEY,
@@ -113,6 +127,40 @@ export class TursoVectorStore implements VectorStore {
       }
       throw error;
     }
+  }
+
+  /**
+   * Read the current F32_BLOB dimension from the chunks table schema.
+   * Returns null if the table doesn't exist or the dimension can't be parsed.
+   */
+  private async getChunksDimension(): Promise<number | null> {
+    try {
+      const rs = await this.client.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='chunks'"
+      );
+      if (rs.rows.length === 0) return null;
+      const sql = rs.rows[0]!.sql as string;
+      const match = sql.match(/F32_BLOB\((\d+)\)/i);
+      return match ? parseInt(match[1]!, 10) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Drop all SearchSocket tables (chunks, registry, pages) and their indexes.
+   * Used by `clean --remote` for a full reset.
+   */
+  async dropAllTables(): Promise<void> {
+    await this.client.batch([
+      "DROP INDEX IF EXISTS idx",
+      "DROP TABLE IF EXISTS chunks",
+      "DROP TABLE IF EXISTS registry",
+      "DROP TABLE IF EXISTS pages"
+    ]);
+    this.chunksReady = false;
+    this.registryReady = false;
+    this.pagesReady = false;
   }
 
   async upsert(records: VectorRecord[], _scope: Scope): Promise<void> {

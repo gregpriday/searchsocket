@@ -6,7 +6,7 @@ export function createReranker(config: ResolvedSearchSocketConfig): Reranker | n
     return null;
   }
 
-  const apiKey = process.env[config.embeddings.apiKeyEnv];
+  const apiKey = config.embeddings.apiKey ?? process.env[config.embeddings.apiKeyEnv];
   if (!apiKey) {
     return null;
   }
