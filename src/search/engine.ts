@@ -285,13 +285,30 @@ export class SearchEngine {
       else pageGroups.set(url, [entry]);
     }
 
-    // 2. Build page-level documents from chunk texts in ordinal order
+    // 2. Build page-level documents from top chunks in ordinal order
+    //    Jina reranker v2 has a 1024 token context limit per document.
+    //    We select the best chunks per page (by score) to stay within budget,
+    //    then order them by ordinal so the text reads naturally.
+    const MAX_CHUNKS_PER_PAGE = 5;
+    const MIN_CHUNKS_PER_PAGE = 1;
+    const MIN_CHUNK_SCORE_RATIO = 0.5;
+
     const pageCandidates: Array<{ id: string; text: string }> = [];
     for (const [url, chunks] of pageGroups) {
-      const sorted = [...chunks].sort(
-        (a, b) => (a.hit.metadata.ordinal ?? 0) - (b.hit.metadata.ordinal ?? 0)
-      );
-      const first = sorted[0]!.hit.metadata;
+      // Sort by score descending to pick the best chunks
+      const byScore = [...chunks].sort((a, b) => b.finalScore - a.finalScore);
+      const bestScore = byScore[0]!.finalScore;
+      const scoreFloor = Number.isFinite(bestScore) ? bestScore * MIN_CHUNK_SCORE_RATIO : Number.NEGATIVE_INFINITY;
+
+      // Keep top chunks that meet the relative score threshold, with a guaranteed minimum
+      const selected = byScore.filter((c, i) =>
+        i < MIN_CHUNKS_PER_PAGE || c.finalScore >= scoreFloor
+      ).slice(0, MAX_CHUNKS_PER_PAGE);
+
+      // Re-sort selected chunks by ordinal for natural reading order
+      selected.sort((a, b) => (a.hit.metadata.ordinal ?? 0) - (b.hit.metadata.ordinal ?? 0));
+
+      const first = selected[0]!.hit.metadata;
       const parts: string[] = [first.title];
 
       if (first.description) {
@@ -301,7 +318,7 @@ export class SearchEngine {
         parts.push(first.keywords.join(", "));
       }
 
-      const body = sorted
+      const body = selected
         .map((c) => c.hit.metadata.chunkText || c.hit.metadata.snippet)
         .join("\n\n");
       parts.push(body);
