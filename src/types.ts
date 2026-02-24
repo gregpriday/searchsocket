@@ -31,6 +31,10 @@ export interface SearchSocketConfig {
       paramValues?: Record<string, string[]>;
       exclude?: string[];
       previewTimeout?: number;
+      discover?: boolean;
+      seedUrls?: string[];
+      maxPages?: number;
+      maxDepth?: number;
     };
   };
   extract?: {
@@ -144,6 +148,10 @@ export interface ResolvedSearchSocketConfig {
       paramValues: Record<string, string[]>;
       exclude: string[];
       previewTimeout: number;
+      discover: boolean;
+      seedUrls: string[];
+      maxPages: number;
+      maxDepth: number;
     };
   };
   extract: {

@@ -100,7 +100,11 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
             outputDir: parsed.source.build.outputDir ?? ".svelte-kit/output",
             paramValues: parsed.source.build.paramValues ?? {},
             exclude: parsed.source.build.exclude ?? [],
-            previewTimeout: parsed.source.build.previewTimeout ?? 30_000
+            previewTimeout: parsed.source.build.previewTimeout ?? 30_000,
+            discover: parsed.source.build.discover ?? false,
+            seedUrls: parsed.source.build.seedUrls ?? ["/"],
+            maxPages: parsed.source.build.maxPages ?? 200,
+            maxDepth: parsed.source.build.maxDepth ?? 10
           }
         : undefined
     },
@@ -181,7 +185,11 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
       outputDir: ".svelte-kit/output",
       paramValues: {},
       exclude: [],
-      previewTimeout: 30_000
+      previewTimeout: 30_000,
+      discover: false,
+      seedUrls: ["/"],
+      maxPages: 200,
+      maxDepth: 10
     };
   }
 

@@ -38,7 +38,11 @@ export const searchSocketConfigSchema = z.object({
           outputDir: z.string().min(1).optional(),
           paramValues: z.record(z.string(), z.array(z.string())).optional(),
           exclude: z.array(z.string()).optional(),
-          previewTimeout: z.number().int().positive().optional()
+          previewTimeout: z.number().int().positive().optional(),
+          discover: z.boolean().optional(),
+          seedUrls: z.array(z.string()).optional(),
+          maxPages: z.number().int().positive().optional(),
+          maxDepth: z.number().int().nonnegative().optional()
         })
         .optional()
     })

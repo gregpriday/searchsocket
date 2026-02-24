@@ -121,7 +121,7 @@ function expandDynamicUrl(url: string, value: string): string {
   return url.replace(/\[\[?\.\.\.[^\]]+\]?\]|\[\[[^\]]+\]\]|\[[^\]]+\]/g, value);
 }
 
-function isExcluded(url: string, patterns: string[]): boolean {
+export function isExcluded(url: string, patterns: string[]): boolean {
   for (const pattern of patterns) {
     if (pattern.endsWith("/*")) {
       const prefix = pattern.slice(0, -1);
