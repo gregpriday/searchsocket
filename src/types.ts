@@ -309,6 +309,8 @@ export interface Chunk {
   routeFile: string;
   tags: string[];
   contentHash: string;
+  description?: string;
+  keywords?: string[];
 }
 
 export interface EmbeddingVector {
@@ -336,6 +338,8 @@ export interface VectorRecord {
     incomingLinks: number;
     routeFile: string;
     tags: string[];
+    description?: string;
+    keywords?: string[];
   };
 }
 

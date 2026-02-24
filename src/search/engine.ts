@@ -291,11 +291,22 @@ export class SearchEngine {
       const sorted = [...chunks].sort(
         (a, b) => (a.hit.metadata.ordinal ?? 0) - (b.hit.metadata.ordinal ?? 0)
       );
-      const title = sorted[0]!.hit.metadata.title;
+      const first = sorted[0]!.hit.metadata;
+      const parts: string[] = [first.title];
+
+      if (first.description) {
+        parts.push(first.description);
+      }
+      if (first.keywords && first.keywords.length > 0) {
+        parts.push(first.keywords.join(", "));
+      }
+
       const body = sorted
         .map((c) => c.hit.metadata.chunkText || c.hit.metadata.snippet)
         .join("\n\n");
-      pageCandidates.push({ id: url, text: `${title}\n\n${body}` });
+      parts.push(body);
+
+      pageCandidates.push({ id: url, text: parts.join("\n\n") });
     }
 
     // 3. Rerank page-level documents

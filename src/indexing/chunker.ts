@@ -328,7 +328,9 @@ export function chunkMirrorPage(
       incomingLinks: page.incomingLinks,
       routeFile: page.routeFile,
       tags: page.tags,
-      contentHash: ""
+      contentHash: "",
+      description: page.description,
+      keywords: page.keywords
     };
 
     const embeddingText = buildEmbeddingText(summaryChunk, config.chunking.prependTitle);
@@ -359,7 +361,9 @@ export function chunkMirrorPage(
       incomingLinks: page.incomingLinks,
       routeFile: page.routeFile,
       tags: page.tags,
-      contentHash: ""
+      contentHash: "",
+      description: page.description,
+      keywords: page.keywords
     };
 
     const embeddingText = buildEmbeddingText(chunk, config.chunking.prependTitle);

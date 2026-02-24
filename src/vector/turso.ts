@@ -89,25 +89,12 @@ export class TursoVectorStore implements VectorStore {
         incoming_links INTEGER NOT NULL DEFAULT 0,
         route_file     TEXT NOT NULL DEFAULT '',
         tags           TEXT NOT NULL DEFAULT '[]',
+        description    TEXT NOT NULL DEFAULT '',
+        keywords       TEXT NOT NULL DEFAULT '[]',
         embedding      F32_BLOB(${dim})
       )`,
       `CREATE INDEX IF NOT EXISTS idx ON chunks (libsql_vector_idx(embedding, 'metric=cosine'))`
     ]);
-
-    // Migrate existing tables: add chunk_text and ordinal columns if missing
-    const chunkMigrationCols = [
-      { name: "chunk_text", def: "TEXT NOT NULL DEFAULT ''" },
-      { name: "ordinal", def: "INTEGER NOT NULL DEFAULT 0" }
-    ];
-    for (const col of chunkMigrationCols) {
-      try {
-        await this.client.execute(`ALTER TABLE chunks ADD COLUMN ${col.name} ${col.def}`);
-      } catch (error) {
-        if (error instanceof Error && !error.message.includes("duplicate column")) {
-          throw error;
-        }
-      }
-    }
 
     this.chunksReady = true;
   }
@@ -194,8 +181,8 @@ export class TursoVectorStore implements VectorStore {
         sql: `INSERT OR REPLACE INTO chunks
               (id, project_id, scope_name, url, path, title, section_title,
                heading_path, snippet, chunk_text, ordinal, content_hash, model_id, depth,
-               incoming_links, route_file, tags, embedding)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, vector(?))`,
+               incoming_links, route_file, tags, description, keywords, embedding)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, vector(?))`,
         args: [
           r.id,
           r.metadata.projectId,
@@ -214,6 +201,8 @@ export class TursoVectorStore implements VectorStore {
           r.metadata.incomingLinks,
           r.metadata.routeFile,
           JSON.stringify(r.metadata.tags),
+          r.metadata.description ?? "",
+          JSON.stringify(r.metadata.keywords ?? []),
           JSON.stringify(r.vector)
         ]
       }));
@@ -231,6 +220,7 @@ export class TursoVectorStore implements VectorStore {
                    c.section_title, c.heading_path, c.snippet, c.chunk_text,
                    c.ordinal, c.content_hash,
                    c.model_id, c.depth, c.incoming_links, c.route_file, c.tags,
+                   c.description, c.keywords,
                    vector_distance_cos(c.embedding, vector(?)) AS distance
             FROM vector_top_k('idx', vector(?), ?) AS v
             JOIN chunks AS c ON c.rowid = v.id`,
@@ -268,6 +258,13 @@ export class TursoVectorStore implements VectorStore {
       const distance = row.distance as number;
       const score = 1 - distance;
 
+      const description = (row.description as string) || undefined;
+      const keywords: string[] | undefined = (() => {
+        const raw = (row.keywords as string) || "[]";
+        const parsed: string[] = JSON.parse(raw);
+        return parsed.length > 0 ? parsed : undefined;
+      })();
+
       hits.push({
         id: row.id as string,
         score,
@@ -287,7 +284,9 @@ export class TursoVectorStore implements VectorStore {
           depth: row.depth as number,
           incomingLinks: row.incoming_links as number,
           routeFile: row.route_file as string,
-          tags
+          tags,
+          description,
+          keywords
         }
       });
     }

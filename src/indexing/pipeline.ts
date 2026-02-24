@@ -430,7 +430,9 @@ export class IndexPipeline {
             depth: chunk.depth,
             incomingLinks: chunk.incomingLinks,
             routeFile: chunk.routeFile,
-            tags: chunk.tags
+            tags: chunk.tags,
+            description: chunk.description,
+            keywords: chunk.keywords
           }
         });
       }
