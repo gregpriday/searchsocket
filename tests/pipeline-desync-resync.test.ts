@@ -48,7 +48,8 @@ function makeStore(
     upsertPages: async () => undefined,
     getPage: async () => null,
     deletePages: async () => undefined,
-    getScopeModelId: async () => "jina-embeddings-v3"
+    getScopeModelId: async () => "jina-embeddings-v3",
+    dropAllTables: async () => undefined
   };
 }
 

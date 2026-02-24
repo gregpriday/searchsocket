@@ -81,6 +81,10 @@ class FakeStore implements VectorStore {
   async getScopeModelId(): Promise<string | null> {
     return this.scopeModelId;
   }
+
+  async dropAllTables(): Promise<void> {
+    return;
+  }
 }
 
 function makeHit(id: string, url: string): VectorHit {
@@ -342,7 +346,8 @@ describe("SearchEngine - adversarial cases", () => {
       upsertPages: async () => undefined,
       getPage: async () => null,
       deletePages: async () => undefined,
-      getScopeModelId: async () => null
+      getScopeModelId: async () => null,
+      dropAllTables: async () => undefined
     };
 
     const embeddings: EmbeddingsProvider = {
@@ -380,7 +385,8 @@ describe("SearchEngine - adversarial cases", () => {
       upsertPages: async () => undefined,
       getPage: async () => null,
       deletePages: async () => undefined,
-      getScopeModelId: async () => null
+      getScopeModelId: async () => null,
+      dropAllTables: async () => undefined
     };
 
     const embeddings: EmbeddingsProvider = {
@@ -418,7 +424,8 @@ describe("SearchEngine - adversarial cases", () => {
       upsertPages: async () => undefined,
       getPage: async () => null,
       deletePages: async () => undefined,
-      getScopeModelId: async () => null
+      getScopeModelId: async () => null,
+      dropAllTables: async () => undefined
     };
 
     const engine = await SearchEngine.create({
@@ -455,7 +462,8 @@ describe("SearchEngine - adversarial cases", () => {
       upsertPages: async () => undefined,
       getPage: async () => null,
       deletePages: async () => undefined,
-      getScopeModelId: async () => null
+      getScopeModelId: async () => null,
+      dropAllTables: async () => undefined
     };
 
     const engine = await SearchEngine.create({
@@ -582,7 +590,8 @@ describe("SearchEngine - adversarial cases", () => {
       upsertPages: async () => undefined,
       getPage: async () => null,
       deletePages: async () => undefined,
-      getScopeModelId: async () => null
+      getScopeModelId: async () => null,
+      dropAllTables: async () => undefined
     };
 
     const engine = await SearchEngine.create({

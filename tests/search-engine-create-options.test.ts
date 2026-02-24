@@ -33,7 +33,8 @@ const fakeStore: VectorStore = {
   upsertPages: async () => undefined,
   getPage: async () => null,
   deletePages: async () => undefined,
-  getScopeModelId: async () => null
+  getScopeModelId: async () => null,
+  dropAllTables: async () => undefined
 };
 
 describe("SearchEngine.create options", () => {

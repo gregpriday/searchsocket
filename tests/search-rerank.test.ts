@@ -129,6 +129,10 @@ class FakeStore implements VectorStore {
   async getScopeModelId() {
     return null;
   }
+
+  async dropAllTables(): Promise<void> {
+    return;
+  }
 }
 
 afterEach(async () => {

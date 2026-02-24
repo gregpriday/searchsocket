@@ -203,7 +203,11 @@ export default {
       paramValues: {                     // values for dynamic routes
         "/blog/[slug]": ["hello-world", "getting-started"],
         "/docs/[category]/[page]": ["guides/quickstart", "api/search"]
-      }
+      },
+      discover: true,                    // crawl internal links to find pages (default: false)
+      seedUrls: ["/"],                   // starting URLs for discovery
+      maxPages: 200,                     // max pages to discover (default: 200)
+      maxDepth: 5                        // max link depth from seed URLs (default: 5)
     }
   }
 };
@@ -220,6 +224,8 @@ Best for: CI/CD pipelines. Enables `vite build && searchsocket index` with zero 
 6. Shuts down the preview server
 
 **Dynamic routes**: Each key in `paramValues` maps to a route ID (e.g., `/blog/[slug]`) or its URL equivalent. Each value in the array replaces all `[param]` segments in the URL. Routes with layout groups like `/(app)/blog/[slug]` also match the URL key `/blog/[slug]`.
+
+**Link discovery**: Enable `discover: true` to automatically find pages by crawling internal links from `seedUrls`. This is useful when dynamic routes have many parameter values that are impractical to enumerate. The crawler respects `maxPages` and `maxDepth` limits and only follows links within the same origin.
 
 ### `crawl`
 
@@ -324,6 +330,30 @@ For production, switch to **Turso's hosted service**:
    ```
 
 3. **Index normally** — SearchSocket auto-detects the remote URL and uses it.
+
+### Direct Credential Passing
+
+Instead of environment variables, you can pass credentials directly in the config. This is useful for serverless deployments or multi-tenant setups:
+
+```ts
+export default {
+  embeddings: {
+    apiKey: "jina_..."  // direct API key (takes precedence over apiKeyEnv)
+  },
+  vector: {
+    turso: {
+      url: "libsql://my-db.turso.io",       // direct URL
+      authToken: "eyJhbGc..."               // direct auth token
+    }
+  }
+};
+```
+
+Direct values take precedence over environment variable lookups (`apiKeyEnv`, `urlEnv`, `authTokenEnv`).
+
+### Dimension Mismatch Auto-Recovery
+
+When switching embedding models (e.g., from a 1536-dim model to Jina's 1024-dim), the vector dimension changes. SearchSocket automatically detects this and recreates the chunks table with the new dimension — no manual intervention needed. A full re-index (`--force`) is still required after switching models.
 
 ### Why Turso?
 
@@ -445,6 +475,7 @@ Configure aggregation behavior:
 ```ts
 export default {
   ranking: {
+    minScore: 0,                // minimum absolute score to include in results (default: 0, disabled)
     aggregationCap: 5,          // max chunks contributing to page score (default: 5)
     aggregationDecay: 0.5,      // decay factor for additional chunks (default: 0.5)
     minChunkScoreRatio: 0.5,    // threshold for sub-chunks in results (default: 0.5)
@@ -464,6 +495,8 @@ export default {
 ```
 
 `pageWeights` supports exact URL matches and prefix matching. A weight of `1.15` on `"/docs"` boosts all pages under `/docs/` by 15%. Use gentle values (1.05-1.2x) since they compound with aggregation.
+
+`minScore` filters out low-relevance results before they reach the client. Set to a value like `0.3` to remove noise. In page mode, pages below the threshold are dropped; in chunk mode, individual chunks are filtered. Default is `0` (disabled).
 
 ### Chunk Mode
 
@@ -790,7 +823,11 @@ export default {
       exclude: ["/api/*"],
       paramValues: {
         "/blog/[slug]": ["hello-world", "getting-started"]
-      }
+      },
+      discover: false,
+      seedUrls: ["/"],
+      maxPages: 200,
+      maxDepth: 5
     },
 
     // Crawl mode (alternative)
@@ -829,6 +866,7 @@ export default {
   embeddings: {
     provider: "jina",
     model: "jina-embeddings-v3",
+    apiKey: "jina_...",          // direct API key (or use apiKeyEnv)
     apiKeyEnv: "JINA_API_KEY",
     batchSize: 64,
     concurrency: 4
@@ -837,6 +875,8 @@ export default {
   vector: {
     dimension: 1024,  // optional, inferred from first embedding
     turso: {
+      url: "libsql://my-db.turso.io",    // direct URL (or use urlEnv)
+      authToken: "eyJhbGc...",            // direct token (or use authTokenEnv)
       urlEnv: "TURSO_DATABASE_URL",
       authTokenEnv: "TURSO_AUTH_TOKEN",
       localPath: ".searchsocket/vectors.db"
@@ -856,6 +896,7 @@ export default {
       "/": 1.1,
       "/docs": 1.15
     },
+    minScore: 0,
     aggregationCap: 5,
     aggregationDecay: 0.5,
     minChunkScoreRatio: 0.5,

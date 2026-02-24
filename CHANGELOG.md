@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-02-24
+
+### Added
+
+- **Page-level reranking** — reranker now receives assembled page documents (all matching chunks concatenated in document order) instead of individual chunk snippets, giving it a holistic view of each page's relevance
+- **Stored chunk text** — full chunk markdown (up to 4000 chars) is now persisted alongside the snippet for richer reranking context
+- **`ranking.minScore`** — configurable minimum absolute score threshold to filter out low-relevance results before they reach the client (default: `0`, disabled)
+- **Link-discovery crawling for build mode** — `source.build.discover` enables automatic page discovery by crawling internal links from seed URLs, with configurable `maxPages` and `maxDepth` limits
+- **Direct credential passing** — `embeddings.apiKey`, `vector.turso.url`, and `vector.turso.authToken` allow passing credentials directly in config instead of through environment variables
+- **Dimension mismatch auto-recovery** — automatically detects and recreates the chunks table when switching to an embedding model with a different vector dimension
+
+### Changed
+
+- Replaced OpenAI embedding provider with Jina AI (`jina-embeddings-v3`) as the default and only provider; uses task-specific LoRA adapters (`retrieval.passage` for indexing, `retrieval.query` for search)
+- Reranker uses Jina AI (`jina-reranker-v2-base-multilingual`), sharing the same API key as embeddings
+- Removed `openai` dependency
+
+### Fixed
+
+- Fixed TypeScript errors in test mocks (missing `dropAllTables` implementations)
+
 ## [0.2.1] - 2026-02-24
 
 ### Changed
@@ -37,5 +58,6 @@ Initial public release.
 - **Request validation** with Zod schemas
 - **Rate limiting** and CORS configuration for the search API
 
+[0.3.0]: https://github.com/gregpriday/searchsocket/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/gregpriday/searchsocket/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/gregpriday/searchsocket/releases/tag/v0.2.0
