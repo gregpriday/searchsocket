@@ -78,6 +78,8 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
       ...defaults.scope,
       ...parsed.scope
     },
+    exclude: parsed.exclude ?? defaults.exclude,
+    respectRobotsTxt: parsed.respectRobotsTxt ?? defaults.respectRobotsTxt,
     source: {
       ...defaults.source,
       ...parsed.source,

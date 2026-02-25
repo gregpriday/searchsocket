@@ -15,6 +15,8 @@ export const searchSocketConfigSchema = z.object({
       sanitize: z.boolean().optional()
     })
     .optional(),
+  exclude: z.array(z.string()).optional(),
+  respectRobotsTxt: z.boolean().optional(),
   source: z
     .object({
       mode: z.enum(["static-output", "crawl", "content-files", "build"]).optional(),

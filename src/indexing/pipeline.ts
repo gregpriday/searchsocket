@@ -13,6 +13,9 @@ import { loadBuildPages } from "./sources/build";
 import { loadContentFilesPages } from "./sources/content-files";
 import { loadCrawledPages } from "./sources/crawl";
 import { loadStaticOutputPages } from "./sources/static-output";
+import { loadRobotsTxtFromDir, fetchRobotsTxt, isBlockedByRobots } from "./robots";
+import { findPageWeight } from "../search/ranking";
+import { matchUrlPatterns } from "../utils/pattern";
 import { hrTimeMs, nowIso } from "../utils/time";
 import { getUrlDepth, normalizeUrlPath } from "../utils/path";
 import { Logger } from "../core/logger";
@@ -149,6 +152,60 @@ export class IndexPipeline {
     stageEnd("source", sourceStart);
     this.logger.info(`Loaded ${sourcePages.length} page${sourcePages.length === 1 ? "" : "s"} (${stageTimingsMs["source"]}ms)`);
 
+    // --- Pre-extraction filtering: robots.txt + top-level exclude ---
+    const filterStart = stageStart();
+    let filteredSourcePages = sourcePages;
+
+    // Apply top-level exclude patterns (works across all source modes)
+    if (this.config.exclude.length > 0) {
+      const beforeExclude = filteredSourcePages.length;
+      filteredSourcePages = filteredSourcePages.filter((p) => {
+        const url = normalizeUrlPath(p.url);
+        if (matchUrlPatterns(url, this.config.exclude)) {
+          this.logger.debug(`Excluding ${url} (matched exclude pattern)`);
+          return false;
+        }
+        return true;
+      });
+      const excludedCount = beforeExclude - filteredSourcePages.length;
+      if (excludedCount > 0) {
+        this.logger.info(`Excluded ${excludedCount} page${excludedCount === 1 ? "" : "s"} by config exclude patterns`);
+      }
+    }
+
+    // Apply robots.txt filtering
+    if (this.config.respectRobotsTxt) {
+      let robotsRules = null;
+      if (sourceMode === "static-output") {
+        robotsRules = await loadRobotsTxtFromDir(
+          path.resolve(this.cwd, this.config.source.staticOutputDir)
+        );
+      } else if (sourceMode === "build" && this.config.source.build) {
+        robotsRules = await loadRobotsTxtFromDir(
+          path.resolve(this.cwd, this.config.source.build.outputDir)
+        );
+      } else if (sourceMode === "crawl" && this.config.source.crawl) {
+        robotsRules = await fetchRobotsTxt(this.config.source.crawl.baseUrl);
+      }
+
+      if (robotsRules) {
+        const beforeRobots = filteredSourcePages.length;
+        filteredSourcePages = filteredSourcePages.filter((p) => {
+          const url = normalizeUrlPath(p.url);
+          if (isBlockedByRobots(url, robotsRules!)) {
+            this.logger.debug(`Excluding ${url} (blocked by robots.txt)`);
+            return false;
+          }
+          return true;
+        });
+        const robotsExcluded = beforeRobots - filteredSourcePages.length;
+        if (robotsExcluded > 0) {
+          this.logger.info(`Excluded ${robotsExcluded} page${robotsExcluded === 1 ? "" : "s"} by robots.txt`);
+        }
+      }
+    }
+    stageEnd("filter", filterStart);
+
     const routeStart = stageStart();
     const routePatterns = await buildRoutePatterns(this.cwd);
     stageEnd("route_map", routeStart);
@@ -158,7 +215,7 @@ export class IndexPipeline {
     this.logger.info("Extracting content...");
     const extractedPages: ExtractedPage[] = [];
 
-    for (const sourcePage of sourcePages) {
+    for (const sourcePage of filteredSourcePages) {
       const extracted = sourcePage.html
         ? extractFromHtml(sourcePage.url, sourcePage.html, this.config)
         : extractFromMarkdown(sourcePage.url, sourcePage.markdown ?? "", sourcePage.title);
@@ -190,19 +247,37 @@ export class IndexPipeline {
       seenUrls.add(page.url);
       uniquePages.push(page);
     }
+
+    // Filter out zero-weight pages at index time.
+    // Effective weight: per-page meta tag (ExtractedPage.weight) > config pageWeights > default (1.0)
+    const indexablePages: ExtractedPage[] = [];
+    for (const page of uniquePages) {
+      const effectiveWeight = page.weight ?? findPageWeight(page.url, this.config.ranking.pageWeights);
+      if (effectiveWeight === 0) {
+        this.logger.debug(`Excluding ${page.url} (zero weight)`);
+        continue;
+      }
+      indexablePages.push(page);
+    }
+
+    const zeroWeightCount = uniquePages.length - indexablePages.length;
+    if (zeroWeightCount > 0) {
+      this.logger.info(`Excluded ${zeroWeightCount} page${zeroWeightCount === 1 ? "" : "s"} with zero weight`);
+    }
+
     stageEnd("extract", extractStart);
-    const skippedPages = sourcePages.length - uniquePages.length;
-    this.logger.info(`Extracted ${uniquePages.length} page${uniquePages.length === 1 ? "" : "s"}${skippedPages > 0 ? ` (${skippedPages} skipped)` : ""} (${stageTimingsMs["extract"]}ms)`);
+    const skippedPages = filteredSourcePages.length - indexablePages.length;
+    this.logger.info(`Extracted ${indexablePages.length} page${indexablePages.length === 1 ? "" : "s"}${skippedPages > 0 ? ` (${skippedPages} skipped)` : ""} (${stageTimingsMs["extract"]}ms)`);
 
     const linkStart = stageStart();
-    const pageSet = new Set(uniquePages.map((page) => normalizeUrlPath(page.url)));
+    const pageSet = new Set(indexablePages.map((page) => normalizeUrlPath(page.url)));
     const incomingLinkCount = new Map<string, number>();
 
-    for (const page of uniquePages) {
+    for (const page of indexablePages) {
       incomingLinkCount.set(page.url, incomingLinkCount.get(page.url) ?? 0);
     }
 
-    for (const page of uniquePages) {
+    for (const page of indexablePages) {
       for (const outgoing of page.outgoingLinks) {
         if (!pageSet.has(outgoing)) {
           continue;
@@ -230,7 +305,7 @@ export class IndexPipeline {
       }
     }
 
-    for (const page of uniquePages) {
+    for (const page of indexablePages) {
       const routeMatch = precomputedRoutes.get(normalizeUrlPath(page.url)) ?? mapUrlToRoute(page.url, routePatterns);
 
       if (routeMatch.routeResolution === "best-effort") {

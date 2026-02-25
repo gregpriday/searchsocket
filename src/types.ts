@@ -13,6 +13,8 @@ export interface SearchSocketConfig {
     envVar?: string;
     sanitize?: boolean;
   };
+  exclude?: string[];
+  respectRobotsTxt?: boolean;
   source?: {
     mode?: SourceMode;
     staticOutputDir?: string;
@@ -134,6 +136,8 @@ export interface ResolvedSearchSocketConfig {
     envVar: string;
     sanitize: boolean;
   };
+  exclude: string[];
+  respectRobotsTxt: boolean;
   source: {
     mode: SourceMode;
     staticOutputDir: string;
@@ -276,6 +280,7 @@ export interface ExtractedPage {
   tags: string[];
   description?: string;
   keywords?: string[];
+  weight?: number;
 }
 
 export interface MirrorPage {

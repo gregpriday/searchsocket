@@ -20,6 +20,8 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       envVar: "SEARCHSOCKET_SCOPE",
       sanitize: true
     },
+    exclude: [],
+    respectRobotsTxt: true,
     source: {
       mode: "static-output",
       staticOutputDir: "build",

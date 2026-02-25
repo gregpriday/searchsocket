@@ -52,6 +52,21 @@ export function extractFromHtml(
     return null;
   }
 
+  // Read per-page search weight from <meta name="searchsocket-weight" content="...">
+  const weightRaw = $("meta[name='searchsocket-weight']").attr("content")?.trim();
+  let weight: number | undefined;
+  if (weightRaw !== undefined) {
+    const parsed = Number(weightRaw);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      weight = parsed;
+    }
+  }
+
+  // If weight is 0, skip indexing entirely — save extraction/chunking/embedding cost
+  if (weight === 0) {
+    return null;
+  }
+
   const description =
     $("meta[name='description']").attr("content")?.trim() ||
     $("meta[property='og:description']").attr("content")?.trim() ||
@@ -134,7 +149,8 @@ export function extractFromHtml(
     noindex: false,
     tags,
     description,
-    keywords
+    keywords,
+    weight
   };
 }
 
@@ -150,6 +166,16 @@ export function extractFromMarkdown(url: string, markdown: string, title?: strin
 
   const searchsocketMeta = frontmatter.searchsocket as Record<string, unknown> | undefined;
   if (frontmatter.noindex === true || searchsocketMeta?.noindex === true) {
+    return null;
+  }
+
+  // Read per-page weight from frontmatter: searchsocket.weight or weight
+  let mdWeight: number | undefined;
+  const rawWeight = searchsocketMeta?.weight ?? frontmatter.searchsocketWeight;
+  if (typeof rawWeight === "number" && Number.isFinite(rawWeight) && rawWeight >= 0) {
+    mdWeight = rawWeight;
+  }
+  if (mdWeight === 0) {
     return null;
   }
 
@@ -181,6 +207,7 @@ export function extractFromMarkdown(url: string, markdown: string, title?: strin
       .filter(Boolean)
       .slice(0, 1),
     description: fmDescription,
-    keywords: fmKeywords
+    keywords: fmKeywords,
+    weight: mdWeight
   };
 }

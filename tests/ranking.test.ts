@@ -292,12 +292,33 @@ describe("findPageWeight", () => {
     expect(findPageWeight("/docs", { "/docs": 1.5 })).toBe(1.5);
   });
 
-  it("returns prefix match weight", () => {
-    expect(findPageWeight("/docs/api/auth", { "/docs": 1.5 })).toBe(1.5);
+  it("exact pattern does NOT match subpaths", () => {
+    expect(findPageWeight("/docs/api/auth", { "/docs": 1.5 })).toBe(1);
   });
 
-  it("prefers longest prefix match", () => {
-    const weights = { "/docs": 1.2, "/docs/api": 1.5 };
+  it("single-level wildcard matches direct children", () => {
+    expect(findPageWeight("/docs/intro", { "/docs/*": 1.5 })).toBe(1.5);
+  });
+
+  it("single-level wildcard does NOT match deeper paths", () => {
+    expect(findPageWeight("/docs/api/auth", { "/docs/*": 1.5 })).toBe(1);
+  });
+
+  it("single-level wildcard does NOT match the parent itself", () => {
+    expect(findPageWeight("/docs", { "/docs/*": 1.5 })).toBe(1);
+  });
+
+  it("globstar matches any depth", () => {
+    expect(findPageWeight("/docs/api/auth", { "/docs/**": 1.5 })).toBe(1.5);
+    expect(findPageWeight("/docs/intro", { "/docs/**": 1.5 })).toBe(1.5);
+  });
+
+  it("globstar matches the parent itself", () => {
+    expect(findPageWeight("/docs", { "/docs/**": 1.5 })).toBe(1.5);
+  });
+
+  it("prefers longest (most specific) pattern match", () => {
+    const weights = { "/docs/**": 1.2, "/docs/api/**": 1.5 };
     expect(findPageWeight("/docs/api/auth", weights)).toBe(1.5);
   });
 

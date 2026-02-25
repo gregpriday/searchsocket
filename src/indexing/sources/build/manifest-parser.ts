@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { SearchSocketError } from "../../../errors";
 import { Logger } from "../../../core/logger";
+import { matchUrlPatterns } from "../../../utils/pattern";
 
 export interface ManifestRoute {
   id: string;
@@ -122,13 +123,5 @@ function expandDynamicUrl(url: string, value: string): string {
 }
 
 export function isExcluded(url: string, patterns: string[]): boolean {
-  for (const pattern of patterns) {
-    if (pattern.endsWith("/*")) {
-      const prefix = pattern.slice(0, -1);
-      if (url.startsWith(prefix) || url === prefix.slice(0, -1)) return true;
-    } else if (url === pattern) {
-      return true;
-    }
-  }
-  return false;
+  return matchUrlPatterns(url, patterns);
 }

@@ -78,11 +78,22 @@ describe("isExcluded", () => {
     expect(isExcluded("/admin", ["/other"])).toBe(false);
   });
 
-  it("matches wildcard prefix patterns", () => {
+  it("exact pattern does not match subpaths", () => {
+    expect(isExcluded("/admin/users", ["/admin"])).toBe(false);
+  });
+
+  it("single-level wildcard matches direct children only", () => {
     expect(isExcluded("/api/users", ["/api/*"])).toBe(true);
-    expect(isExcluded("/api/users/1", ["/api/*"])).toBe(true);
-    expect(isExcluded("/api", ["/api/*"])).toBe(true);
+    expect(isExcluded("/api/users/1", ["/api/*"])).toBe(false);
+    expect(isExcluded("/api", ["/api/*"])).toBe(false);
     expect(isExcluded("/apiary", ["/api/*"])).toBe(false);
+  });
+
+  it("globstar matches any depth and the parent", () => {
+    expect(isExcluded("/api/users", ["/api/**"])).toBe(true);
+    expect(isExcluded("/api/users/1", ["/api/**"])).toBe(true);
+    expect(isExcluded("/api", ["/api/**"])).toBe(true);
+    expect(isExcluded("/apiary", ["/api/**"])).toBe(false);
   });
 
   it("returns false for empty patterns", () => {
@@ -90,9 +101,9 @@ describe("isExcluded", () => {
   });
 
   it("matches multiple patterns", () => {
-    expect(isExcluded("/admin", ["/api/*", "/admin"])).toBe(true);
-    expect(isExcluded("/api/v2", ["/api/*", "/admin"])).toBe(true);
-    expect(isExcluded("/docs", ["/api/*", "/admin"])).toBe(false);
+    expect(isExcluded("/admin", ["/api/**", "/admin"])).toBe(true);
+    expect(isExcluded("/api/v2", ["/api/**", "/admin"])).toBe(true);
+    expect(isExcluded("/docs", ["/api/**", "/admin"])).toBe(false);
   });
 
   it("does not match partial path segments for wildcard", () => {
@@ -100,9 +111,9 @@ describe("isExcluded", () => {
     expect(isExcluded("/api-docs", ["/api/*"])).toBe(false);
   });
 
-  it("handles nested wildcard paths", () => {
-    expect(isExcluded("/admin/users/edit", ["/admin/*"])).toBe(true);
-    expect(isExcluded("/admin/settings", ["/admin/*"])).toBe(true);
+  it("globstar handles nested paths", () => {
+    expect(isExcluded("/admin/users/edit", ["/admin/**"])).toBe(true);
+    expect(isExcluded("/admin/settings", ["/admin/**"])).toBe(true);
   });
 });
 

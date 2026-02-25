@@ -1,3 +1,4 @@
+import { matchUrlPattern } from "../utils/pattern";
 import type { ResolvedSearchSocketConfig, VectorHit } from "../types";
 
 export interface RankedHit {
@@ -48,26 +49,13 @@ export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig):
 }
 
 export function findPageWeight(url: string, pageWeights: Record<string, number>): number {
-  // Normalize: strip trailing slash unless root
-  const norm = (p: string) => (p !== "/" && p.endsWith("/") ? p.slice(0, -1) : p);
-  const normalizedUrl = norm(url);
-
-  // Exact match first (after normalizing both sides)
-  for (const [pattern, weight] of Object.entries(pageWeights)) {
-    if (norm(pattern) === normalizedUrl) {
-      return weight;
-    }
-  }
-
-  // Prefix match — longest prefix wins; "/" only matches via exact above
-  let bestPrefix = "";
+  // Try each pattern — most specific match wins (longest pattern)
+  let bestPattern = "";
   let bestWeight = 1;
+
   for (const [pattern, weight] of Object.entries(pageWeights)) {
-    const normalizedPattern = norm(pattern);
-    if (normalizedPattern === "/") continue; // root is exact-only, not a global prefix
-    const prefix = `${normalizedPattern}/`;
-    if (normalizedUrl.startsWith(prefix) && prefix.length > bestPrefix.length) {
-      bestPrefix = prefix;
+    if (matchUrlPattern(url, pattern) && pattern.length > bestPattern.length) {
+      bestPattern = pattern;
       bestWeight = weight;
     }
   }
