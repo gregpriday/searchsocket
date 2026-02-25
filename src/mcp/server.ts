@@ -16,7 +16,7 @@ export interface McpServerOptions {
   httpPath?: string;
 }
 
-function createServer(engine: SearchEngine): McpServer {
+function createServer(engine: SearchEngine, config: ResolvedSearchSocketConfig): McpServer {
   const server = new McpServer({
     name: "searchsocket-mcp",
     version: "0.1.0"
@@ -26,14 +26,15 @@ function createServer(engine: SearchEngine): McpServer {
     "search",
     {
       description:
-        "Semantic site search. Returns url/title/snippet/score/routeFile for each match. Supports optional scope, pathPrefix, tags, and topK.",
+        "Semantic site search. Returns url/title/snippet/score/routeFile for each match. Supports optional scope, pathPrefix, tags, topK, and rerank. Enable rerank for better relevance on natural-language queries.",
       inputSchema: {
         query: z.string().min(1),
         scope: z.string().optional(),
         topK: z.number().int().positive().max(100).optional(),
         pathPrefix: z.string().optional(),
         tags: z.array(z.string()).optional(),
-        groupBy: z.enum(["page", "chunk"]).optional()
+        groupBy: z.enum(["page", "chunk"]).optional(),
+        rerank: z.boolean().optional().describe("Enable reranking for better relevance (uses Jina Reranker). Defaults to true when rerank is enabled in config.")
       }
     },
     async (input) => {
@@ -43,7 +44,8 @@ function createServer(engine: SearchEngine): McpServer {
         scope: input.scope,
         pathPrefix: input.pathPrefix,
         tags: input.tags,
-        groupBy: input.groupBy
+        groupBy: input.groupBy,
+        rerank: input.rerank ?? config.rerank.enabled
       });
 
       return {
@@ -188,11 +190,11 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<void
   });
 
   if (resolvedTransport === "http") {
-    await startHttpServer(() => createServer(engine), config, options);
+    await startHttpServer(() => createServer(engine, config), config, options);
     return;
   }
 
-  const server = createServer(engine);
+  const server = createServer(engine, config);
   const stdioTransport = new StdioServerTransport();
   await server.connect(stdioTransport);
 }
