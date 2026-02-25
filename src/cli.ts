@@ -299,7 +299,7 @@ program
       configPath: rootOpts?.config,
       scope: opts.scope,
       changedOnly: opts.changedOnly,
-      force: opts.force,
+      force: opts.force || /^(1|true|yes)$/i.test(process.env.SEARCHSOCKET_FORCE_REINDEX ?? ""),
       dryRun: opts.dryRun,
       source: opts.source,
       maxPages: opts.maxPages ? parsePositiveInt(opts.maxPages, "--max-pages") : undefined,

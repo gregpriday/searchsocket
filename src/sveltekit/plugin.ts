@@ -105,7 +105,7 @@ export function searchsocketVitePlugin(options: SearchSocketAutoIndexOptions = {
 
         const stats = await pipeline.run({
           changedOnly: options.changedOnly ?? true,
-          force: options.force ?? false,
+          force: (options.force ?? false) || /^(1|true|yes)$/i.test(process.env.SEARCHSOCKET_FORCE_REINDEX ?? ""),
           dryRun: options.dryRun ?? false,
           scopeOverride: options.scope,
           verbose: options.verbose
