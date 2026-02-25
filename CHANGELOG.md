@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-25
+
+### Added
+
+- **NDJSON streaming search** — new streaming search endpoint with smart merge utility for combining partial results
+- **Robots.txt support** — respects `robots.txt` directives during indexing
+- **Meta-based page weighting** — extract and apply weight hints from page meta tags
+- **Glob pattern filtering** — include/exclude pages by glob patterns in config
+- **MCP rerank support** — the MCP `search` tool now supports reranking results
+- **`SEARCHSOCKET_FORCE_REINDEX` env var** — set to `1`, `true`, or `yes` in CI/CD to trigger force rebuilds without CLI flag changes
+
+### Changed
+
+- Upgraded default embedding model to `jina-embeddings-v5-text-small`
+- Upgraded default reranker to `jina-reranker-v3`
+
+### Fixed
+
+- Replaced fraction-based merge metric with single `maxDisplacement` check for more reliable result merging
+
+## [0.3.3] - 2026-02-25
+
+### Changed
+
+- Reduced rerank API payload size for lower latency
+
+## [0.3.2] - 2026-02-25
+
+### Added
+
+- Support `pageWeights: 0` as a no-index signal to exclude specific pages
+- Prioritise `og:title` and `h1` over `<title>` tag during content extraction
+
+## [0.3.1] - 2026-02-24
+
+### Added
+
+- Limit chunks per page sent to reranker for efficiency
+- Include page description and keywords in reranker text for better relevance
+
 ## [0.3.0] - 2026-02-24
 
 ### Added
@@ -58,6 +98,10 @@ Initial public release.
 - **Request validation** with Zod schemas
 - **Rate limiting** and CORS configuration for the search API
 
+[0.4.0]: https://github.com/gregpriday/searchsocket/compare/v0.3.3...v0.4.0
+[0.3.3]: https://github.com/gregpriday/searchsocket/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/gregpriday/searchsocket/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/gregpriday/searchsocket/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/gregpriday/searchsocket/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/gregpriday/searchsocket/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/gregpriday/searchsocket/releases/tag/v0.2.0
