@@ -35,8 +35,10 @@ export function extractFromHtml(
   const pageBaseUrl = new URL(`https://searchsocket.local${normalizedUrl}`);
 
   const title =
-    normalizeText($("title").first().text() || "") ||
+    $("meta[property='og:title']").attr("content")?.trim() ||
     normalizeText($(`${config.extract.mainSelector} h1`).first().text() || "") ||
+    $("meta[name='twitter:title']").attr("content")?.trim() ||
+    normalizeText($("title").first().text() || "") ||
     normalizedUrl;
 
   if (config.extract.respectRobotsNoindex) {

@@ -49,6 +49,57 @@ describe("extractFromHtml", () => {
     expect(extracted).toBeNull();
   });
 
+  it("prefers og:title over all other title sources", () => {
+    const html = `
+      <html>
+        <head>
+          <title>Introducing Canopy - Canopy Blog</title>
+          <meta property="og:title" content="Introducing Canopy" />
+          <meta name="twitter:title" content="Introducing Canopy on Twitter" />
+        </head>
+        <body><main><h1>Introducing Canopy</h1><p>Content</p></main></body>
+      </html>
+    `;
+    const extracted = extractFromHtml("/blog/introducing-canopy", html, config);
+    expect(extracted?.title).toBe("Introducing Canopy");
+  });
+
+  it("falls back to h1 when og:title is missing", () => {
+    const html = `
+      <html>
+        <head><title>Page Title - My Site</title></head>
+        <body><main><h1>Page Title</h1><p>Content</p></main></body>
+      </html>
+    `;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.title).toBe("Page Title");
+  });
+
+  it("falls back to twitter:title when og:title and h1 are missing", () => {
+    const html = `
+      <html>
+        <head>
+          <title>Page - My Site</title>
+          <meta name="twitter:title" content="Clean Page Title" />
+        </head>
+        <body><main><p>Content without heading</p></main></body>
+      </html>
+    `;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.title).toBe("Clean Page Title");
+  });
+
+  it("falls back to title tag when og:title, h1, and twitter:title are missing", () => {
+    const html = `
+      <html>
+        <head><title>Page Title</title></head>
+        <body><main><p>Content</p></main></body>
+      </html>
+    `;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.title).toBe("Page Title");
+  });
+
   it("extracts meta description", () => {
     const html = `
       <html>
