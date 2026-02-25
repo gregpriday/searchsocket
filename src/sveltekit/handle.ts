@@ -2,7 +2,7 @@ import { loadConfig, mergeConfig } from "../config/load";
 import { isServerless } from "../core/serverless";
 import { SearchSocketError, toErrorPayload } from "../errors";
 import { SearchEngine } from "../search/engine";
-import type { ResolvedSearchSocketConfig, SearchRequest, SearchSocketConfig } from "../types";
+import type { ResolvedSearchSocketConfig, SearchRequest, SearchSocketConfig, StreamEvent } from "../types";
 
 interface RateBucket {
   count: number;
@@ -208,7 +208,47 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
       }
 
       const engine = await getEngine();
-      const result = await engine.search(body as SearchRequest);
+      const searchRequest = body as SearchRequest;
+
+      if (searchRequest.stream && searchRequest.rerank) {
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            try {
+              for await (const event of engine.searchStreaming(searchRequest)) {
+                const line = JSON.stringify(event) + "\n";
+                controller.enqueue(encoder.encode(line));
+              }
+            } catch (streamError) {
+              const errorEvent: StreamEvent = {
+                phase: "error",
+                data: {
+                  error: {
+                    code: streamError instanceof SearchSocketError ? streamError.code : "INTERNAL_ERROR",
+                    message: streamError instanceof Error ? streamError.message : "Unknown error"
+                  }
+                }
+              };
+              controller.enqueue(encoder.encode(JSON.stringify(errorEvent) + "\n"));
+            } finally {
+              controller.close();
+            }
+          }
+        });
+
+        return withCors(
+          new Response(stream, {
+            status: 200,
+            headers: {
+              "content-type": "application/x-ndjson"
+            }
+          }),
+          event.request,
+          config
+        );
+      }
+
+      const result = await engine.search(searchRequest);
 
       return withCors(
         new Response(JSON.stringify(result), {

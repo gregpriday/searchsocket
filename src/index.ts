@@ -3,6 +3,8 @@ export type {
   EmbeddingsProvider,
   IndexOptions,
   IndexStats,
+  MergeSearchOptions,
+  MergeSearchResult,
   QueryOpts,
   RerankCandidate,
   Reranker,
@@ -11,6 +13,9 @@ export type {
   SearchRequest,
   SearchResponse,
   SearchSocketConfig,
+  StreamEvent,
+  StreamSearchErrorEvent,
+  StreamSearchEvent,
   VectorHit,
   VectorRecord,
   VectorStore
@@ -27,3 +32,4 @@ export { createVectorStore } from "./vector";
 export { runMcpServer } from "./mcp/server";
 export { searchsocketHandle, searchsocketVitePlugin } from "./sveltekit";
 export { createSearchClient } from "./client";
+export { mergeSearchResults } from "./merge";

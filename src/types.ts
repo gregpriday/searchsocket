@@ -419,6 +419,7 @@ export interface SearchRequest {
   tags?: string[];
   rerank?: boolean;
   groupBy?: "page" | "chunk";
+  stream?: boolean;
 }
 
 export interface SearchResultChunk {
@@ -487,4 +488,27 @@ export interface JsonLogEntry {
   event: string;
   ts: string;
   data?: Record<string, unknown>;
+}
+
+export interface StreamSearchEvent {
+  phase: "initial" | "reranked";
+  data: SearchResponse;
+}
+
+export interface StreamSearchErrorEvent {
+  phase: "error";
+  data: { error: { code: string; message: string } };
+}
+
+export type StreamEvent = StreamSearchEvent | StreamSearchErrorEvent;
+
+export interface MergeSearchOptions {
+  positionThreshold?: number;
+  fractionThreshold?: number;
+}
+
+export interface MergeSearchResult {
+  response: SearchResponse;
+  usedRerankedOrder: boolean;
+  displacements: Array<{ url: string; displacement: number }>;
 }

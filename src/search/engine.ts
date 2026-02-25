@@ -18,6 +18,7 @@ import type {
   SearchRequest,
   SearchResponse,
   SearchResult,
+  StreamSearchEvent,
   VectorStore
 } from "../types";
 
@@ -28,7 +29,8 @@ const requestSchema = z.object({
   pathPrefix: z.string().optional(),
   tags: z.array(z.string()).optional(),
   rerank: z.boolean().optional(),
-  groupBy: z.enum(["page", "chunk"]).optional()
+  groupBy: z.enum(["page", "chunk"]).optional(),
+  stream: z.boolean().optional()
 });
 
 export interface SearchEngineOptions {
@@ -135,7 +137,123 @@ export class SearchEngine {
       usedRerank = true;
     }
 
-    let results: SearchResult[];
+    const results = this.buildResults(ordered, topK, groupByPage);
+
+    return {
+      q: input.q,
+      scope: resolvedScope.scopeName,
+      results,
+      meta: {
+        timingsMs: {
+          embed: Math.round(embedMs),
+          vector: Math.round(vectorMs),
+          rerank: Math.round(rerankMs),
+          total: Math.round(hrTimeMs(totalStart))
+        },
+        usedRerank,
+        modelId: this.config.embeddings.model
+      }
+    };
+  }
+
+  async *searchStreaming(request: SearchRequest): AsyncGenerator<StreamSearchEvent> {
+    const parsed = requestSchema.safeParse(request);
+    if (!parsed.success) {
+      throw new SearchSocketError("INVALID_REQUEST", parsed.error.issues[0]?.message ?? "Invalid request", 400);
+    }
+
+    const input = parsed.data;
+    const wantsRerank = Boolean(input.rerank);
+
+    if (!wantsRerank) {
+      // No rerank — just yield one initial event using the standard search path
+      const response = await this.search(request);
+      yield { phase: "initial" as const, data: response };
+      return;
+    }
+
+    const totalStart = process.hrtime.bigint();
+
+    const resolvedScope = resolveScope(this.config, input.scope);
+    await this.assertModelCompatibility(resolvedScope);
+
+    const topK = input.topK ?? 10;
+    const groupByPage = (input.groupBy ?? "page") === "page";
+    const candidateK = groupByPage
+      ? Math.max(topK * 10, 50)
+      : Math.max(50, topK);
+
+    // Phase 1: embed + vector search + rank (no rerank)
+    const embedStart = process.hrtime.bigint();
+    const queryEmbeddings = await this.embeddings.embedTexts([input.q], this.config.embeddings.model, "retrieval.query");
+    const queryVector = queryEmbeddings[0];
+    if (!queryVector || queryVector.length === 0 || queryVector.some((value) => !Number.isFinite(value))) {
+      throw new SearchSocketError("VECTOR_BACKEND_UNAVAILABLE", "Unable to create query embedding.");
+    }
+    const embedMs = hrTimeMs(embedStart);
+
+    const vectorStart = process.hrtime.bigint();
+    const hits = await this.vectorStore.query(
+      queryVector,
+      {
+        topK: candidateK,
+        pathPrefix: input.pathPrefix,
+        tags: input.tags
+      },
+      resolvedScope
+    );
+    const vectorMs = hrTimeMs(vectorStart);
+
+    const ranked = rankHits(hits, this.config);
+    const initialResults = this.buildResults(ranked, topK, groupByPage);
+
+    yield {
+      phase: "initial" as const,
+      data: {
+        q: input.q,
+        scope: resolvedScope.scopeName,
+        results: initialResults,
+        meta: {
+          timingsMs: {
+            embed: Math.round(embedMs),
+            vector: Math.round(vectorMs),
+            rerank: 0,
+            total: Math.round(hrTimeMs(totalStart))
+          },
+          usedRerank: false,
+          modelId: this.config.embeddings.model
+        }
+      }
+    };
+
+    // Phase 2: rerank
+    const rerankStart = process.hrtime.bigint();
+    const reranked = await this.rerankHits(input.q, ranked, topK);
+    const rerankMs = hrTimeMs(rerankStart);
+
+    const rerankedResults = this.buildResults(reranked, topK, groupByPage);
+
+    yield {
+      phase: "reranked" as const,
+      data: {
+        q: input.q,
+        scope: resolvedScope.scopeName,
+        results: rerankedResults,
+        meta: {
+          timingsMs: {
+            embed: Math.round(embedMs),
+            vector: Math.round(vectorMs),
+            rerank: Math.round(rerankMs),
+            total: Math.round(hrTimeMs(totalStart))
+          },
+          usedRerank: true,
+          modelId: this.config.embeddings.model
+        }
+      }
+    };
+  }
+
+  private buildResults(ordered: RankedHit[], topK: number, groupByPage: boolean): SearchResult[] {
     const minScore = this.config.ranking.minScore;
 
     if (groupByPage) {
@@ -144,11 +262,11 @@ export class SearchEngine {
         pages = pages.filter((p) => p.pageScore >= minScore);
       }
       const minRatio = this.config.ranking.minChunkScoreRatio;
-      results = pages.slice(0, topK).map((page) => {
+      return pages.slice(0, topK).map((page) => {
         const bestScore = page.bestChunk.finalScore;
-        const minScore = Number.isFinite(bestScore) ? bestScore * minRatio : Number.NEGATIVE_INFINITY;
+        const minChunkScore = Number.isFinite(bestScore) ? bestScore * minRatio : Number.NEGATIVE_INFINITY;
         const meaningful = page.matchingChunks
-          .filter((c) => c.finalScore >= minScore)
+          .filter((c) => c.finalScore >= minChunkScore)
           .slice(0, 5);
         return {
           url: page.url,
@@ -168,10 +286,11 @@ export class SearchEngine {
         };
       });
     } else {
+      let filtered = ordered;
       if (minScore > 0) {
-        ordered = ordered.filter((entry) => entry.finalScore >= minScore);
+        filtered = ordered.filter((entry) => entry.finalScore >= minScore);
       }
-      results = ordered.slice(0, topK).map(({ hit, finalScore }) => ({
+      return filtered.slice(0, topK).map(({ hit, finalScore }) => ({
         url: hit.metadata.url,
         title: hit.metadata.title,
         sectionTitle: hit.metadata.sectionTitle || undefined,
@@ -180,22 +299,6 @@ export class SearchEngine {
         routeFile: hit.metadata.routeFile
       }));
     }
-
-    return {
-      q: input.q,
-      scope: resolvedScope.scopeName,
-      results,
-      meta: {
-        timingsMs: {
-          embed: Math.round(embedMs),
-          vector: Math.round(vectorMs),
-          rerank: Math.round(rerankMs),
-          total: Math.round(hrTimeMs(totalStart))
-        },
-        usedRerank,
-        modelId: this.config.embeddings.model
-      }
-    };
   }
 
   async getPage(pathOrUrl: string, scope?: string): Promise<{
