@@ -26,7 +26,7 @@ export class JinaReranker implements Reranker {
   constructor(options: JinaRerankerOptions) {
     this.apiKey = options.apiKey;
     this.model = options.model;
-    this.maxRetries = options.maxRetries ?? 4;
+    this.maxRetries = options.maxRetries ?? 2;
   }
 
   async rerank(query: string, candidates: RerankCandidate[], topN?: number): Promise<Array<{ id: string; score: number }>> {
@@ -38,7 +38,8 @@ export class JinaReranker implements Reranker {
       model: this.model,
       query,
       documents: candidates.map((candidate) => candidate.text),
-      top_n: topN ?? candidates.length
+      top_n: topN ?? candidates.length,
+      return_documents: false
     };
 
     let attempt = 0;

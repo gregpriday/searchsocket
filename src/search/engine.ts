@@ -286,12 +286,13 @@ export class SearchEngine {
     }
 
     // 2. Build page-level documents from top chunks in ordinal order
-    //    Jina reranker v2 has a 1024 token context limit per document.
+    //    Jina reranker v2 has a 1024 token context limit per document (~3500 chars).
     //    We select the best chunks per page (by score) to stay within budget,
     //    then order them by ordinal so the text reads naturally.
     const MAX_CHUNKS_PER_PAGE = 5;
     const MIN_CHUNKS_PER_PAGE = 1;
     const MIN_CHUNK_SCORE_RATIO = 0.5;
+    const MAX_DOC_CHARS = 2000;
 
     const pageCandidates: Array<{ id: string; text: string }> = [];
     for (const [url, chunks] of pageGroups) {
@@ -323,14 +324,20 @@ export class SearchEngine {
         .join("\n\n");
       parts.push(body);
 
-      pageCandidates.push({ id: url, text: parts.join("\n\n") });
+      let text = parts.join("\n\n");
+      if (text.length > MAX_DOC_CHARS) {
+        text = text.slice(0, MAX_DOC_CHARS);
+      }
+      pageCandidates.push({ id: url, text });
     }
 
-    // 3. Rerank page-level documents
+    // 3. Rerank page-level documents (cap input to topN to avoid huge payloads)
+    const maxCandidates = Math.max(topK, this.config.rerank.topN);
+    const cappedCandidates = pageCandidates.slice(0, maxCandidates);
     const reranked = await this.reranker.rerank(
       query,
-      pageCandidates,
-      Math.max(topK, this.config.rerank.topN)
+      cappedCandidates,
+      maxCandidates
     );
     const scoreByUrl = new Map(reranked.map((e) => [e.id, e.score]));
 
