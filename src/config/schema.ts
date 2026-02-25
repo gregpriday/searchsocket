@@ -112,7 +112,7 @@ export const searchSocketConfigSchema = z.object({
     .object({
       enableIncomingLinkBoost: z.boolean().optional(),
       enableDepthBoost: z.boolean().optional(),
-      pageWeights: z.record(z.string(), z.number().positive()).optional(),
+      pageWeights: z.record(z.string(), z.number().min(0)).optional(),
       aggregationCap: z.number().int().positive().optional(),
       aggregationDecay: z.number().min(0).max(1).optional(),
       minChunkScoreRatio: z.number().min(0).max(1).optional(),

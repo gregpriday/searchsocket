@@ -114,6 +114,7 @@ export function aggregateByPage(
     // Note: page weights are multiplicative on the already-boosted score,
     // so they compound with aggregation. Use gentle values (1.05–1.2x).
     const pageWeight = findPageWeight(url, config.ranking.pageWeights);
+    if (pageWeight === 0) continue;
     if (pageWeight !== 1) {
       pageScore *= pageWeight;
     }
