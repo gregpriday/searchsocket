@@ -16,7 +16,6 @@ Semantic site search and MCP retrieval for SvelteKit content projects.
   - `searchsocketVitePlugin()` for build-triggered indexing
 - **Client Library**: `createSearchClient()` for browser-side search
 - **MCP Server**: Model Context Protocol tools for search and page retrieval
-- **Git-Tracked Markdown Mirror**: Commit-safe deterministic markdown outputs
 
 ## Install
 
@@ -399,7 +398,6 @@ The built-in `InMemoryRateLimiter` auto-disables on serverless platforms (it res
 
 The following features are only used during `searchsocket index` (CLI), not the search handler:
 - `ensureStateDirs` — creates `.searchsocket/` state directories
-- Markdown mirror — writes `.searchsocket/mirror/` files
 - Local SQLite fallback — only needed when `TURSO_DATABASE_URL` is not set
 
 ### Adapter Guidance
@@ -535,34 +533,6 @@ SEARCHSOCKET_AUTO_INDEX=1 pnpm build
 
 # Disable via env var
 SEARCHSOCKET_DISABLE_AUTO_INDEX=1 pnpm build
-```
-
-## Git-Tracked Markdown Mirror
-
-Indexing writes a **deterministic markdown mirror**:
-
-```
-.searchsocket/pages/<scope>/<path>.md
-```
-
-Example:
-```
-.searchsocket/pages/main/docs/intro.md
-```
-
-Each file contains:
-- Frontmatter: URL, title, scope, route file, metadata
-- Markdown: Extracted content
-
-**Why commit it?**
-- Content workflows (edit markdown, regenerate embeddings)
-- Version control for indexed content
-- Debugging (see exactly what was indexed)
-- Offline search (grep the mirror)
-
-Add to `.gitignore` if you don't need it:
-```
-.searchsocket/pages/
 ```
 
 ## Commands

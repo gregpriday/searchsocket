@@ -5,9 +5,8 @@ import { ensureStateDirs } from "../core/state";
 import { createEmbeddingsProvider } from "../embeddings";
 import { SearchSocketError } from "../errors";
 import { createVectorStore } from "../vector";
-import { buildEmbeddingText, chunkMirrorPage } from "./chunker";
+import { buildEmbeddingText, chunkPage } from "./chunker";
 import { extractFromHtml, extractFromMarkdown } from "./extractor";
-import { cleanMirrorForScope, writeMirrorPage } from "./mirror";
 import { buildRoutePatterns, mapUrlToRoute } from "./route-mapper";
 import { loadBuildPages } from "./sources/build";
 import { loadContentFilesPages } from "./sources/content-files";
@@ -23,9 +22,9 @@ import type {
   Chunk,
   EmbeddingsProvider,
   ExtractedPage,
+  IndexedPage,
   IndexOptions,
   IndexStats,
-  MirrorPage,
   PageRecord,
   ResolvedSearchSocketConfig,
   RouteMatch,
@@ -105,14 +104,13 @@ export class IndexPipeline {
     };
 
     const scope = resolveScope(this.config, options.scopeOverride);
-    const { statePath } = ensureStateDirs(this.cwd, this.config.state.dir, scope);
+    ensureStateDirs(this.cwd, this.config.state.dir, scope);
 
     const sourceMode = options.sourceOverride ?? this.config.source.mode;
     this.logger.info(`Indexing scope "${scope.scopeName}" (source: ${sourceMode}, model: ${this.config.embeddings.model})`);
 
     if (options.force) {
       this.logger.info("Force mode enabled — full rebuild");
-      await cleanMirrorForScope(statePath, scope);
     }
 
     if (options.dryRun) {
@@ -290,9 +288,9 @@ export class IndexPipeline {
     stageEnd("links", linkStart);
     this.logger.debug(`Link analysis: computed incoming links for ${incomingLinkCount.size} pages (${stageTimingsMs["links"]}ms)`);
 
-    const mirrorStart = stageStart();
-    this.logger.info("Writing mirror pages...");
-    const mirrorPages: MirrorPage[] = [];
+    const pagesStart = stageStart();
+    this.logger.info("Building indexed pages...");
+    const pages: IndexedPage[] = [];
     let routeExact = 0;
     let routeBestEffort = 0;
 
@@ -327,7 +325,7 @@ export class IndexPipeline {
         routeExact += 1;
       }
 
-      const mirror: MirrorPage = {
+      const indexedPage: IndexedPage = {
         url: page.url,
         title: page.title,
         scope: scope.scopeName,
@@ -343,40 +341,37 @@ export class IndexPipeline {
         keywords: page.keywords
       };
 
-      mirrorPages.push(mirror);
-      if (this.config.state.writeMirror) {
-        await writeMirrorPage(statePath, scope, mirror);
-      }
-      this.logger.event("markdown_written", { url: page.url });
+      pages.push(indexedPage);
+      this.logger.event("page_indexed", { url: page.url });
     }
 
     // Store pages in Turso (replace entire scope to remove stale pages)
     if (!options.dryRun) {
-      const pageRecords: PageRecord[] = mirrorPages.map((mp) => ({
-        url: mp.url,
-        title: mp.title,
-        markdown: mp.markdown,
+      const pageRecords: PageRecord[] = pages.map((p) => ({
+        url: p.url,
+        title: p.title,
+        markdown: p.markdown,
         projectId: scope.projectId,
         scopeName: scope.scopeName,
-        routeFile: mp.routeFile,
-        routeResolution: mp.routeResolution,
-        incomingLinks: mp.incomingLinks,
-        outgoingLinks: mp.outgoingLinks,
-        depth: mp.depth,
-        tags: mp.tags,
-        indexedAt: mp.generatedAt
+        routeFile: p.routeFile,
+        routeResolution: p.routeResolution,
+        incomingLinks: p.incomingLinks,
+        outgoingLinks: p.outgoingLinks,
+        depth: p.depth,
+        tags: p.tags,
+        indexedAt: p.generatedAt
       }));
       // Delete old pages first, then insert new ones to avoid stale data
       await this.vectorStore.deletePages(scope);
       await this.vectorStore.upsertPages(pageRecords, scope);
     }
 
-    stageEnd("mirror", mirrorStart);
-    this.logger.info(`Mirrored ${mirrorPages.length} page${mirrorPages.length === 1 ? "" : "s"} (${routeExact} exact, ${routeBestEffort} best-effort) (${stageTimingsMs["mirror"]}ms)`);
+    stageEnd("pages", pagesStart);
+    this.logger.info(`Indexed ${pages.length} page${pages.length === 1 ? "" : "s"} (${routeExact} exact, ${routeBestEffort} best-effort) (${stageTimingsMs["pages"]}ms)`);
 
     const chunkStart = stageStart();
     this.logger.info("Chunking pages...");
-    let chunks: Chunk[] = mirrorPages.flatMap((page) => chunkMirrorPage(page, this.config, scope));
+    let chunks: Chunk[] = pages.flatMap((page) => chunkPage(page, this.config, scope));
 
     const maxChunks = typeof options.maxChunks === "number" ? Math.max(0, Math.floor(options.maxChunks)) : undefined;
     if (typeof maxChunks === "number") {
@@ -553,7 +548,7 @@ export class IndexPipeline {
     this.logger.info("Done.");
 
     return {
-      pagesProcessed: mirrorPages.length,
+      pagesProcessed: pages.length,
       chunksTotal: chunks.length,
       chunksChanged: changedChunks.length,
       newEmbeddings,

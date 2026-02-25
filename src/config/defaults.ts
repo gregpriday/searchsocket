@@ -99,8 +99,7 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       }
     },
     state: {
-      dir: ".searchsocket",
-      writeMirror: false
+      dir: ".searchsocket"
     }
   };
 }

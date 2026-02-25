@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   normalizeUrlPath,
-  urlPathToMirrorRelative,
   staticHtmlFileToUrl,
   getUrlDepth,
   humanizeUrlPath,
@@ -32,20 +31,6 @@ describe("normalizeUrlPath", () => {
 
   it("normalizes empty input to root", () => {
     expect(normalizeUrlPath("")).toBe("/");
-  });
-});
-
-describe("urlPathToMirrorRelative", () => {
-  it("converts root to index.md", () => {
-    expect(urlPathToMirrorRelative("/")).toBe("index.md");
-  });
-
-  it("converts path to .md file", () => {
-    expect(urlPathToMirrorRelative("/docs/getting-started")).toBe("docs/getting-started.md");
-  });
-
-  it("handles single segment", () => {
-    expect(urlPathToMirrorRelative("/about")).toBe("about.md");
   });
 });
 

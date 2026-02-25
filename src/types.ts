@@ -121,7 +121,6 @@ export interface SearchSocketConfig {
   };
   state?: {
     dir?: string;
-    writeMirror?: boolean;
   };
 }
 
@@ -244,7 +243,6 @@ export interface ResolvedSearchSocketConfig {
   };
   state: {
     dir: string;
-    writeMirror: boolean;
   };
 }
 
@@ -283,7 +281,7 @@ export interface ExtractedPage {
   weight?: number;
 }
 
-export interface MirrorPage {
+export interface IndexedPage {
   url: string;
   title: string;
   scope: string;

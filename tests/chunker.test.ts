@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultConfig } from "../src/config/defaults";
-import { buildEmbeddingText, buildSummaryChunkText, chunkMirrorPage } from "../src/indexing/chunker";
-import type { Chunk, MirrorPage, Scope } from "../src/types";
+import { buildEmbeddingText, buildSummaryChunkText, chunkPage } from "../src/indexing/chunker";
+import type { Chunk, IndexedPage, Scope } from "../src/types";
 
 const config = createDefaultConfig("searchsocket-test");
 const scope: Scope = {
@@ -10,9 +10,9 @@ const scope: Scope = {
   scopeId: "searchsocket-test:main"
 };
 
-describe("chunkMirrorPage", () => {
+describe("chunkPage", () => {
   it("creates stable chunk keys and keeps fenced code together", () => {
-    const page: MirrorPage = {
+    const page: IndexedPage = {
       url: "/docs/code",
       title: "Code",
       scope: "main",
@@ -38,8 +38,8 @@ Another long section content here.
 `
     };
 
-    const first = chunkMirrorPage(page, config, scope);
-    const second = chunkMirrorPage(page, config, scope);
+    const first = chunkPage(page, config, scope);
+    const second = chunkPage(page, config, scope);
 
     expect(first.length).toBeGreaterThan(0);
     expect(first.map((chunk) => chunk.chunkKey)).toEqual(second.map((chunk) => chunk.chunkKey));
@@ -88,7 +88,7 @@ describe("buildEmbeddingText", () => {
 
 describe("contentHash reflects embedding text", () => {
   it("contentHash changes when title changes with prependTitle enabled", () => {
-    const page: MirrorPage = {
+    const page: IndexedPage = {
       url: "/docs/github",
       title: "GitHub Integration",
       scope: "main",
@@ -102,10 +102,10 @@ describe("contentHash reflects embedding text", () => {
       markdown: "Some content about connecting repos."
     };
 
-    const chunksA = chunkMirrorPage(page, config, scope);
+    const chunksA = chunkPage(page, config, scope);
 
-    const renamedPage: MirrorPage = { ...page, title: "GH Integration" };
-    const chunksB = chunkMirrorPage(renamedPage, config, scope);
+    const renamedPage: IndexedPage = { ...page, title: "GH Integration" };
+    const chunksB = chunkPage(renamedPage, config, scope);
 
     expect(chunksA.length).toBeGreaterThan(0);
     expect(chunksB.length).toBeGreaterThan(0);
@@ -118,7 +118,7 @@ describe("contentHash reflects embedding text", () => {
       chunking: { ...config.chunking, prependTitle: false, pageSummaryChunk: false }
     };
 
-    const page: MirrorPage = {
+    const page: IndexedPage = {
       url: "/docs/github",
       title: "GitHub Integration",
       scope: "main",
@@ -132,10 +132,10 @@ describe("contentHash reflects embedding text", () => {
       markdown: "Some content about connecting repos."
     };
 
-    const chunksA = chunkMirrorPage(page, noPrependConfig, scope);
+    const chunksA = chunkPage(page, noPrependConfig, scope);
 
-    const renamedPage: MirrorPage = { ...page, title: "GH Integration" };
-    const chunksB = chunkMirrorPage(renamedPage, noPrependConfig, scope);
+    const renamedPage: IndexedPage = { ...page, title: "GH Integration" };
+    const chunksB = chunkPage(renamedPage, noPrependConfig, scope);
 
     expect(chunksA.length).toBeGreaterThan(0);
     expect(chunksB.length).toBeGreaterThan(0);
@@ -144,7 +144,7 @@ describe("contentHash reflects embedding text", () => {
 });
 
 describe("summary chunk", () => {
-  const basePage: MirrorPage = {
+  const basePage: IndexedPage = {
     url: "/docs/security",
     title: "Security Guide",
     scope: "main",
@@ -159,7 +159,7 @@ describe("summary chunk", () => {
   };
 
   it("generates summary chunk at ordinal 0 with correct content", () => {
-    const chunks = chunkMirrorPage(basePage, config, scope);
+    const chunks = chunkPage(basePage, config, scope);
     const summary = chunks[0]!;
     expect(summary.ordinal).toBe(0);
     expect(summary.chunkText).toContain("Security Guide");
@@ -170,7 +170,7 @@ describe("summary chunk", () => {
   });
 
   it("shifts regular chunk ordinals by 1", () => {
-    const chunks = chunkMirrorPage(basePage, config, scope);
+    const chunks = chunkPage(basePage, config, scope);
     expect(chunks.length).toBeGreaterThan(1);
     // First regular chunk should have ordinal 1
     expect(chunks[1]!.ordinal).toBe(1);
@@ -181,7 +181,7 @@ describe("summary chunk", () => {
       ...config,
       chunking: { ...config.chunking, pageSummaryChunk: false }
     };
-    const chunks = chunkMirrorPage(basePage, noSummaryConfig, scope);
+    const chunks = chunkPage(basePage, noSummaryConfig, scope);
     // First chunk should be ordinal 0 (regular chunk)
     expect(chunks[0]!.ordinal).toBe(0);
     // No chunk should have __summary__ in its key derivation
@@ -189,18 +189,18 @@ describe("summary chunk", () => {
   });
 
   it("produces stable chunkKey across runs", () => {
-    const first = chunkMirrorPage(basePage, config, scope);
-    const second = chunkMirrorPage(basePage, config, scope);
+    const first = chunkPage(basePage, config, scope);
+    const second = chunkPage(basePage, config, scope);
     expect(first[0]!.chunkKey).toBe(second[0]!.chunkKey);
   });
 
   it("regular chunk keys unchanged when summary is toggled", () => {
-    const withSummary = chunkMirrorPage(basePage, config, scope);
+    const withSummary = chunkPage(basePage, config, scope);
     const noSummaryConfig = {
       ...config,
       chunking: { ...config.chunking, pageSummaryChunk: false }
     };
-    const withoutSummary = chunkMirrorPage(basePage, noSummaryConfig, scope);
+    const withoutSummary = chunkPage(basePage, noSummaryConfig, scope);
 
     // Regular chunk keys should be identical
     const regularKeysWithSummary = withSummary.slice(1).map((c) => c.chunkKey);
@@ -209,12 +209,12 @@ describe("summary chunk", () => {
   });
 
   it("root page omits humanized path", () => {
-    const rootPage: MirrorPage = {
+    const rootPage: IndexedPage = {
       ...basePage,
       url: "/",
       depth: 0
     };
-    const chunks = chunkMirrorPage(rootPage, config, scope);
+    const chunks = chunkPage(rootPage, config, scope);
     const summaryText = chunks[0]!.chunkText;
     // Should not have an empty line for the path segment
     expect(summaryText).not.toContain("\n\n\n");
@@ -222,22 +222,22 @@ describe("summary chunk", () => {
   });
 
   it("uses description instead of first paragraph when available", () => {
-    const pageWithDesc: MirrorPage = {
+    const pageWithDesc: IndexedPage = {
       ...basePage,
       description: "A comprehensive security overview."
     };
-    const chunks = chunkMirrorPage(pageWithDesc, config, scope);
+    const chunks = chunkPage(pageWithDesc, config, scope);
     const summaryText = chunks[0]!.chunkText;
     expect(summaryText).toContain("A comprehensive security overview.");
     expect(summaryText).not.toContain("This guide covers security best practices.");
   });
 
   it("includes keywords in summary text", () => {
-    const pageWithKeywords: MirrorPage = {
+    const pageWithKeywords: IndexedPage = {
       ...basePage,
       keywords: ["auth", "encryption", "OWASP"]
     };
-    const chunks = chunkMirrorPage(pageWithKeywords, config, scope);
+    const chunks = chunkPage(pageWithKeywords, config, scope);
     const summaryText = chunks[0]!.chunkText;
     expect(summaryText).toContain("auth, encryption, OWASP");
   });
@@ -245,7 +245,7 @@ describe("summary chunk", () => {
 
 describe("buildSummaryChunkText", () => {
   it("includes title, path, and first paragraph", () => {
-    const page: MirrorPage = {
+    const page: IndexedPage = {
       url: "/docs/getting-started",
       title: "Getting Started",
       scope: "main",
@@ -263,7 +263,7 @@ describe("buildSummaryChunkText", () => {
   });
 
   it("uses description over first paragraph", () => {
-    const page: MirrorPage = {
+    const page: IndexedPage = {
       url: "/docs/api",
       title: "API Reference",
       scope: "main",
@@ -283,7 +283,7 @@ describe("buildSummaryChunkText", () => {
   });
 
   it("appends keywords", () => {
-    const page: MirrorPage = {
+    const page: IndexedPage = {
       url: "/security",
       title: "Security",
       scope: "main",
@@ -302,7 +302,7 @@ describe("buildSummaryChunkText", () => {
   });
 
   it("omits path for root page", () => {
-    const page: MirrorPage = {
+    const page: IndexedPage = {
       url: "/",
       title: "Home",
       scope: "main",
