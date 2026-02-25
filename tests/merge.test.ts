@@ -22,32 +22,59 @@ function makeResponse(urls: string[], scores?: number[]): SearchResponse {
 }
 
 describe("mergeSearchResults", () => {
-  it("keeps initial order when reranker barely changes positions", () => {
+  it("keeps initial order when all displacements are within threshold", () => {
     const initial = makeResponse(["/a", "/b", "/c", "/d"], [0.9, 0.8, 0.7, 0.6]);
-    // Only swap adjacent: /b and /c swap (displacement = 1 each) — below threshold of 2
+    // Only swap adjacent: /b and /c swap (displacement = 1 each) — within default maxDisplacement of 3
     const reranked = makeResponse(["/a", "/c", "/b", "/d"], [0.95, 0.85, 0.75, 0.65]);
 
     const result = mergeSearchResults(initial, reranked);
 
     expect(result.usedRerankedOrder).toBe(false);
-    // Should preserve initial order
     expect(result.response.results.map((r) => r.url)).toEqual(["/a", "/b", "/c", "/d"]);
-    // But use reranked scores
+    // Uses reranked scores
     expect(result.response.results[0]!.score).toBe(0.95);
     expect(result.response.results[1]!.score).toBe(0.75); // /b's reranked score
     expect(result.response.results[2]!.score).toBe(0.85); // /c's reranked score
   });
 
-  it("adopts reranked order when reranker significantly changes positions", () => {
-    const initial = makeResponse(["/a", "/b", "/c", "/d"], [0.9, 0.8, 0.7, 0.6]);
-    // Major reorder: /d moves from 3→0 (displacement 3), /a moves 0→3 (displacement 3)
-    // /b stays at 1, /c stays at 2. 2/4 = 0.5 >= threshold
-    const reranked = makeResponse(["/d", "/b", "/c", "/a"], [0.95, 0.85, 0.75, 0.65]);
+  it("adopts reranked order when any result moves more than maxDisplacement", () => {
+    // Real-world scenario from feedback: #1 and #8 swap — displacement of 7
+    const initial = makeResponse(
+      ["/canopy-assistant", "/install", "/home", "/layout", "/projects", "/download", "/troubleshoot", "/introducing-canopy"],
+      [0.65, 0.64, 0.63, 0.62, 0.61, 0.60, 0.59, 0.58]
+    );
+    const reranked = makeResponse(
+      ["/introducing-canopy", "/install", "/home", "/download", "/layout", "/canopy-assistant"],
+      [0.968, 0.85, 0.83, 0.80, 0.78, 0.75]
+    );
 
     const result = mergeSearchResults(initial, reranked);
 
     expect(result.usedRerankedOrder).toBe(true);
-    expect(result.response.results.map((r) => r.url)).toEqual(["/d", "/b", "/c", "/a"]);
+    expect(result.response.results[0]!.url).toBe("/introducing-canopy");
+  });
+
+  it("adopts reranked order when one result jumps from last to first", () => {
+    const initial = makeResponse(["/a", "/b", "/c", "/d"], [0.9, 0.8, 0.7, 0.6]);
+    // /d jumps from pos 3 to pos 0 (displacement 3), /a goes 0→3 (displacement 3)
+    // Both at exactly maxDisplacement (3) — should NOT trigger (> not >=)
+    const reranked = makeResponse(["/d", "/b", "/c", "/a"], [0.95, 0.85, 0.75, 0.65]);
+
+    const result = mergeSearchResults(initial, reranked);
+
+    // Displacement is exactly 3, not > 3, so keeps initial order
+    expect(result.usedRerankedOrder).toBe(false);
+  });
+
+  it("adopts reranked order when displacement exceeds maxDisplacement", () => {
+    const initial = makeResponse(["/a", "/b", "/c", "/d", "/e"], [0.9, 0.8, 0.7, 0.6, 0.5]);
+    // /e moves from pos 4 to pos 0 (displacement 4 > default 3)
+    const reranked = makeResponse(["/e", "/b", "/c", "/d", "/a"], [0.95, 0.85, 0.75, 0.65, 0.55]);
+
+    const result = mergeSearchResults(initial, reranked);
+
+    expect(result.usedRerankedOrder).toBe(true);
+    expect(result.response.results.map((r) => r.url)).toEqual(["/e", "/b", "/c", "/d", "/a"]);
   });
 
   it("returns displacements for all results", () => {
@@ -84,24 +111,13 @@ describe("mergeSearchResults", () => {
     expect(result.response.results[0]!.score).toBe(0.95);
   });
 
-  it("respects custom positionThreshold", () => {
-    const initial = makeResponse(["/a", "/b", "/c", "/d"]);
-    // /a moves 0→3 (displacement 3), /d moves 3→0 (displacement 3)
-    // /b and /c stay. With positionThreshold: 5, neither exceeds threshold
-    const reranked = makeResponse(["/d", "/b", "/c", "/a"]);
+  it("respects custom maxDisplacement", () => {
+    const initial = makeResponse(["/a", "/b", "/c", "/d", "/e"]);
+    // /e moves 4→0 (displacement 4), /a moves 0→4 (displacement 4)
+    // With maxDisplacement: 5, displacement 4 does not exceed threshold
+    const reranked = makeResponse(["/e", "/b", "/c", "/d", "/a"]);
 
-    const result = mergeSearchResults(initial, reranked, { positionThreshold: 5 });
-
-    expect(result.usedRerankedOrder).toBe(false);
-  });
-
-  it("respects custom fractionThreshold", () => {
-    const initial = makeResponse(["/a", "/b", "/c", "/d"]);
-    // Only /a and /d have displacement > 2 → 2/4 = 0.5
-    // With fractionThreshold: 0.75, 0.5 < 0.75 → keep initial
-    const reranked = makeResponse(["/d", "/b", "/c", "/a"]);
-
-    const result = mergeSearchResults(initial, reranked, { fractionThreshold: 0.75 });
+    const result = mergeSearchResults(initial, reranked, { maxDisplacement: 5 });
 
     expect(result.usedRerankedOrder).toBe(false);
   });
@@ -125,10 +141,19 @@ describe("mergeSearchResults", () => {
     const result = mergeSearchResults(initial, reranked);
 
     // /a: 0→1 (disp 1), /b: 1→0 (disp 1), /c: not in reranked (disp 0)
-    // 0/3 > threshold → keeps initial order
+    // No displacement > 3 → keeps initial order
     expect(result.usedRerankedOrder).toBe(false);
     expect(result.response.results.map((r) => r.url)).toEqual(["/a", "/b", "/c"]);
     // /c keeps its original score since it's not in reranked
     expect(result.response.results[2]!.score).toBe(0.7);
+  });
+
+  it("maxDisplacement: 0 always adopts reranked order on any change", () => {
+    const initial = makeResponse(["/a", "/b"], [0.9, 0.8]);
+    const reranked = makeResponse(["/b", "/a"], [0.95, 0.85]);
+
+    const result = mergeSearchResults(initial, reranked, { maxDisplacement: 0 });
+
+    expect(result.usedRerankedOrder).toBe(true);
   });
 });

@@ -508,8 +508,13 @@ export interface StreamSearchErrorEvent {
 export type StreamEvent = StreamSearchEvent | StreamSearchErrorEvent;
 
 export interface MergeSearchOptions {
-  positionThreshold?: number;
-  fractionThreshold?: number;
+  /**
+   * If any single result moved more than this many positions, adopt
+   * the reranked order. The reranker is semantic — if it strongly
+   * disagrees with vector similarity on even one result, trust it.
+   * @default 3
+   */
+  maxDisplacement?: number;
 }
 
 export interface MergeSearchResult {

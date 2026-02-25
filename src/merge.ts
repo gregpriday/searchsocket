@@ -5,15 +5,16 @@ import type { SearchResponse, MergeSearchOptions, MergeSearchResult } from "./ty
  *
  * If the reranker barely changed the ordering, we keep the initial order
  * (which the user already saw) and just update scores from the reranked response.
- * If the reranker significantly changed the ordering, we adopt the reranked order.
+ * If the reranker moved any single result by more than `maxDisplacement`
+ * positions, we adopt the reranked order — the reranker is semantic and
+ * expensive, so if it strongly disagrees on even one result, trust it.
  */
 export function mergeSearchResults(
   initial: SearchResponse,
   reranked: SearchResponse,
   options?: MergeSearchOptions
 ): MergeSearchResult {
-  const positionThreshold = options?.positionThreshold ?? 2;
-  const fractionThreshold = options?.fractionThreshold ?? 0.5;
+  const maxDisplacement = options?.maxDisplacement ?? 3;
 
   const initialUrls = initial.results.map((r) => r.url);
   const rerankedUrls = reranked.results.map((r) => r.url);
@@ -38,7 +39,6 @@ export function mergeSearchResults(
     displacements.push({ url, displacement });
   }
 
-  // Count significantly displaced results
   const totalResults = displacements.length;
   if (totalResults === 0) {
     return {
@@ -48,13 +48,10 @@ export function mergeSearchResults(
     };
   }
 
-  const significantlyMoved = displacements.filter(
-    (d) => d.displacement > positionThreshold
-  ).length;
-  const fraction = significantlyMoved / totalResults;
+  // If any single result moved more than maxDisplacement, adopt reranked order
+  const hasLargeDisplacement = displacements.some((d) => d.displacement > maxDisplacement);
 
-  if (fraction >= fractionThreshold) {
-    // Significant reordering — adopt reranked order as-is
+  if (hasLargeDisplacement) {
     return {
       response: reranked,
       usedRerankedOrder: true,
