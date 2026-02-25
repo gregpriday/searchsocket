@@ -886,7 +886,7 @@ export default {
   rerank: {
     enabled: true,
     topN: 20,
-    model: "jina-reranker-v2-base-multilingual"
+    model: "jina-reranker-v1-tiny-en"
   },
 
   ranking: {

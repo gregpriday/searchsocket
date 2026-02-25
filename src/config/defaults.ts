@@ -67,7 +67,7 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
     rerank: {
       enabled: false,
       topN: 20,
-      model: "jina-reranker-v2-base-multilingual"
+      model: "jina-reranker-v1-tiny-en"
     },
     ranking: {
       enableIncomingLinkBoost: true,

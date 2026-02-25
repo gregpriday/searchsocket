@@ -72,7 +72,7 @@ export default {
 
 - `rerank.enabled` (default `false`)
 - `rerank.topN` (default `20`)
-- `rerank.model` (default `jina-reranker-v2-base-multilingual`)
+- `rerank.model` (default `jina-reranker-v1-tiny-en`)
 
 Reranking uses the same `JINA_API_KEY` from `embeddings.apiKeyEnv`.
 
