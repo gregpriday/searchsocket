@@ -36,9 +36,10 @@ import type {
 } from "../types";
 
 const EMBEDDING_PRICE_PER_1K_TOKENS_USD: Record<string, number> = {
-  "jina-embeddings-v3": 0.00002
+  "jina-embeddings-v3": 0.00002,
+  "jina-embeddings-v5-text-small": 0.00005
 };
-const DEFAULT_EMBEDDING_PRICE_PER_1K = 0.00002;
+const DEFAULT_EMBEDDING_PRICE_PER_1K = 0.00005;
 
 interface IndexPipelineOptions {
   cwd?: string;

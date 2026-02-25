@@ -23,7 +23,7 @@ describe("createDefaultConfig", () => {
     expect(config.project.id).toBe("my-project");
     expect(config.scope.mode).toBe("fixed");
     expect(config.scope.fixed).toBe("main");
-    expect(config.embeddings.model).toBe("jina-embeddings-v3");
+    expect(config.embeddings.model).toBe("jina-embeddings-v5-text-small");
     expect(config.chunking.maxChars).toBe(2200);
     expect(config.chunking.overlapChars).toBe(200);
     expect(config.chunking.minChars).toBe(250);
@@ -51,7 +51,7 @@ describe("mergeConfig", () => {
     expect(merged.vector.turso.urlEnv).toBe("TURSO_DATABASE_URL");
     expect(merged.chunking.maxChars).toBe(3000);
     expect(merged.chunking.overlapChars).toBe(200); // default preserved
-    expect(merged.embeddings.model).toBe("jina-embeddings-v3");
+    expect(merged.embeddings.model).toBe("jina-embeddings-v5-text-small");
   });
 
   it("infers project id from package.json name", async () => {

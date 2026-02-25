@@ -6,9 +6,9 @@ Semantic site search and MCP retrieval for SvelteKit content projects.
 
 ## Features
 
-- **Embeddings**: Jina AI `jina-embeddings-v3` with task-specific LoRA adapters (configurable)
+- **Embeddings**: Jina AI `jina-embeddings-v5-text-small` with task-specific LoRA adapters (configurable)
 - **Vector Backend**: Turso/libSQL with vector search (local file DB for development, remote for production)
-- **Rerank**: Optional Jina reranker — same API key, one boolean to enable
+- **Rerank**: Jina `jina-reranker-v3` enabled by default — same API key
 - **Page Aggregation**: Group results by page with score-weighted chunk decay
 - **Meta Extraction**: Automatically extracts `<meta name="description">` and `<meta name="keywords">` for improved relevance
 - **SvelteKit Integrations**:
@@ -163,7 +163,7 @@ pnpm searchsocket search --q "getting started" --top-k 5 --path-prefix /docs
   "meta": {
     "timingsMs": { "embed": 120, "vector": 15, "rerank": 0, "total": 135 },
     "usedRerank": false,
-    "modelId": "jina-embeddings-v3"
+    "modelId": "jina-embeddings-v5-text-small"
   }
 }
 ```
@@ -416,9 +416,9 @@ SearchSocket uses **Jina AI's embedding models** to convert text into semantic v
 
 ### Default Model
 
-- **Model**: `jina-embeddings-v3`
+- **Model**: `jina-embeddings-v5-text-small`
 - **Dimensions**: 1024 (default)
-- **Cost**: ~$0.00002 per 1K tokens (generous 10M token free tier)
+- **Cost**: ~$0.00005 per 1K tokens
 - **Task adapters**: Uses `retrieval.passage` for indexing, `retrieval.query` for search queries (LoRA task-specific adapters for better retrieval quality)
 
 ### How It Works
@@ -612,7 +612,7 @@ pnpm searchsocket status
 # Output:
 # project: my-site
 # resolved scope: main
-# embedding model: jina-embeddings-v3
+# embedding model: jina-embeddings-v5-text-small
 # vector backend: turso/libsql (local (.searchsocket/vectors.db))
 # vector health: ok
 # last indexed (main): 2025-02-23T10:30:00Z
@@ -865,7 +865,7 @@ export default {
 
   embeddings: {
     provider: "jina",
-    model: "jina-embeddings-v3",
+    model: "jina-embeddings-v5-text-small",
     apiKey: "jina_...",          // direct API key (or use apiKeyEnv)
     apiKeyEnv: "JINA_API_KEY",
     batchSize: 64,
@@ -886,7 +886,7 @@ export default {
   rerank: {
     enabled: true,
     topN: 20,
-    model: "jina-reranker-v1-tiny-en"
+    model: "jina-reranker-v3"
   },
 
   ranking: {

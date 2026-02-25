@@ -55,7 +55,7 @@ export default {
 ## Embeddings
 
 - `embeddings.provider` (`jina`)
-- `embeddings.model` (default `jina-embeddings-v3`)
+- `embeddings.model` (default `jina-embeddings-v5-text-small`)
 - `embeddings.apiKeyEnv` (default `JINA_API_KEY`)
 - `embeddings.batchSize` (default `64`)
 - `embeddings.concurrency` (default `4`)
@@ -70,9 +70,9 @@ export default {
 
 ## Reranking
 
-- `rerank.enabled` (default `false`)
+- `rerank.enabled` (default `true`)
 - `rerank.topN` (default `20`)
-- `rerank.model` (default `jina-reranker-v1-tiny-en`)
+- `rerank.model` (default `jina-reranker-v3`)
 
 Reranking uses the same `JINA_API_KEY` from `embeddings.apiKeyEnv`.
 

@@ -52,7 +52,7 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
     },
     embeddings: {
       provider: "jina",
-      model: "jina-embeddings-v3",
+      model: "jina-embeddings-v5-text-small",
       apiKeyEnv: "JINA_API_KEY",
       batchSize: 64,
       concurrency: 4
@@ -65,9 +65,9 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       }
     },
     rerank: {
-      enabled: false,
+      enabled: true,
       topN: 20,
-      model: "jina-reranker-v1-tiny-en"
+      model: "jina-reranker-v3"
     },
     ranking: {
       enableIncomingLinkBoost: true,

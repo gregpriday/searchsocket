@@ -389,9 +389,10 @@ export class SearchEngine {
     }
 
     // 2. Build page-level documents from top chunks in ordinal order
-    //    Jina reranker v2 has a 1024 token context limit per document (~3500 chars).
-    //    We select the best chunks per page (by score) to stay within budget,
-    //    then order them by ordinal so the text reads naturally.
+    //    Jina reranker v3 has a 131K token context limit, but we still cap
+    //    per-page text to keep rerank calls fast and focused.
+    //    We select the best chunks per page (by score), then order them
+    //    by ordinal so the text reads naturally.
     const MAX_CHUNKS_PER_PAGE = 5;
     const MIN_CHUNKS_PER_PAGE = 1;
     const MIN_CHUNK_SCORE_RATIO = 0.5;
