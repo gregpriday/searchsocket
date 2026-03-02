@@ -1,5 +1,6 @@
 import type { Search } from "@upstash/search";
 import type {
+  PageHit,
   PageRecord,
   Scope,
   ScopeInfo,
@@ -33,15 +34,19 @@ interface ChunkMetadata {
   [key: string]: unknown;
 }
 
-/** Content fields for full page documents in Upstash Search */
+/** Content fields for full page documents in Upstash Search (indexed and searchable) */
 interface PageContent {
   title: string;
   url: string;
   type: string;
+  description: string;
+  keywords: string;
+  summary: string;
+  tags: string;
   [key: string]: unknown;
 }
 
-/** Metadata fields for full page documents in Upstash Search */
+/** Metadata fields for full page documents in Upstash Search (returned but not searchable) */
 interface PageMetadata {
   markdown: string;
   projectId: string;
@@ -51,7 +56,6 @@ interface PageMetadata {
   incomingLinks: number;
   outgoingLinks: number;
   depth: number;
-  tags: string;
   indexedAt: string;
   [key: string]: unknown;
 }
@@ -149,6 +153,46 @@ export class UpstashSearchStore {
         description: (doc.metadata?.description as string) || undefined,
         keywords: doc.metadata?.keywords ? (doc.metadata.keywords as string).split(",").filter(Boolean) : undefined
       }
+    }));
+  }
+
+  async searchPages(
+    query: string,
+    opts: {
+      limit: number;
+      semanticWeight?: number;
+      inputEnrichment?: boolean;
+      filter?: string;
+    },
+    scope: Scope
+  ): Promise<PageHit[]> {
+    const index = this.pageIndex(scope);
+
+    let results;
+    try {
+      results = await index.search({
+        query,
+        limit: opts.limit,
+        semanticWeight: opts.semanticWeight,
+        inputEnrichment: opts.inputEnrichment,
+        reranking: true,
+        filter: opts.filter
+      });
+    } catch {
+      // Page index may not exist yet (pre-reindex)
+      return [];
+    }
+
+    return results.map((doc) => ({
+      id: doc.id,
+      score: doc.score,
+      title: doc.content.title as string,
+      url: doc.content.url as string,
+      description: (doc.content.description as string) ?? "",
+      tags: doc.content.tags ? (doc.content.tags as string).split(",").filter(Boolean) : [],
+      depth: (doc.metadata?.depth as number) ?? 0,
+      incomingLinks: (doc.metadata?.incomingLinks as number) ?? 0,
+      routeFile: (doc.metadata?.routeFile as string) ?? ""
     }));
   }
 
@@ -255,7 +299,11 @@ export class UpstashSearchStore {
         content: {
           title: p.title,
           url: p.url,
-          type: "page"
+          type: "page",
+          description: p.description ?? "",
+          keywords: (p.keywords ?? []).join(","),
+          summary: p.summary ?? "",
+          tags: p.tags.join(",")
         } as PageContent,
         metadata: {
           markdown: p.markdown,
@@ -266,7 +314,6 @@ export class UpstashSearchStore {
           incomingLinks: p.incomingLinks,
           outgoingLinks: p.outgoingLinks,
           depth: p.depth,
-          tags: JSON.stringify(p.tags),
           indexedAt: p.indexedAt
         } as PageMetadata
       }));
@@ -293,8 +340,11 @@ export class UpstashSearchStore {
         incomingLinks: doc.metadata.incomingLinks as number,
         outgoingLinks: doc.metadata.outgoingLinks as number,
         depth: doc.metadata.depth as number,
-        tags: JSON.parse((doc.metadata.tags as string) || "[]"),
-        indexedAt: doc.metadata.indexedAt as string
+        tags: doc.content.tags ? (doc.content.tags as string).split(",").filter(Boolean) : [],
+        indexedAt: doc.metadata.indexedAt as string,
+        summary: (doc.content.summary as string) || undefined,
+        description: (doc.content.description as string) || undefined,
+        keywords: doc.content.keywords ? (doc.content.keywords as string).split(",").filter(Boolean) : undefined
       };
     } catch {
       return null;

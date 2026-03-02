@@ -90,7 +90,9 @@ export const searchSocketConfigSchema = z.object({
     .object({
       semanticWeight: z.number().min(0).max(1).optional(),
       inputEnrichment: z.boolean().optional(),
-      reranking: z.boolean().optional()
+      reranking: z.boolean().optional(),
+      dualSearch: z.boolean().optional(),
+      pageSearchWeight: z.number().min(0).max(1).optional()
     })
     .optional(),
   ranking: z

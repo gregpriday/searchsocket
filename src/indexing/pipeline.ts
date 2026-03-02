@@ -30,6 +30,40 @@ import type {
   Scope
 } from "../types";
 
+/**
+ * Build a plain-text summary of a page for the page search index.
+ * Combines title, description, and stripped markdown body (truncated to maxChars).
+ */
+export function buildPageSummary(page: IndexedPage, maxChars = 4000): string {
+  const parts: string[] = [page.title];
+
+  if (page.description) {
+    parts.push(page.description);
+  }
+
+  if (page.keywords && page.keywords.length > 0) {
+    parts.push(page.keywords.join(", "));
+  }
+
+  // Strip markdown formatting to get plain body text
+  const plainBody = page.markdown
+    .replace(/```[\s\S]*?```/g, " ")   // remove code blocks
+    .replace(/`([^`]+)`/g, "$1")       // inline code → text
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1") // links/images → text
+    .replace(/^#{1,6}\s+/gm, "")       // headings → text
+    .replace(/[>*_|~\-]/g, " ")        // strip formatting chars
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (plainBody) {
+    parts.push(plainBody);
+  }
+
+  const joined = parts.join("\n\n");
+  if (joined.length <= maxChars) return joined;
+  return joined.slice(0, maxChars).trim();
+}
+
 interface IndexPipelineOptions {
   cwd?: string;
   configPath?: string;
@@ -317,20 +351,26 @@ export class IndexPipeline {
 
     // Store pages in Upstash (replace entire scope to remove stale pages)
     if (!options.dryRun) {
-      const pageRecords: PageRecord[] = pages.map((p) => ({
-        url: p.url,
-        title: p.title,
-        markdown: p.markdown,
-        projectId: scope.projectId,
-        scopeName: scope.scopeName,
-        routeFile: p.routeFile,
-        routeResolution: p.routeResolution,
-        incomingLinks: p.incomingLinks,
-        outgoingLinks: p.outgoingLinks,
-        depth: p.depth,
-        tags: p.tags,
-        indexedAt: p.generatedAt
-      }));
+      const pageRecords: PageRecord[] = pages.map((p) => {
+        const summary = buildPageSummary(p);
+        return {
+          url: p.url,
+          title: p.title,
+          markdown: p.markdown,
+          projectId: scope.projectId,
+          scopeName: scope.scopeName,
+          routeFile: p.routeFile,
+          routeResolution: p.routeResolution,
+          incomingLinks: p.incomingLinks,
+          outgoingLinks: p.outgoingLinks,
+          depth: p.depth,
+          tags: p.tags,
+          indexedAt: p.generatedAt,
+          summary,
+          description: p.description,
+          keywords: p.keywords
+        };
+      });
       await this.store.deletePages(scope);
       await this.store.upsertPages(pageRecords, scope);
     }

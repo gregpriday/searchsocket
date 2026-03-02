@@ -4,13 +4,14 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SearchEngine } from "../src/search/engine";
 import { createDefaultConfig } from "../src/config/defaults";
-import type { PageRecord, VectorHit } from "../src/types";
+import type { PageHit, PageRecord, VectorHit } from "../src/types";
 import type { UpstashSearchStore } from "../src/vector/upstash";
 
 const tempDirs: string[] = [];
 
-function createMockStore(hits: VectorHit[] = []): UpstashSearchStore & {
+function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): UpstashSearchStore & {
   search: ReturnType<typeof vi.fn>;
+  searchPages: ReturnType<typeof vi.fn>;
   getPage: ReturnType<typeof vi.fn>;
   _pages: Map<string, PageRecord>;
 } {
@@ -19,6 +20,7 @@ function createMockStore(hits: VectorHit[] = []): UpstashSearchStore & {
   const store = {
     upsertChunks: vi.fn(async () => undefined),
     search: vi.fn(async () => hits),
+    searchPages: vi.fn(async () => pageHits),
     deleteByIds: vi.fn(async () => undefined),
     deleteScope: vi.fn(async () => undefined),
     listScopes: vi.fn(async () => []),
@@ -35,6 +37,7 @@ function createMockStore(hits: VectorHit[] = []): UpstashSearchStore & {
 
   return store as unknown as UpstashSearchStore & {
     search: ReturnType<typeof vi.fn>;
+    searchPages: ReturnType<typeof vi.fn>;
     getPage: ReturnType<typeof vi.fn>;
     _pages: Map<string, PageRecord>;
   };
@@ -225,6 +228,8 @@ describe("SearchEngine - adversarial cases", () => {
   it("overfetches vector candidates with higher multiplier in page mode (default)", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
+    // Disable dual search to test legacy overfetch behavior
+    config.search.dualSearch = false;
 
     const store = createMockStore();
 
@@ -356,6 +361,8 @@ describe("SearchEngine - adversarial cases", () => {
   it("uses requested topK when it exceeds the candidate floor", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
+    // Disable dual search to test legacy overfetch behavior
+    config.search.dualSearch = false;
 
     const store = createMockStore();
 
@@ -477,5 +484,138 @@ describe("SearchEngine - adversarial cases", () => {
 
     const result = await engine.search({ q: "xyzzy gibberish asdf", topK: 10 });
     expect(result.results.length).toBe(0);
+  });
+});
+
+describe("SearchEngine - dual search", () => {
+  it("calls both searchPages and search in parallel when dualSearch is enabled", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    // dualSearch is true by default
+
+    const chunkHits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/docs"), score: 0.8 }
+    ];
+    const pageHits: PageHit[] = [
+      {
+        id: "/docs",
+        score: 0.9,
+        title: "Docs",
+        url: "/docs",
+        description: "Documentation page",
+        tags: [],
+        depth: 1,
+        incomingLinks: 2,
+        routeFile: "src/routes/docs/+page.svelte"
+      }
+    ];
+
+    const store = createMockStore(chunkHits, pageHits);
+    const engine = await SearchEngine.create({ cwd, config, store });
+
+    const result = await engine.search({ q: "documentation", topK: 10 });
+
+    // Both search methods should have been called
+    expect(store.searchPages).toHaveBeenCalledTimes(1);
+    expect(store.search).toHaveBeenCalledTimes(1);
+
+    // Chunk search should NOT have reranking (dual search disables it for chunks)
+    expect(store.search).toHaveBeenCalledWith(
+      "documentation",
+      expect.objectContaining({ reranking: false }),
+      expect.any(Object)
+    );
+
+    expect(result.results.length).toBeGreaterThan(0);
+    expect(result.results[0]!.url).toBe("/docs");
+  });
+
+  it("falls back to single search when dualSearch is disabled", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.search.dualSearch = false;
+
+    const store = createMockStore([makeHit("chunk-1", "/home")]);
+    const engine = await SearchEngine.create({ cwd, config, store });
+
+    await engine.search({ q: "test", topK: 5 });
+
+    expect(store.searchPages).not.toHaveBeenCalled();
+    expect(store.search).toHaveBeenCalledTimes(1);
+    // Single search should use the configured reranking setting
+    expect(store.search).toHaveBeenCalledWith(
+      "test",
+      expect.objectContaining({ reranking: true }),
+      expect.any(Object)
+    );
+  });
+
+  it("falls back to single search in chunk groupBy mode", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    // dualSearch is true, but groupBy=chunk should bypass it
+
+    const store = createMockStore([makeHit("chunk-1", "/home")]);
+    const engine = await SearchEngine.create({ cwd, config, store });
+
+    await engine.search({ q: "test", topK: 5, groupBy: "chunk" });
+
+    expect(store.searchPages).not.toHaveBeenCalled();
+    expect(store.search).toHaveBeenCalledTimes(1);
+  });
+
+  it("handles empty page search results gracefully", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+
+    const chunkHits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/home"), score: 0.8 },
+      { ...makeHit("chunk-2", "/about"), score: 0.75 }
+    ];
+    // No page hits (e.g., page index not yet populated)
+    const store = createMockStore(chunkHits, []);
+    const engine = await SearchEngine.create({ cwd, config, store });
+
+    const result = await engine.search({ q: "test", topK: 10 });
+
+    expect(result.results.length).toBe(2);
+    expect(result.results.map((r) => r.url)).toContain("/home");
+    expect(result.results.map((r) => r.url)).toContain("/about");
+  });
+
+  it("blends page scores into chunk results", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minScore = 0;
+    config.ranking.scoreGapThreshold = 0;
+
+    const chunkHits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/top"), score: 0.9 },
+      { ...makeHit("chunk-2", "/boosted"), score: 0.6 }
+    ];
+    const pageHits: PageHit[] = [
+      {
+        id: "/boosted",
+        score: 1.0,
+        title: "Boosted",
+        url: "/boosted",
+        description: "Gets a page boost",
+        tags: [],
+        depth: 1,
+        incomingLinks: 5,
+        routeFile: "src/routes/+page.svelte"
+      }
+    ];
+
+    const store = createMockStore(chunkHits, pageHits);
+    const engine = await SearchEngine.create({ cwd, config, store });
+
+    const result = await engine.search({ q: "test", topK: 10 });
+
+    expect(result.results.length).toBe(2);
+    // /top should still be first since its chunk score (0.9) is higher than /boosted's blended score
+    // /boosted blended: (1-0.3)*0.6 + 0.3*1.0 = 0.42 + 0.3 = 0.72 (plus ranking boosts)
+    expect(result.results[0]!.url).toBe("/top");
+    expect(result.results[1]!.url).toBe("/boosted");
   });
 });

@@ -55,6 +55,7 @@ function createMockStore(): {
       }
       return results;
     }),
+    searchPages: vi.fn(async () => []),
     deleteByIds: vi.fn(async () => undefined),
     deleteScope: vi.fn(async () => undefined),
     listScopes: vi.fn(async () => []),

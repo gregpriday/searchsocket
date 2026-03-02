@@ -57,7 +57,9 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
     search: {
       semanticWeight: 0.75,
       inputEnrichment: true,
-      reranking: true
+      reranking: true,
+      dualSearch: true,
+      pageSearchWeight: 0.3
     },
     ranking: {
       enableIncomingLinkBoost: true,

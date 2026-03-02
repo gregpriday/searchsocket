@@ -7,6 +7,7 @@ function createMockStore(): UpstashSearchStore {
   return {
     upsertChunks: vi.fn(async () => undefined),
     search: vi.fn(async () => []),
+    searchPages: vi.fn(async () => []),
     deleteByIds: vi.fn(async () => undefined),
     deleteScope: vi.fn(async () => undefined),
     listScopes: vi.fn(async () => []),

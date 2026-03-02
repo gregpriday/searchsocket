@@ -71,6 +71,8 @@ export interface SearchSocketConfig {
     semanticWeight?: number;
     inputEnrichment?: boolean;
     reranking?: boolean;
+    dualSearch?: boolean;
+    pageSearchWeight?: number;
   };
   ranking?: {
     enableIncomingLinkBoost?: boolean;
@@ -181,6 +183,8 @@ export interface ResolvedSearchSocketConfig {
     semanticWeight: number;
     inputEnrichment: boolean;
     reranking: boolean;
+    dualSearch: boolean;
+    pageSearchWeight: number;
   };
   ranking: {
     enableIncomingLinkBoost: boolean;
@@ -328,6 +332,21 @@ export interface PageRecord {
   depth: number;
   tags: string[];
   indexedAt: string;
+  summary?: string;
+  description?: string;
+  keywords?: string[];
+}
+
+export interface PageHit {
+  id: string;
+  score: number;
+  title: string;
+  url: string;
+  description: string;
+  tags: string[];
+  depth: number;
+  incomingLinks: number;
+  routeFile: string;
 }
 
 export interface ScopeInfo {

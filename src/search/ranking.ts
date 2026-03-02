@@ -1,5 +1,5 @@
 import { matchUrlPattern } from "../utils/pattern";
-import type { ResolvedSearchSocketConfig, VectorHit } from "../types";
+import type { PageHit, ResolvedSearchSocketConfig, VectorHit } from "../types";
 
 export interface RankedHit {
   hit: VectorHit;
@@ -171,6 +171,84 @@ export function aggregateByPage(
   // 3. Sort by pageScore desc (NaN-safe)
   return pages.sort((a, b) => {
     const delta = b.pageScore - a.pageScore;
+    return Number.isNaN(delta) ? 0 : delta;
+  });
+}
+
+/**
+ * Merge page-level search results with chunk-level search results.
+ *
+ * - For chunks whose page appeared in page search: blend score = (1 - w) * chunkScore + w * pageScore
+ * - For chunks whose page did NOT appear in page search: keep original score
+ * - For pages found ONLY by page search (no matching chunks): create synthetic RankedHit entries
+ */
+export function mergePageAndChunkResults(
+  pageHits: PageHit[],
+  rankedChunks: RankedHit[],
+  config: ResolvedSearchSocketConfig
+): RankedHit[] {
+  if (pageHits.length === 0) return rankedChunks;
+
+  const w = config.search.pageSearchWeight;
+  const pageScoreMap = new Map<string, PageHit>();
+  for (const ph of pageHits) {
+    pageScoreMap.set(ph.url, ph);
+  }
+
+  // Track which page URLs have chunks
+  const pagesWithChunks = new Set<string>();
+
+  // Blend chunk scores with page scores
+  const merged: RankedHit[] = rankedChunks.map((ranked) => {
+    const url = ranked.hit.metadata.url;
+    const pageHit = pageScoreMap.get(url);
+    if (pageHit) {
+      pagesWithChunks.add(url);
+      const blended = (1 - w) * ranked.finalScore + w * pageHit.score;
+      return {
+        hit: ranked.hit,
+        finalScore: Number.isFinite(blended) ? blended : ranked.finalScore
+      };
+    }
+    return ranked;
+  });
+
+  // Create synthetic entries for pages found only by page search (no chunks)
+  for (const [url, pageHit] of pageScoreMap) {
+    if (pagesWithChunks.has(url)) continue;
+
+    const syntheticScore = pageHit.score * w;
+    const syntheticHit: VectorHit = {
+      id: `page:${url}`,
+      score: pageHit.score,
+      metadata: {
+        projectId: "",
+        scopeName: "",
+        url: pageHit.url,
+        path: pageHit.url,
+        title: pageHit.title,
+        sectionTitle: "",
+        headingPath: [],
+        snippet: pageHit.description || pageHit.title,
+        chunkText: pageHit.description || pageHit.title,
+        ordinal: 0,
+        contentHash: "",
+        depth: pageHit.depth,
+        incomingLinks: pageHit.incomingLinks,
+        routeFile: pageHit.routeFile,
+        tags: pageHit.tags
+      }
+    };
+
+    merged.push({
+      hit: syntheticHit,
+      finalScore: Number.isFinite(syntheticScore) ? syntheticScore : 0
+    });
+  }
+
+  // Re-sort by blended score descending
+  return merged.sort((a, b) => {
+    const delta = b.finalScore - a.finalScore;
     return Number.isNaN(delta) ? 0 : delta;
   });
 }

@@ -6,8 +6,9 @@ import { resolveScope } from "../core/scope";
 import { hrTimeMs } from "../utils/time";
 import { normalizeUrlPath } from "../utils/path";
 import { createUpstashStore } from "../vector/factory";
-import { rankHits, aggregateByPage, trimByScoreGap } from "./ranking";
+import { rankHits, aggregateByPage, trimByScoreGap, mergePageAndChunkResults } from "./ranking";
 import type {
+  PageHit,
   ResolvedSearchSocketConfig,
   SearchRequest,
   SearchResponse,
@@ -97,21 +98,59 @@ export class SearchEngine {
     }
     const filter = filterParts.length > 0 ? filterParts.join(" AND ") : undefined;
 
+    const useDualSearch = this.config.search.dualSearch && groupByPage;
+
     const searchStart = process.hrtime.bigint();
-    const hits = await this.store.search(
-      input.q,
-      {
-        limit: candidateK,
-        semanticWeight: this.config.search.semanticWeight,
-        inputEnrichment: this.config.search.inputEnrichment,
-        reranking: this.config.search.reranking,
-        filter
-      },
-      resolvedScope
-    );
+    let ranked: RankedHit[];
+
+    if (useDualSearch) {
+      // Parallel search: reranked page search + fast chunk search
+      const chunkLimit = Math.max(topK * 10, 100);
+      const pageLimit = 20;
+
+      const [pageHits, chunkHits] = await Promise.all([
+        this.store.searchPages(
+          input.q,
+          {
+            limit: pageLimit,
+            semanticWeight: this.config.search.semanticWeight,
+            inputEnrichment: this.config.search.inputEnrichment,
+            filter
+          },
+          resolvedScope
+        ),
+        this.store.search(
+          input.q,
+          {
+            limit: chunkLimit,
+            semanticWeight: this.config.search.semanticWeight,
+            inputEnrichment: this.config.search.inputEnrichment,
+            reranking: false,
+            filter
+          },
+          resolvedScope
+        )
+      ]);
+
+      const rankedChunks = rankHits(chunkHits, this.config, input.q);
+      ranked = mergePageAndChunkResults(pageHits, rankedChunks, this.config);
+    } else {
+      // Legacy single-search behavior
+      const hits = await this.store.search(
+        input.q,
+        {
+          limit: candidateK,
+          semanticWeight: this.config.search.semanticWeight,
+          inputEnrichment: this.config.search.inputEnrichment,
+          reranking: this.config.search.reranking,
+          filter
+        },
+        resolvedScope
+      );
+      ranked = rankHits(hits, this.config, input.q);
+    }
     const searchMs = hrTimeMs(searchStart);
 
-    const ranked = rankHits(hits, this.config, input.q);
     const results = this.buildResults(ranked, topK, groupByPage, input.q);
 
     return {
