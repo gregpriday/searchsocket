@@ -148,4 +148,82 @@ describe("searchsocketScrollToText", () => {
 
     expect(h2.scrollIntoView).not.toHaveBeenCalled();
   });
+
+  // --- Cross-node matching tests ---
+
+  it("matches text that spans across child elements", () => {
+    const p = document.createElement("p");
+    p.scrollIntoView = vi.fn();
+    p.appendChild(document.createTextNode("Install "));
+    const strong = document.createElement("strong");
+    strong.textContent = "SearchSocket";
+    p.appendChild(strong);
+    p.appendChild(document.createTextNode(" with pnpm"));
+    document.body.appendChild(p);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "Install SearchSocket" }));
+
+    expect(p.scrollIntoView).toHaveBeenCalled();
+    // Cross-node: either a highlight span or the ancestor element is highlighted
+    const hasHighlight =
+      p.querySelector(".ssk-highlight") !== null || p.classList.contains("ssk-highlight");
+    expect(hasHighlight).toBe(true);
+  });
+
+  it("matches text split across multiple inline elements", () => {
+    const p = document.createElement("p");
+    p.scrollIntoView = vi.fn();
+
+    const em = document.createElement("em");
+    em.textContent = "Getting";
+    p.appendChild(em);
+    p.appendChild(document.createTextNode(" "));
+    const strong = document.createElement("strong");
+    strong.textContent = "Started";
+    p.appendChild(strong);
+    p.appendChild(document.createTextNode(" guide"));
+    document.body.appendChild(p);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "Getting Started" }));
+
+    expect(p.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it("matches adjacent elements with no whitespace separator via lenient fallback", () => {
+    const p = document.createElement("p");
+    p.scrollIntoView = vi.fn();
+
+    const span1 = document.createElement("span");
+    span1.textContent = "Deploy";
+    p.appendChild(span1);
+    const span2 = document.createElement("span");
+    span2.textContent = "SearchSocket";
+    p.appendChild(span2);
+    document.body.appendChild(p);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "Deploy SearchSocket" }));
+
+    expect(p.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it("handles deeply nested text nodes", () => {
+    const div = document.createElement("div");
+    div.scrollIntoView = vi.fn();
+
+    const p = document.createElement("p");
+    const span = document.createElement("span");
+    const em = document.createElement("em");
+    em.textContent = "deeply nested target";
+    span.appendChild(em);
+    p.appendChild(span);
+    div.appendChild(p);
+    document.body.appendChild(div);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "deeply nested target" }));
+
+    // The match is within a single text node inside <em>, so surroundContents works
+    const marker = div.querySelector(".ssk-highlight");
+    expect(marker).not.toBeNull();
+    expect(marker?.textContent?.toLowerCase()).toContain("deeply nested target");
+  });
 });

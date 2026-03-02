@@ -6,6 +6,10 @@
  * hook finds matching text in the document, scrolls it into view, and briefly
  * highlights it.
  *
+ * Uses a TreeWalker-based text map to match across split DOM nodes (e.g.
+ * `<em>Install</em>ation`), and the CSS Custom Highlight API when available
+ * for non-destructive highlighting that avoids DOM mutation.
+ *
  * Usage in a SvelteKit layout:
  * ```svelte
  * <script>
@@ -32,7 +36,11 @@ const HIGHLIGHT_DURATION = 2000;
 /** Marker attribute used for temporary inline text wrappers. */
 const HIGHLIGHT_MARKER_ATTR = "data-ssk-highlight-marker";
 
-/** Inject the highlight keyframe animation once per page. */
+/** Name for the CSS Custom Highlight API registry entry. */
+const HIGHLIGHT_NAME = "ssk-search-match";
+
+// ---------- Style injection ----------
+
 let styleInjected = false;
 function ensureHighlightStyle(): void {
   if (styleInjected || typeof document === "undefined") return;
@@ -48,43 +56,53 @@ function ensureHighlightStyle(): void {
       animation: ssk-highlight-fade ${HIGHLIGHT_DURATION}ms ease-out forwards;
       border-radius: 4px;
     }
+    ::highlight(${HIGHLIGHT_NAME}) {
+      background-color: rgba(16, 185, 129, 0.18);
+    }
   `;
   document.head.appendChild(style);
 }
 
-/**
- * Apply a temporary highlight effect to an element then clean up.
- */
-function highlightElement(el: Element): void {
-  ensureHighlightStyle();
-  el.classList.add(HIGHLIGHT_CLASS);
-  setTimeout(() => el.classList.remove(HIGHLIGHT_CLASS), HIGHLIGHT_DURATION);
+// ---------- Text map ----------
+
+interface TextChunk {
+  node: Text;
+  start: number;
+  end: number;
 }
 
-function unwrapHighlightMarker(marker: HTMLElement): void {
-  if (!marker.isConnected) {
-    return;
-  }
-
-  const parent = marker.parentNode;
-  if (!parent) {
-    return;
-  }
-
-  while (marker.firstChild) {
-    parent.insertBefore(marker.firstChild, marker);
-  }
-
-  parent.removeChild(marker);
-  if (parent instanceof Element) {
-    parent.normalize();
-  }
+interface TextMap {
+  text: string;
+  chunks: TextChunk[];
 }
 
-/**
- * Normalize a string for loose comparison: lowercase, collapse whitespace,
- * and trim.
- */
+const IGNORED_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"]);
+
+function buildTextMap(root: Node): TextMap {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (!parent || IGNORED_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+
+  const chunks: TextChunk[] = [];
+  let text = "";
+  let current: Node | null;
+
+  while ((current = walker.nextNode())) {
+    const value = (current as Text).nodeValue ?? "";
+    if (!value) continue;
+    chunks.push({ node: current as Text, start: text.length, end: text.length + value.length });
+    text += value;
+  }
+
+  return { text, chunks };
+}
+
+// ---------- Matching ----------
+
 function normalize(text: string): string {
   return text.toLowerCase().replace(/\s+/g, " ").trim();
 }
@@ -97,7 +115,7 @@ function buildNeedleRegex(needle: string): RegExp | null {
   const tokenParts = needle.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 
   if (tokenParts.length > 1) {
-    const pattern = tokenParts.map((part) => escapeRegExp(part)).join("[^\\p{L}\\p{N}]+");
+    const pattern = tokenParts.map(escapeRegExp).join("[^\\p{L}\\p{N}]+");
     return new RegExp(pattern, "iu");
   }
 
@@ -105,140 +123,172 @@ function buildNeedleRegex(needle: string): RegExp | null {
     return new RegExp(escapeRegExp(tokenParts[0]!), "iu");
   }
 
-  if (!needle) {
-    return null;
-  }
-
+  if (!needle) return null;
   return new RegExp(escapeRegExp(needle).replace(/\s+/g, "\\s+"), "i");
 }
 
-function isIgnoredParent(el: Element): boolean {
-  const tag = el.tagName;
-  return tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT" || tag === "TEMPLATE";
+function buildLenientRegex(needle: string): RegExp | null {
+  const tokenParts = needle.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (tokenParts.length <= 1) return null;
+  const pattern = tokenParts.map(escapeRegExp).join("[^\\p{L}\\p{N}]*");
+  return new RegExp(pattern, "iu");
 }
 
-function scrollIntoViewIfPossible(el: Element): void {
-  if (typeof (el as { scrollIntoView?: unknown }).scrollIntoView !== "function") {
-    return;
-  }
-  (el as { scrollIntoView: (options: ScrollIntoViewOptions) => void }).scrollIntoView({
-    behavior: "smooth",
-    block: "start"
-  });
+interface MatchOffsets {
+  start: number;
+  end: number;
 }
 
-type ScrollMatch =
-  | {
-      kind: "range";
-      node: Text;
-      start: number;
-      end: number;
-      parent: Element;
-    }
-  | {
-      kind: "element";
-      element: Element;
-    };
-
-function findScrollMatch(needle: string): ScrollMatch | null {
+function findMatch(fullText: string, needle: string): MatchOffsets | null {
   const regex = buildNeedleRegex(needle);
-  const walker = document.createTreeWalker(
-    document.body,
-    NodeFilter.SHOW_TEXT,
-    {
-      acceptNode(node) {
-        const parent = node.parentElement;
-        if (!parent || isIgnoredParent(parent)) return NodeFilter.FILTER_SKIP;
-        if (!normalize(node.textContent ?? "")) return NodeFilter.FILTER_SKIP;
-        return NodeFilter.FILTER_ACCEPT;
-      }
-    }
-  );
-
-  let fallbackElement: Element | null = null;
-  for (let current = walker.nextNode(); current; current = walker.nextNode()) {
-    const textNode = current as Text;
-    const parent = textNode.parentElement;
-    if (!parent) continue;
-
-    const text = textNode.textContent ?? "";
-    if (!text) continue;
-
-    if (regex) {
-      const match = regex.exec(text);
-      if (match?.[0] && typeof match.index === "number") {
-        return {
-          kind: "range",
-          node: textNode,
-          start: match.index,
-          end: match.index + match[0].length,
-          parent
-        };
-      }
-    }
-
-    if (!fallbackElement && normalize(text).includes(needle)) {
-      fallbackElement = parent;
+  if (regex) {
+    const m = regex.exec(fullText);
+    if (m && typeof m.index === "number") {
+      return { start: m.index, end: m.index + m[0].length };
     }
   }
 
-  if (fallbackElement) {
-    return { kind: "element", element: fallbackElement };
+  // Lenient pass: allow zero separators between tokens (handles adjacent DOM nodes)
+  const lenient = buildLenientRegex(needle);
+  if (lenient) {
+    const m = lenient.exec(fullText);
+    if (m && typeof m.index === "number") {
+      return { start: m.index, end: m.index + m[0].length };
+    }
   }
 
   return null;
 }
 
-function highlightTextMatch(match: Extract<ScrollMatch, { kind: "range" }>): Element {
+// ---------- Range resolution ----------
+
+function resolveRange(map: TextMap, offsets: MatchOffsets): Range | null {
+  let startChunk: TextChunk | undefined;
+  let endChunk: TextChunk | undefined;
+
+  for (const chunk of map.chunks) {
+    if (!startChunk && offsets.start >= chunk.start && offsets.start < chunk.end) {
+      startChunk = chunk;
+    }
+    if (offsets.end > chunk.start && offsets.end <= chunk.end) {
+      endChunk = chunk;
+    }
+    if (startChunk && endChunk) break;
+  }
+
+  if (!startChunk || !endChunk) return null;
+
+  const range = document.createRange();
+  range.setStart(startChunk.node, offsets.start - startChunk.start);
+  range.setEnd(endChunk.node, offsets.end - endChunk.start);
+  return range;
+}
+
+// ---------- Highlighting ----------
+
+function hasCustomHighlightAPI(): boolean {
+  return typeof CSS !== "undefined" && typeof (CSS as any).highlights !== "undefined";
+}
+
+let highlightTimer: ReturnType<typeof setTimeout> | null = null;
+
+function highlightWithCSS(range: Range): void {
   ensureHighlightStyle();
+  const hl = new (globalThis as any).Highlight(range);
+  (CSS as any).highlights.set(HIGHLIGHT_NAME, hl);
 
+  if (highlightTimer) clearTimeout(highlightTimer);
+  highlightTimer = setTimeout(() => {
+    (CSS as any).highlights.delete(HIGHLIGHT_NAME);
+    highlightTimer = null;
+  }, HIGHLIGHT_DURATION);
+}
+
+function unwrapMarker(marker: HTMLElement): void {
+  if (!marker.isConnected) return;
+  const parent = marker.parentNode;
+  if (!parent) return;
+  while (marker.firstChild) parent.insertBefore(marker.firstChild, marker);
+  parent.removeChild(marker);
+  if (parent instanceof Element) parent.normalize();
+}
+
+function highlightWithDOM(range: Range): Element {
+  ensureHighlightStyle();
   try {
-    const range = document.createRange();
-    range.setStart(match.node, match.start);
-    range.setEnd(match.node, match.end);
-
     const marker = document.createElement("span");
     marker.classList.add(HIGHLIGHT_CLASS);
     marker.setAttribute(HIGHLIGHT_MARKER_ATTR, "true");
     range.surroundContents(marker);
-    setTimeout(() => unwrapHighlightMarker(marker), HIGHLIGHT_DURATION);
+    setTimeout(() => unwrapMarker(marker), HIGHLIGHT_DURATION);
     return marker;
   } catch {
-    highlightElement(match.parent);
-    return match.parent;
+    // surroundContents fails on cross-element ranges — highlight the ancestor
+    const ancestor = range.commonAncestorContainer;
+    const el = ancestor instanceof Element ? ancestor : ancestor.parentElement;
+    if (el) {
+      el.classList.add(HIGHLIGHT_CLASS);
+      setTimeout(() => el.classList.remove(HIGHLIGHT_CLASS), HIGHLIGHT_DURATION);
+      return el;
+    }
+    return document.body;
   }
 }
+
+// ---------- Scrolling ----------
+
+function scrollToRange(range: Range): void {
+  const rect = range.getBoundingClientRect();
+  window.scrollTo({
+    top: window.scrollY + rect.top - window.innerHeight / 3,
+    behavior: "smooth"
+  });
+}
+
+function scrollIntoViewIfPossible(el: Element): void {
+  if (typeof (el as any).scrollIntoView === "function") {
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+// ---------- Main ----------
 
 /**
  * A function compatible with SvelteKit's `afterNavigate` callback.
  *
  * Reads `_sskt` (preferred) or `_ssk` from the destination URL, walks text
- * nodes in document order, and scrolls/highlights the first match.
+ * nodes in document order via a TreeWalker text map, and scrolls/highlights
+ * the first match. Matches can span multiple DOM text nodes.
+ *
+ * Uses the CSS Custom Highlight API when available for non-destructive
+ * highlighting, with a DOM mutation fallback for older browsers.
  *
  * Silent no-op when no target parameter is present or no match is found.
  */
 export function searchsocketScrollToText(navigation: AfterNavigateParam): void {
   if (typeof document === "undefined") return;
 
-  const searchParams = navigation.to?.url.searchParams;
-  const rawNeedle = searchParams?.get("_sskt") ?? searchParams?.get("_ssk");
-  if (!rawNeedle) return;
+  const params = navigation.to?.url.searchParams;
+  const raw = params?.get("_sskt") ?? params?.get("_ssk");
+  if (!raw) return;
 
-  const needle = normalize(rawNeedle);
+  const needle = normalize(raw);
   if (!needle) return;
 
-  const match = findScrollMatch(needle);
-  if (!match) return;
+  const map = buildTextMap(document.body);
+  const offsets = findMatch(map.text, needle);
+  if (!offsets) return;
 
-  if (match.kind === "range") {
-    const marker = highlightTextMatch(match);
-    const scrollTarget = typeof (marker as { scrollIntoView?: unknown }).scrollIntoView === "function"
-      ? marker
-      : match.parent;
-    scrollIntoViewIfPossible(scrollTarget);
-    return;
+  const range = resolveRange(map, offsets);
+  if (!range) return;
+
+  if (hasCustomHighlightAPI()) {
+    highlightWithCSS(range);
+    scrollToRange(range);
+  } else {
+    const marker = highlightWithDOM(range);
+    const target =
+      typeof (marker as any).scrollIntoView === "function" ? marker : marker.parentElement;
+    if (target) scrollIntoViewIfPossible(target);
   }
-
-  scrollIntoViewIfPossible(match.element);
-  highlightElement(match.element);
 }
