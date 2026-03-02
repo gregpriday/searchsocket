@@ -14,7 +14,8 @@ Semantic site search and MCP retrieval for SvelteKit content projects.
 - **SvelteKit Integrations**:
   - `searchsocketHandle()` for `POST /api/search` endpoint
   - `searchsocketVitePlugin()` for build-triggered indexing
-- **Client Library**: `createSearchClient()` for browser-side search
+- **Client Library**: `createSearchClient()` for browser-side search, `buildResultUrl()` for scroll-to-section links
+- **Scroll-to-Text**: `searchsocketScrollToText()` auto-scrolls to matching sections on navigation
 - **MCP Server**: Model Context Protocol tools for search and page retrieval
 
 ## Install
@@ -289,6 +290,53 @@ for (const result of response.results) {
   }
 }
 ```
+
+## Scroll-to-Text Navigation
+
+When a visitor clicks a search result, SearchSocket can automatically scroll them to the relevant section on the destination page. This uses two utilities:
+
+### `buildResultUrl(result)`
+
+Builds a URL from a search result that includes:
+- A `_ss` query parameter for SvelteKit client-side navigation (read by `searchsocketScrollToText`)
+- A [Text Fragment](https://developer.mozilla.org/en-US/docs/Web/URI/Fragment/Text_fragments) (`#:~:text=`) for native browser scroll-to-text on full page loads (Chrome 80+, Safari 16.1+, Firefox 131+)
+
+Import from `searchsocket/client`:
+
+```ts
+import { createSearchClient, buildResultUrl } from "searchsocket/client";
+
+const client = createSearchClient();
+const { results } = await client.search({ q: "installation" });
+
+// Use in your search UI
+for (const result of results) {
+  const href = buildResultUrl(result);
+  // "/docs/getting-started?_ss=Installation#:~:text=Installation"
+}
+```
+
+If the result has no `sectionTitle`, the original URL is returned unchanged.
+
+### `searchsocketScrollToText`
+
+A SvelteKit `afterNavigate` hook that reads the `_ss` parameter and scrolls the matching heading into view. Add it to your root layout:
+
+```svelte
+<!-- src/routes/+layout.svelte -->
+<script>
+  import { afterNavigate } from '$app/navigation';
+  import { searchsocketScrollToText } from 'searchsocket/sveltekit';
+
+  afterNavigate(searchsocketScrollToText);
+</script>
+```
+
+The hook:
+- Matches headings (h1–h6) case-insensitively with whitespace normalization
+- Falls back to a broader text node search if no heading matches
+- Scrolls smoothly to the first match
+- Is a silent no-op when `_ss` is absent or no match is found
 
 ## Vector Backend: Turso/libSQL
 
