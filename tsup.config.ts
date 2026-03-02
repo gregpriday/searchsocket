@@ -5,7 +5,8 @@ export default defineConfig([
     entry: {
       index: "src/index.ts",
       sveltekit: "src/sveltekit.ts",
-      client: "src/client.ts"
+      client: "src/client.ts",
+      scroll: "src/scroll.ts"
     },
     format: ["esm", "cjs"],
     dts: true,

@@ -298,7 +298,7 @@ When a visitor clicks a search result, SearchSocket can automatically scroll the
 ### `buildResultUrl(result)`
 
 Builds a URL from a search result that includes:
-- A `_ss` query parameter for SvelteKit client-side navigation (read by `searchsocketScrollToText`)
+- A `_ssk` query parameter for SvelteKit client-side navigation (read by `searchsocketScrollToText`)
 - A [Text Fragment](https://developer.mozilla.org/en-US/docs/Web/URI/Fragment/Text_fragments) (`#:~:text=`) for native browser scroll-to-text on full page loads (Chrome 80+, Safari 16.1+, Firefox 131+)
 
 Import from `searchsocket/client`:
@@ -312,7 +312,7 @@ const { results } = await client.search({ q: "installation" });
 // Use in your search UI
 for (const result of results) {
   const href = buildResultUrl(result);
-  // "/docs/getting-started?_ss=Installation#:~:text=Installation"
+  // "/docs/getting-started?_ssk=Installation#:~:text=Installation"
 }
 ```
 
@@ -320,7 +320,7 @@ If the result has no `sectionTitle`, the original URL is returned unchanged.
 
 ### `searchsocketScrollToText`
 
-A SvelteKit `afterNavigate` hook that reads the `_ss` parameter and scrolls the matching heading into view. Add it to your root layout:
+A SvelteKit `afterNavigate` hook that reads the `_ssk` parameter and scrolls the matching heading into view. Add it to your root layout:
 
 ```svelte
 <!-- src/routes/+layout.svelte -->
@@ -336,7 +336,7 @@ The hook:
 - Matches headings (h1–h6) case-insensitively with whitespace normalization
 - Falls back to a broader text node search if no heading matches
 - Scrolls smoothly to the first match
-- Is a silent no-op when `_ss` is absent or no match is found
+- Is a silent no-op when `_ssk` is absent or no match is found
 
 ## Vector Backend: Turso/libSQL
 

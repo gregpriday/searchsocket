@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { searchsocketScrollToText } from "../src/sveltekit/scroll-to-text";
 import type { AfterNavigateParam } from "../src/sveltekit/scroll-to-text";
 
@@ -26,34 +26,28 @@ describe("searchsocketScrollToText", () => {
   });
 
   it("is a no-op when navigation.to is null", () => {
-    // Should not throw
     searchsocketScrollToText({ to: null });
   });
 
-  it("is a no-op when _ss param is absent", () => {
+  it("is a no-op when no scroll params are present", () => {
     searchsocketScrollToText(makeNavigation());
-    // Nothing to assert, just ensure no error
   });
 
-  it("is a no-op when _ss param is empty string", () => {
-    searchsocketScrollToText(makeNavigation({ _ss: "" }));
-  });
-
-  it("is a no-op when _ss param is whitespace only", () => {
+  it("is a no-op when _sskt is whitespace only", () => {
     const h1 = makeHeading("h1", "Should Not Scroll");
     document.body.appendChild(h1);
 
-    searchsocketScrollToText(makeNavigation({ _ss: "   " }));
+    searchsocketScrollToText(makeNavigation({ _sskt: "   " }));
 
     expect(h1.scrollIntoView).not.toHaveBeenCalled();
   });
 
-  it("scrolls to an exact heading match", () => {
+  it("scrolls to an exact heading text match via _ssk", () => {
     const h2 = makeHeading("h2", "Installation");
     document.body.appendChild(makeHeading("h1", "Docs"));
     document.body.appendChild(h2);
 
-    searchsocketScrollToText(makeNavigation({ _ss: "Installation" }));
+    searchsocketScrollToText(makeNavigation({ _ssk: "Installation" }));
 
     expect(h2.scrollIntoView).toHaveBeenCalledWith({
       behavior: "smooth",
@@ -65,60 +59,65 @@ describe("searchsocketScrollToText", () => {
     const h3 = makeHeading("h3", "Quick Start Guide");
     document.body.appendChild(h3);
 
-    searchsocketScrollToText(makeNavigation({ _ss: "quick start guide" }));
+    searchsocketScrollToText(makeNavigation({ _ssk: "quick start guide" }));
 
     expect(h3.scrollIntoView).toHaveBeenCalled();
-  });
-
-  it("matches when heading contains the section title (partial match)", () => {
-    const h2 = makeHeading("h2", "1. Installation Steps");
-    document.body.appendChild(h2);
-
-    searchsocketScrollToText(makeNavigation({ _ss: "Installation Steps" }));
-
-    expect(h2.scrollIntoView).toHaveBeenCalled();
-  });
-
-  it("scrolls to the first matching heading when multiple match", () => {
-    const h2a = makeHeading("h2", "Setup");
-    const h2b = makeHeading("h2", "Setup");
-    document.body.appendChild(h2a);
-    document.body.appendChild(h2b);
-
-    searchsocketScrollToText(makeNavigation({ _ss: "Setup" }));
-
-    expect(h2a.scrollIntoView).toHaveBeenCalled();
-    expect(h2b.scrollIntoView).not.toHaveBeenCalled();
   });
 
   it("normalizes whitespace when matching", () => {
     const h2 = makeHeading("h2", "Getting   Started");
     document.body.appendChild(h2);
 
-    searchsocketScrollToText(makeNavigation({ _ss: "Getting Started" }));
+    searchsocketScrollToText(makeNavigation({ _ssk: "Getting Started" }));
 
     expect(h2.scrollIntoView).toHaveBeenCalled();
   });
 
-  it("falls back to text node search when no heading matches", () => {
+  it("finds a body text match and highlights the relevant substring", () => {
     const p = document.createElement("p");
-    p.textContent = "This paragraph mentions the Installation process.";
+    p.textContent = "This paragraph mentions the Installation process for local development.";
     p.scrollIntoView = vi.fn();
     document.body.appendChild(p);
 
-    searchsocketScrollToText(makeNavigation({ _ss: "Installation" }));
+    searchsocketScrollToText(makeNavigation({ _sskt: "Installation process" }));
 
     expect(p.scrollIntoView).toHaveBeenCalledWith({
       behavior: "smooth",
       block: "start"
     });
+
+    const marker = p.querySelector(".ssk-highlight");
+    expect(marker).not.toBeNull();
+    expect(marker?.textContent?.toLowerCase()).toContain("installation process");
   });
 
-  it("does nothing when no match at all", () => {
-    document.body.appendChild(makeHeading("h1", "Unrelated Title"));
+  it("prefers _sskt over _ssk when both are present", () => {
+    const h2 = makeHeading("h2", "Configuration");
+    document.body.appendChild(h2);
 
-    // Should not throw
-    searchsocketScrollToText(makeNavigation({ _ss: "Nonexistent Section" }));
+    const p = document.createElement("p");
+    p.textContent = "Install SearchSocket with pnpm add searchsocket.";
+    p.scrollIntoView = vi.fn();
+    document.body.appendChild(p);
+
+    searchsocketScrollToText(
+      makeNavigation({
+        _ssk: "Configuration",
+        _sskt: "pnpm add searchsocket"
+      })
+    );
+
+    expect(p.scrollIntoView).toHaveBeenCalled();
+    expect(h2.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when no match exists", () => {
+    const h1 = makeHeading("h1", "Unrelated Title");
+    document.body.appendChild(h1);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "Nonexistent Section" }));
+
+    expect(h1.scrollIntoView).not.toHaveBeenCalled();
   });
 
   it("handles all heading levels (h1-h6)", () => {
@@ -127,7 +126,7 @@ describe("searchsocketScrollToText", () => {
       const heading = makeHeading(`h${level}`, "Target Heading");
       document.body.appendChild(heading);
 
-      searchsocketScrollToText(makeNavigation({ _ss: "Target Heading" }));
+      searchsocketScrollToText(makeNavigation({ _ssk: "Target Heading" }));
 
       expect(heading.scrollIntoView).toHaveBeenCalled();
     }
@@ -142,24 +141,11 @@ describe("searchsocketScrollToText", () => {
     style.textContent = ".installation { color: red; }";
     document.body.appendChild(style);
 
-    // Should not scroll to script/style content
-    searchsocketScrollToText(makeNavigation({ _ss: "installation" }));
-    // No error, no scroll — just a silent no-op
-  });
-
-  it("prefers heading match over text node match", () => {
-    const p = document.createElement("p");
-    p.textContent = "Configuration details here";
-    p.scrollIntoView = vi.fn();
-    document.body.appendChild(p);
-
-    const h2 = makeHeading("h2", "Configuration");
+    const h2 = makeHeading("h2", "Visible heading");
     document.body.appendChild(h2);
 
-    searchsocketScrollToText(makeNavigation({ _ss: "Configuration" }));
+    searchsocketScrollToText(makeNavigation({ _sskt: "installation" }));
 
-    // h2 should be scrolled to, not the paragraph
-    expect(h2.scrollIntoView).toHaveBeenCalled();
-    expect(p.scrollIntoView).not.toHaveBeenCalled();
+    expect(h2.scrollIntoView).not.toHaveBeenCalled();
   });
 });

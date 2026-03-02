@@ -46,6 +46,11 @@
       "types": "./dist/client.d.ts",
       "import": "./dist/client.js",
       "require": "./dist/client.cjs"
+    },
+    "./scroll": {
+      "types": "./dist/scroll.d.ts",
+      "import": "./dist/scroll.js",
+      "require": "./dist/scroll.cjs"
     }
   },
   "scripts": {
