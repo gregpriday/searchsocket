@@ -226,4 +226,173 @@ describe("searchsocketScrollToText", () => {
     expect(marker).not.toBeNull();
     expect(marker?.textContent?.toLowerCase()).toContain("deeply nested target");
   });
+
+  // --- Ignored element tests ---
+
+  it("ignores text inside noscript elements", () => {
+    const noscript = document.createElement("noscript");
+    noscript.textContent = "Enable JavaScript to search";
+    document.body.appendChild(noscript);
+
+    const p = document.createElement("p");
+    p.textContent = "Visible content";
+    p.scrollIntoView = vi.fn();
+    document.body.appendChild(p);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "Enable JavaScript" }));
+
+    expect(p.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("ignores text inside template elements", () => {
+    const template = document.createElement("template");
+    // template.content is a DocumentFragment; text set via innerHTML lands there
+    // but setting textContent directly puts a text node as a child of <template>
+    template.textContent = "template search target";
+    document.body.appendChild(template);
+
+    const h2 = makeHeading("h2", "Real heading");
+    document.body.appendChild(h2);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "template search target" }));
+
+    expect(h2.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  // --- Unicode matching tests ---
+
+  it("matches Unicode text with accented characters", () => {
+    const h2 = makeHeading("h2", "Überblick der Dokumentation");
+    document.body.appendChild(h2);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "Überblick der Dokumentation" }));
+
+    expect(h2.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it("matches Unicode text case-insensitively", () => {
+    const p = document.createElement("p");
+    p.textContent = "Die Ärzte empfehlen tägliche Übungen für bessere Gesundheit.";
+    p.scrollIntoView = vi.fn();
+    document.body.appendChild(p);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "die ärzte empfehlen" }));
+
+    expect(p.scrollIntoView).toHaveBeenCalled();
+    const marker = p.querySelector(".ssk-highlight");
+    expect(marker).not.toBeNull();
+  });
+
+  it("matches CJK characters", () => {
+    const h2 = makeHeading("h2", "日本語ドキュメント");
+    document.body.appendChild(h2);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "日本語ドキュメント" }));
+
+    expect(h2.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it("matches text with mixed scripts", () => {
+    const p = document.createElement("p");
+    p.textContent = "Use the SearchSocket API для поиска на сайте.";
+    p.scrollIntoView = vi.fn();
+    document.body.appendChild(p);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "SearchSocket API для поиска" }));
+
+    expect(p.scrollIntoView).toHaveBeenCalled();
+  });
+
+  // --- Punctuation and special characters ---
+
+  it("matches text containing punctuation between words", () => {
+    const p = document.createElement("p");
+    p.textContent = "Use the command-line interface (CLI) for indexing.";
+    p.scrollIntoView = vi.fn();
+    document.body.appendChild(p);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "command-line interface" }));
+
+    expect(p.scrollIntoView).toHaveBeenCalled();
+    const marker = p.querySelector(".ssk-highlight");
+    expect(marker).not.toBeNull();
+    expect(marker?.textContent).toContain("command-line interface");
+  });
+
+  it("matches when needle has apostrophe", () => {
+    const p = document.createElement("p");
+    p.textContent = "The plugin won't modify your build output directly.";
+    p.scrollIntoView = vi.fn();
+    document.body.appendChild(p);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "won't modify" }));
+
+    expect(p.scrollIntoView).toHaveBeenCalled();
+  });
+
+  // --- Edge cases ---
+
+  it("matches the very first text in the document", () => {
+    const p = document.createElement("p");
+    p.textContent = "First words on the page followed by more content.";
+    p.scrollIntoView = vi.fn();
+    document.body.appendChild(p);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "First words on the page" }));
+
+    expect(p.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it("matches the very last text in the document", () => {
+    document.body.appendChild(makeHeading("h1", "Title"));
+
+    const p = document.createElement("p");
+    p.textContent = "Final paragraph content here.";
+    p.scrollIntoView = vi.fn();
+    document.body.appendChild(p);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "content here" }));
+
+    expect(p.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it("picks the first occurrence when text appears multiple times", () => {
+    const p1 = document.createElement("p");
+    p1.textContent = "Repeated phrase appears here.";
+    p1.scrollIntoView = vi.fn();
+    document.body.appendChild(p1);
+
+    const p2 = document.createElement("p");
+    p2.textContent = "Repeated phrase appears again.";
+    p2.scrollIntoView = vi.fn();
+    document.body.appendChild(p2);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "Repeated phrase" }));
+
+    expect(p1.scrollIntoView).toHaveBeenCalled();
+    expect(p2.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("handles an empty document body gracefully", () => {
+    searchsocketScrollToText(makeNavigation({ _sskt: "anything" }));
+    // No error thrown — silent no-op
+  });
+
+  it("handles a second call replacing the previous highlight", () => {
+    const p1 = document.createElement("p");
+    p1.textContent = "Alpha target text in paragraph one.";
+    p1.scrollIntoView = vi.fn();
+    document.body.appendChild(p1);
+
+    const p2 = document.createElement("p");
+    p2.textContent = "Beta target text in paragraph two.";
+    p2.scrollIntoView = vi.fn();
+    document.body.appendChild(p2);
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "Alpha target" }));
+    expect(p1.querySelector(".ssk-highlight")).not.toBeNull();
+
+    searchsocketScrollToText(makeNavigation({ _sskt: "Beta target" }));
+    expect(p2.querySelector(".ssk-highlight")).not.toBeNull();
+  });
 });
