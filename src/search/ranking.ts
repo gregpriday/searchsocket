@@ -22,7 +22,14 @@ function nonNegativeOrZero(value: number): number {
   return Math.max(0, value);
 }
 
-export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig): RankedHit[] {
+function normalizeForTitleMatch(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+}
+
+export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig, query?: string): RankedHit[] {
+  const normalizedQuery = query ? normalizeForTitleMatch(query) : "";
+  const titleMatchWeight = config.ranking.weights.titleMatch;
+
   return hits
     .map((hit) => {
       let score = Number.isFinite(hit.score) ? hit.score : Number.NEGATIVE_INFINITY;
@@ -37,6 +44,14 @@ export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig):
         score += depthBoost * config.ranking.weights.depth;
       }
 
+      if (normalizedQuery && titleMatchWeight > 0) {
+        const normalizedTitle = normalizeForTitleMatch(hit.metadata.title);
+        if (normalizedQuery.length > 0 && normalizedTitle.length > 0 &&
+            (normalizedTitle.includes(normalizedQuery) || normalizedQuery.includes(normalizedTitle))) {
+          score += titleMatchWeight;
+        }
+      }
+
       return {
         hit,
         finalScore: Number.isFinite(score) ? score : Number.NEGATIVE_INFINITY
@@ -46,6 +61,42 @@ export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig):
       const delta = b.finalScore - a.finalScore;
       return Number.isNaN(delta) ? 0 : delta;
     });
+}
+
+export function trimByScoreGap(
+  results: PageResult[],
+  config: ResolvedSearchSocketConfig
+): PageResult[] {
+  if (results.length === 0) return results;
+
+  const threshold = config.ranking.scoreGapThreshold;
+  const minScore = config.ranking.minScore;
+
+  // Check median score — if below minScore, no strong matches
+  if (minScore > 0 && results.length > 0) {
+    const sortedScores = results.map((r) => r.pageScore).sort((a, b) => a - b);
+    const mid = Math.floor(sortedScores.length / 2);
+    const median = sortedScores.length % 2 === 0
+      ? (sortedScores[mid - 1]! + sortedScores[mid]!) / 2
+      : sortedScores[mid]!;
+    if (median < minScore) return [];
+  }
+
+  // Score-gap trimming
+  if (threshold > 0 && results.length > 1) {
+    for (let i = 1; i < results.length; i++) {
+      const prev = results[i - 1]!.pageScore;
+      const current = results[i]!.pageScore;
+      if (prev > 0) {
+        const gap = (prev - current) / prev;
+        if (gap >= threshold) {
+          return results.slice(0, i);
+        }
+      }
+    }
+  }
+
+  return results;
 }
 
 export function findPageWeight(url: string, pageWeights: Record<string, number>): number {

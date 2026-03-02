@@ -111,6 +111,7 @@ export class UpstashSearchStore {
       limit: number;
       semanticWeight?: number;
       inputEnrichment?: boolean;
+      reranking?: boolean;
       filter?: string;
     },
     scope: Scope
@@ -122,6 +123,7 @@ export class UpstashSearchStore {
       limit: opts.limit,
       semanticWeight: opts.semanticWeight,
       inputEnrichment: opts.inputEnrichment,
+      reranking: opts.reranking,
       filter: opts.filter
     });
 

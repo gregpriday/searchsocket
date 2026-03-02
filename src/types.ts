@@ -70,6 +70,7 @@ export interface SearchSocketConfig {
   search?: {
     semanticWeight?: number;
     inputEnrichment?: boolean;
+    reranking?: boolean;
   };
   ranking?: {
     enableIncomingLinkBoost?: boolean;
@@ -79,10 +80,12 @@ export interface SearchSocketConfig {
     aggregationDecay?: number;
     minChunkScoreRatio?: number;
     minScore?: number;
+    scoreGapThreshold?: number;
     weights?: {
       incomingLinks?: number;
       depth?: number;
       aggregation?: number;
+      titleMatch?: number;
     };
   };
   api?: {
@@ -177,6 +180,7 @@ export interface ResolvedSearchSocketConfig {
   search: {
     semanticWeight: number;
     inputEnrichment: boolean;
+    reranking: boolean;
   };
   ranking: {
     enableIncomingLinkBoost: boolean;
@@ -186,10 +190,12 @@ export interface ResolvedSearchSocketConfig {
     aggregationDecay: number;
     minChunkScoreRatio: number;
     minScore: number;
+    scoreGapThreshold: number;
     weights: {
       incomingLinks: number;
       depth: number;
       aggregation: number;
+      titleMatch: number;
     };
   };
   api: {

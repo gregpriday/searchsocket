@@ -6,7 +6,7 @@ import { resolveScope } from "../core/scope";
 import { hrTimeMs } from "../utils/time";
 import { normalizeUrlPath } from "../utils/path";
 import { createUpstashStore } from "../vector/factory";
-import { rankHits, aggregateByPage } from "./ranking";
+import { rankHits, aggregateByPage, trimByScoreGap } from "./ranking";
 import type {
   ResolvedSearchSocketConfig,
   SearchRequest,
@@ -15,7 +15,8 @@ import type {
   VectorHit
 } from "../types";
 import type { UpstashSearchStore } from "../vector/upstash";
-import type { RankedHit } from "./ranking";
+import type { RankedHit, PageResult } from "./ranking";
+import { toSnippet } from "../utils/text";
 
 const requestSchema = z.object({
   q: z.string().trim().min(1),
@@ -103,14 +104,15 @@ export class SearchEngine {
         limit: candidateK,
         semanticWeight: this.config.search.semanticWeight,
         inputEnrichment: this.config.search.inputEnrichment,
+        reranking: this.config.search.reranking,
         filter
       },
       resolvedScope
     );
     const searchMs = hrTimeMs(searchStart);
 
-    const ranked = rankHits(hits, this.config);
-    const results = this.buildResults(ranked, topK, groupByPage);
+    const ranked = rankHits(hits, this.config, input.q);
+    const results = this.buildResults(ranked, topK, groupByPage, input.q);
 
     return {
       q: input.q,
@@ -125,14 +127,18 @@ export class SearchEngine {
     };
   }
 
-  private buildResults(ordered: RankedHit[], topK: number, groupByPage: boolean): SearchResult[] {
-    const minScore = this.config.ranking.minScore;
+  private ensureSnippet(hit: RankedHit): string {
+    const snippet = hit.hit.metadata.snippet;
+    if (snippet && snippet.length >= 30) return snippet;
+    const chunkText = hit.hit.metadata.chunkText;
+    if (chunkText) return toSnippet(chunkText);
+    return snippet || "";
+  }
 
+  private buildResults(ordered: RankedHit[], topK: number, groupByPage: boolean, _query?: string): SearchResult[] {
     if (groupByPage) {
       let pages = aggregateByPage(ordered, this.config);
-      if (minScore > 0) {
-        pages = pages.filter((p) => p.pageScore >= minScore);
-      }
+      pages = trimByScoreGap(pages, this.config);
       const minRatio = this.config.ranking.minChunkScoreRatio;
       return pages.slice(0, topK).map((page) => {
         const bestScore = page.bestChunk.finalScore;
@@ -144,13 +150,13 @@ export class SearchEngine {
           url: page.url,
           title: page.title,
           sectionTitle: page.bestChunk.hit.metadata.sectionTitle || undefined,
-          snippet: page.bestChunk.hit.metadata.snippet,
+          snippet: this.ensureSnippet(page.bestChunk),
           score: Number(page.pageScore.toFixed(6)),
           routeFile: page.routeFile,
           chunks: meaningful.length > 1
             ? meaningful.map((c) => ({
                 sectionTitle: c.hit.metadata.sectionTitle || undefined,
-                snippet: c.hit.metadata.snippet,
+                snippet: this.ensureSnippet(c),
                 headingPath: c.hit.metadata.headingPath,
                 score: Number(c.finalScore.toFixed(6))
               }))
@@ -159,6 +165,7 @@ export class SearchEngine {
       });
     } else {
       let filtered = ordered;
+      const minScore = this.config.ranking.minScore;
       if (minScore > 0) {
         filtered = ordered.filter((entry) => entry.finalScore >= minScore);
       }
@@ -166,7 +173,7 @@ export class SearchEngine {
         url: hit.metadata.url,
         title: hit.metadata.title,
         sectionTitle: hit.metadata.sectionTitle || undefined,
-        snippet: hit.metadata.snippet,
+        snippet: this.ensureSnippet({ hit, finalScore }),
         score: Number(finalScore.toFixed(6)),
         routeFile: hit.metadata.routeFile
       }));

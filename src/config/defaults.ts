@@ -56,7 +56,8 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
     },
     search: {
       semanticWeight: 0.75,
-      inputEnrichment: true
+      inputEnrichment: true,
+      reranking: true
     },
     ranking: {
       enableIncomingLinkBoost: true,
@@ -65,11 +66,13 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       aggregationCap: 5,
       aggregationDecay: 0.5,
       minChunkScoreRatio: 0.5,
-      minScore: 0,
+      minScore: 0.3,
+      scoreGapThreshold: 0.4,
       weights: {
         incomingLinks: 0.05,
         depth: 0.03,
-        aggregation: 0.1
+        aggregation: 0.1,
+        titleMatch: 0.15
       }
     },
     api: {

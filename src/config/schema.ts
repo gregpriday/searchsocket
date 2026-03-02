@@ -89,7 +89,8 @@ export const searchSocketConfigSchema = z.object({
   search: z
     .object({
       semanticWeight: z.number().min(0).max(1).optional(),
-      inputEnrichment: z.boolean().optional()
+      inputEnrichment: z.boolean().optional(),
+      reranking: z.boolean().optional()
     })
     .optional(),
   ranking: z
@@ -101,11 +102,13 @@ export const searchSocketConfigSchema = z.object({
       aggregationDecay: z.number().min(0).max(1).optional(),
       minChunkScoreRatio: z.number().min(0).max(1).optional(),
       minScore: z.number().min(0).max(1).optional(),
+      scoreGapThreshold: z.number().min(0).max(1).optional(),
       weights: z
         .object({
           incomingLinks: z.number().optional(),
           depth: z.number().optional(),
-          aggregation: z.number().optional()
+          aggregation: z.number().optional(),
+          titleMatch: z.number().optional()
         })
         .optional()
     })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { rankHits, aggregateByPage, findPageWeight } from "../src/search/ranking";
-import type { RankedHit } from "../src/search/ranking";
+import { rankHits, aggregateByPage, findPageWeight, trimByScoreGap } from "../src/search/ranking";
+import type { RankedHit, PageResult } from "../src/search/ranking";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { VectorHit } from "../src/types";
 
@@ -336,5 +336,161 @@ describe("findPageWeight", () => {
   it("root '/' is exact-only, not a global prefix", () => {
     expect(findPageWeight("/", { "/": 2.0 })).toBe(2.0);
     expect(findPageWeight("/about", { "/": 2.0 })).toBe(1);
+  });
+});
+
+describe("title-match boost", () => {
+  it("boosts hits whose title matches the query", () => {
+    const config = createDefaultConfig("test");
+    const hits = [
+      makeHit({ score: 0.7, url: "/recipes", title: "Recipes" }),
+      makeHit({ score: 0.75, url: "/about", title: "About Us" })
+    ];
+
+    const ranked = rankHits(hits, config, "recipes");
+    // /recipes should be boosted above /about despite lower base score
+    expect(ranked[0]?.hit.metadata.url).toBe("/recipes");
+  });
+
+  it("matches when query is substring of title", () => {
+    const config = createDefaultConfig("test");
+    const hits = [
+      makeHit({ score: 0.7, url: "/getting-started", title: "Getting Started Guide" }),
+      makeHit({ score: 0.75, url: "/faq", title: "FAQ" })
+    ];
+
+    const ranked = rankHits(hits, config, "getting started");
+    expect(ranked[0]?.hit.metadata.url).toBe("/getting-started");
+  });
+
+  it("matches when title is substring of query", () => {
+    const config = createDefaultConfig("test");
+    const hits = [
+      makeHit({ score: 0.7, url: "/faq", title: "FAQ" }),
+      makeHit({ score: 0.75, url: "/about", title: "About Us" })
+    ];
+
+    const ranked = rankHits(hits, config, "faq page");
+    expect(ranked[0]?.hit.metadata.url).toBe("/faq");
+  });
+
+  it("ignores case and punctuation in title matching", () => {
+    const config = createDefaultConfig("test");
+    const hits = [
+      makeHit({ score: 0.7, url: "/api-ref", title: "API Reference!" }),
+      makeHit({ score: 0.75, url: "/other", title: "Other Page" })
+    ];
+
+    const ranked = rankHits(hits, config, "api reference");
+    expect(ranked[0]?.hit.metadata.url).toBe("/api-ref");
+  });
+
+  it("does not boost when query does not match title", () => {
+    const config = createDefaultConfig("test");
+    const hits = [
+      makeHit({ score: 0.7, url: "/recipes", title: "Recipes" }),
+      makeHit({ score: 0.75, url: "/about", title: "About Us" })
+    ];
+
+    const ranked = rankHits(hits, config, "deployment guide");
+    // No title match, so /about stays on top with higher base score
+    expect(ranked[0]?.hit.metadata.url).toBe("/about");
+  });
+
+  it("does not apply boost when no query is provided", () => {
+    const config = createDefaultConfig("test");
+    const hits = [
+      makeHit({ score: 0.7, url: "/recipes", title: "Recipes" }),
+      makeHit({ score: 0.75, url: "/about", title: "About Us" })
+    ];
+
+    const ranked = rankHits(hits, config);
+    expect(ranked[0]?.hit.metadata.url).toBe("/about");
+  });
+});
+
+describe("trimByScoreGap", () => {
+  const config = createDefaultConfig("test");
+
+  function makePageResult(url: string, pageScore: number): PageResult {
+    return {
+      url,
+      title: "Page",
+      routeFile: "src/routes/+page.svelte",
+      pageScore,
+      bestChunk: makeRankedHit(url, pageScore),
+      matchingChunks: [makeRankedHit(url, pageScore)]
+    };
+  }
+
+  it("trims results after a large score gap", () => {
+    const pages: PageResult[] = [
+      makePageResult("/best", 0.9),
+      makePageResult("/good", 0.85),
+      makePageResult("/weak", 0.3)  // 65% drop from 0.85 → should be trimmed
+    ];
+
+    const trimmed = trimByScoreGap(pages, config);
+    expect(trimmed.length).toBe(2);
+    expect(trimmed.map((p) => p.url)).toEqual(["/best", "/good"]);
+  });
+
+  it("keeps all results when scores are close", () => {
+    const pages: PageResult[] = [
+      makePageResult("/a", 0.9),
+      makePageResult("/b", 0.85),
+      makePageResult("/c", 0.8),
+      makePageResult("/d", 0.75)
+    ];
+
+    const trimmed = trimByScoreGap(pages, config);
+    expect(trimmed.length).toBe(4);
+  });
+
+  it("returns empty when median score is below minScore", () => {
+    const pages: PageResult[] = [
+      makePageResult("/a", 0.4),
+      makePageResult("/b", 0.2),
+      makePageResult("/c", 0.1)
+    ];
+
+    const trimmed = trimByScoreGap(pages, config);
+    expect(trimmed.length).toBe(0);
+  });
+
+  it("returns results when median is above minScore", () => {
+    const pages: PageResult[] = [
+      makePageResult("/a", 0.9),
+      makePageResult("/b", 0.8),
+      makePageResult("/c", 0.7)
+    ];
+
+    const trimmed = trimByScoreGap(pages, config);
+    expect(trimmed.length).toBe(3);
+  });
+
+  it("returns empty array for empty input", () => {
+    const trimmed = trimByScoreGap([], config);
+    expect(trimmed.length).toBe(0);
+  });
+
+  it("does not trim when scoreGapThreshold is 0", () => {
+    const noGapConfig = createDefaultConfig("test");
+    noGapConfig.ranking.scoreGapThreshold = 0;
+
+    const pages: PageResult[] = [
+      makePageResult("/a", 0.9),
+      makePageResult("/b", 0.1)  // huge gap but trimming disabled
+    ];
+
+    const trimmed = trimByScoreGap(pages, noGapConfig);
+    // Median is 0.5 which is above minScore 0.3, and gap trimming disabled
+    expect(trimmed.length).toBe(2);
+  });
+
+  it("handles single result", () => {
+    const pages: PageResult[] = [makePageResult("/only", 0.8)];
+    const trimmed = trimByScoreGap(pages, config);
+    expect(trimmed.length).toBe(1);
   });
 });

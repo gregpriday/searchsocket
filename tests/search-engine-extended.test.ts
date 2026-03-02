@@ -374,4 +374,108 @@ describe("SearchEngine - adversarial cases", () => {
       expect.any(Object)
     );
   });
+
+  it("falls back to chunkText snippet when snippet is too short", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minScore = 0;
+    config.ranking.scoreGapThreshold = 0;
+
+    const hits: VectorHit[] = [
+      {
+        ...makeHit("chunk-short", "/features"),
+        score: 0.9,
+        metadata: {
+          ...makeHit("chunk-short", "/features").metadata,
+          snippet: "Terminal Features",
+          chunkText: "Terminal Features provide a rich set of tools for interacting with your development environment efficiently."
+        }
+      }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits)
+    });
+
+    const result = await engine.search({ q: "terminal features", topK: 10 });
+    expect(result.results.length).toBe(1);
+    // Should use the chunkText-derived snippet since "Terminal Features" is < 30 chars
+    expect(result.results[0]!.snippet.length).toBeGreaterThan(29);
+    expect(result.results[0]!.snippet).toContain("Terminal Features");
+  });
+
+  it("keeps original snippet when it is long enough", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minScore = 0;
+    config.ranking.scoreGapThreshold = 0;
+
+    const longSnippet = "This is a sufficiently long snippet that should not be replaced by chunk text fallback.";
+    const hits: VectorHit[] = [
+      {
+        ...makeHit("chunk-long", "/docs"),
+        score: 0.9,
+        metadata: {
+          ...makeHit("chunk-long", "/docs").metadata,
+          snippet: longSnippet,
+          chunkText: "Different chunk text content."
+        }
+      }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits)
+    });
+
+    const result = await engine.search({ q: "docs", topK: 10 });
+    expect(result.results[0]!.snippet).toBe(longSnippet);
+  });
+
+  it("trims low-confidence results via score-gap trimming", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    // Use default scoreGapThreshold (0.4) and minScore (0.3)
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/relevant"), score: 0.8 },
+      { ...makeHit("chunk-2", "/also-relevant"), score: 0.75 },
+      { ...makeHit("chunk-3", "/weak"), score: 0.3 }  // big gap from 0.75
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits)
+    });
+
+    const result = await engine.search({ q: "test query", topK: 10 });
+    // The weak result should be trimmed due to score gap
+    expect(result.results.length).toBe(2);
+    expect(result.results.map((r) => r.url)).toEqual(["/relevant", "/also-relevant"]);
+  });
+
+  it("returns empty results for gibberish queries with low scores", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    // Use default minScore (0.3) — median of these scores is below 0.3
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/a"), score: 0.25 },
+      { ...makeHit("chunk-2", "/b"), score: 0.2 },
+      { ...makeHit("chunk-3", "/c"), score: 0.15 }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits)
+    });
+
+    const result = await engine.search({ q: "xyzzy gibberish asdf", topK: 10 });
+    expect(result.results.length).toBe(0);
+  });
 });

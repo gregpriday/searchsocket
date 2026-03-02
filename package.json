@@ -53,7 +53,8 @@
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:quality": "SEARCHSOCKET_QUALITY_TESTS=1 vitest run tests/quality.test.ts"
   },
   "engines": {
     "node": ">=20"
