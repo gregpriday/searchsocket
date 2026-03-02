@@ -109,13 +109,9 @@ describe("searchsocketHandle", () => {
       ],
       meta: {
         timingsMs: {
-          embed: 1,
-          vector: 1,
-          rerank: 0,
+          search: 1,
           total: 2
-        },
-        usedRerank: false,
-        modelId: "jina-embeddings-v3"
+        }
       }
     });
 
@@ -212,9 +208,7 @@ describe("searchsocketHandle", () => {
         scope: "main",
         results: [],
         meta: {
-          timingsMs: { embed: 0, vector: 0, rerank: 0, total: 0 },
-          usedRerank: false,
-          modelId: "jina-embeddings-v3"
+          timingsMs: { search: 0, total: 0 }
         }
       })
     } as unknown as SearchEngine);
@@ -350,9 +344,7 @@ describe("searchsocketHandle", () => {
         scope: "main",
         results: [],
         meta: {
-          timingsMs: { embed: 0, vector: 0, rerank: 0, total: 0 },
-          usedRerank: false,
-          modelId: "jina-embeddings-v3"
+          timingsMs: { search: 0, total: 0 }
         }
       })
     } as unknown as SearchEngine);
@@ -409,9 +401,7 @@ describe("searchsocketHandle", () => {
       scope: "main",
       results: [],
       meta: {
-        timingsMs: { embed: 0, vector: 0, rerank: 0, total: 0 },
-        usedRerank: false,
-        modelId: "jina-embeddings-v3"
+        timingsMs: { search: 0, total: 0 }
       }
     });
 
@@ -447,9 +437,7 @@ describe("searchsocketHandle", () => {
         scope: "main",
         results: [],
         meta: {
-          timingsMs: { embed: 0, vector: 0, rerank: 0, total: 0 },
-          usedRerank: false,
-          modelId: "jina-embeddings-v3"
+          timingsMs: { search: 0, total: 0 }
         }
       })
     } as unknown as SearchEngine);

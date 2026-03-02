@@ -1,6 +1,5 @@
 export type ScopeMode = "fixed" | "git" | "env";
 export type SourceMode = "static-output" | "crawl" | "content-files" | "build";
-export type EmbeddingProvider = "jina";
 
 export interface SearchSocketConfig {
   project?: {
@@ -62,29 +61,15 @@ export interface SearchSocketConfig {
     prependTitle?: boolean;
     pageSummaryChunk?: boolean;
   };
-  embeddings?: {
-    provider?: EmbeddingProvider;
-    model?: string;
-    apiKey?: string;
-    apiKeyEnv?: string;
-    batchSize?: number;
-    concurrency?: number;
-    pricePer1kTokens?: number;
+  upstash?: {
+    url?: string;
+    token?: string;
+    urlEnv?: string;
+    tokenEnv?: string;
   };
-  vector?: {
-    dimension?: number;
-    turso?: {
-      url?: string;
-      authToken?: string;
-      urlEnv?: string;
-      authTokenEnv?: string;
-      localPath?: string;
-    };
-  };
-  rerank?: {
-    enabled?: boolean;
-    topN?: number;
-    model?: string;
+  search?: {
+    semanticWeight?: number;
+    inputEnrichment?: boolean;
   };
   ranking?: {
     enableIncomingLinkBoost?: boolean;
@@ -97,7 +82,6 @@ export interface SearchSocketConfig {
     weights?: {
       incomingLinks?: number;
       depth?: number;
-      rerank?: number;
       aggregation?: number;
     };
   };
@@ -184,29 +168,15 @@ export interface ResolvedSearchSocketConfig {
     prependTitle: boolean;
     pageSummaryChunk: boolean;
   };
-  embeddings: {
-    provider: EmbeddingProvider;
-    model: string;
-    apiKey?: string;
-    apiKeyEnv: string;
-    batchSize: number;
-    concurrency: number;
-    pricePer1kTokens?: number;
+  upstash: {
+    url?: string;
+    token?: string;
+    urlEnv: string;
+    tokenEnv: string;
   };
-  vector: {
-    dimension?: number;
-    turso: {
-      url?: string;
-      authToken?: string;
-      urlEnv: string;
-      authTokenEnv: string;
-      localPath: string;
-    };
-  };
-  rerank: {
-    enabled: boolean;
-    topN: number;
-    model: string;
+  search: {
+    semanticWeight: number;
+    inputEnrichment: boolean;
   };
   ranking: {
     enableIncomingLinkBoost: boolean;
@@ -219,7 +189,6 @@ export interface ResolvedSearchSocketConfig {
     weights: {
       incomingLinks: number;
       depth: number;
-      rerank: number;
       aggregation: number;
     };
   };
@@ -316,14 +285,9 @@ export interface Chunk {
   keywords?: string[];
 }
 
-export interface EmbeddingVector {
-  vector: number[];
-  tokenEstimate: number;
-}
-
-export interface VectorRecord {
+export interface VectorHit {
   id: string;
-  vector: number[];
+  score: number;
   metadata: {
     projectId: string;
     scopeName: string;
@@ -336,7 +300,6 @@ export interface VectorRecord {
     chunkText: string;
     ordinal: number;
     contentHash: string;
-    modelId: string;
     depth: number;
     incomingLinks: number;
     routeFile: string;
@@ -344,18 +307,6 @@ export interface VectorRecord {
     description?: string;
     keywords?: string[];
   };
-}
-
-export interface QueryOpts {
-  topK: number;
-  pathPrefix?: string;
-  tags?: string[];
-}
-
-export interface VectorHit {
-  id: string;
-  score: number;
-  metadata: VectorRecord["metadata"];
 }
 
 export interface PageRecord {
@@ -376,42 +327,8 @@ export interface PageRecord {
 export interface ScopeInfo {
   projectId: string;
   scopeName: string;
-  modelId: string;
   lastIndexedAt: string;
-  vectorCount?: number;
-  lastEstimateTokens?: number;
-  lastEstimateCostUSD?: number;
-  lastEstimateChangedChunks?: number;
-}
-
-export interface VectorStore {
-  upsert(records: VectorRecord[], scope: Scope): Promise<void>;
-  query(queryVector: number[], opts: QueryOpts, scope: Scope): Promise<VectorHit[]>;
-  deleteByIds(ids: string[], scope: Scope): Promise<void>;
-  deleteScope(scope: Scope): Promise<void>;
-  listScopes(scopeProjectId: string): Promise<ScopeInfo[]>;
-  recordScope(info: ScopeInfo): Promise<void>;
-  health(): Promise<{ ok: boolean; details?: string }>;
-  getContentHashes(scope: Scope): Promise<Map<string, string>>;
-  upsertPages(pages: PageRecord[], scope: Scope): Promise<void>;
-  getPage(url: string, scope: Scope): Promise<PageRecord | null>;
-  deletePages(scope: Scope): Promise<void>;
-  getScopeModelId(scope: Scope): Promise<string | null>;
-  dropAllTables(): Promise<void>;
-}
-
-export interface EmbeddingsProvider {
-  embedTexts(texts: string[], modelId: string, task?: string): Promise<number[][]>;
-  estimateTokens(text: string): number;
-}
-
-export interface RerankCandidate {
-  id: string;
-  text: string;
-}
-
-export interface Reranker {
-  rerank(query: string, candidates: RerankCandidate[], topN?: number): Promise<Array<{ id: string; score: number }>>;
+  documentCount?: number;
 }
 
 export interface SearchRequest {
@@ -420,9 +337,7 @@ export interface SearchRequest {
   scope?: string;
   pathPrefix?: string;
   tags?: string[];
-  rerank?: boolean;
   groupBy?: "page" | "chunk";
-  stream?: boolean;
 }
 
 export interface SearchResultChunk {
@@ -448,13 +363,9 @@ export interface SearchResponse {
   results: SearchResult[];
   meta: {
     timingsMs: {
-      embed: number;
-      vector: number;
-      rerank: number;
+      search: number;
       total: number;
     };
-    usedRerank: boolean;
-    modelId: string;
   };
 }
 
@@ -462,10 +373,8 @@ export interface IndexStats {
   pagesProcessed: number;
   chunksTotal: number;
   chunksChanged: number;
-  newEmbeddings: number;
+  documentsUpserted: number;
   deletes: number;
-  estimatedTokens: number;
-  estimatedCostUSD: number;
   routeExact: number;
   routeBestEffort: number;
   stageTimingsMs: Record<string, number>;
@@ -491,32 +400,4 @@ export interface JsonLogEntry {
   event: string;
   ts: string;
   data?: Record<string, unknown>;
-}
-
-export interface StreamSearchEvent {
-  phase: "initial" | "reranked";
-  data: SearchResponse;
-}
-
-export interface StreamSearchErrorEvent {
-  phase: "error";
-  data: { error: { code: string; message: string } };
-}
-
-export type StreamEvent = StreamSearchEvent | StreamSearchErrorEvent;
-
-export interface MergeSearchOptions {
-  /**
-   * If any single result moved more than this many positions, adopt
-   * the reranked order. The reranker is semantic — if it strongly
-   * disagrees with vector similarity on even one result, trust it.
-   * @default 3
-   */
-  maxDisplacement?: number;
-}
-
-export interface MergeSearchResult {
-  response: SearchResponse;
-  usedRerankedOrder: boolean;
-  displacements: Array<{ url: string; displacement: number }>;
 }

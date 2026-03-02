@@ -1,22 +1,40 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
-import { createVectorStore } from "../src/vector";
-import type { EmbeddingsProvider, ResolvedSearchSocketConfig } from "../src/types";
+import type { UpstashSearchStore } from "../src/vector/upstash";
+import type { PageRecord, ResolvedSearchSocketConfig } from "../src/types";
 
 const tempDirs: string[] = [];
 
-class FakeEmbeddingsProvider implements EmbeddingsProvider {
-  estimateTokens(text: string): number {
-    return Math.ceil(text.length / 4);
-  }
+function createMockStoreWithPages(): {
+  store: UpstashSearchStore;
+  getPages: () => PageRecord[];
+} {
+  const pages: PageRecord[] = [];
 
-  async embedTexts(texts: string[]): Promise<number[][]> {
-    return texts.map(() => [1, 0, 0, 0]);
-  }
+  const store = {
+    upsertChunks: vi.fn().mockResolvedValue(undefined),
+    search: vi.fn().mockResolvedValue([]),
+    deleteByIds: vi.fn().mockResolvedValue(undefined),
+    deleteScope: vi.fn().mockResolvedValue(undefined),
+    listScopes: vi.fn().mockResolvedValue([]),
+    getContentHashes: vi.fn().mockResolvedValue(new Map()),
+    upsertPages: vi.fn().mockImplementation(async (records: PageRecord[]) => {
+      pages.length = 0;
+      pages.push(...records);
+    }),
+    getPage: vi.fn().mockImplementation(async (url: string) => {
+      return pages.find((p) => p.url === url) ?? null;
+    }),
+    deletePages: vi.fn().mockResolvedValue(undefined),
+    health: vi.fn().mockResolvedValue({ ok: true }),
+    dropAllIndexes: vi.fn().mockResolvedValue(undefined)
+  } as unknown as UpstashSearchStore;
+
+  return { store, getPages: () => [...pages] };
 }
 
 async function createProjectFixture(): Promise<{ cwd: string; config: ResolvedSearchSocketConfig }> {
@@ -71,7 +89,6 @@ async function createProjectFixture(): Promise<{ cwd: string; config: ResolvedSe
   const config = createDefaultConfig("searchsocket-links");
   config.source.mode = "static-output";
   config.source.staticOutputDir = "build";
-  config.vector.turso.localPath = ".searchsocket/vectors.db";
   config.state.dir = ".searchsocket";
 
   return { cwd, config };
@@ -84,22 +101,18 @@ afterEach(async () => {
 describe("IndexPipeline link graph", () => {
   it("counts incoming links from relative href targets", async () => {
     const { cwd, config } = await createProjectFixture();
-    const embeddings = new FakeEmbeddingsProvider();
-    const vectorStore = await createVectorStore(config, cwd);
+    const { store, getPages } = createMockStoreWithPages();
 
     const pipeline = await IndexPipeline.create({
       cwd,
       config,
-      embeddingsProvider: embeddings,
-      vectorStore
+      store
     });
 
     await pipeline.run({ changedOnly: true });
 
-    const scope = { projectId: "searchsocket-links", scopeName: "main", scopeId: "searchsocket-links:main" };
-    const page = await vectorStore.getPage("/docs/advanced", scope);
-
-    expect(page).not.toBeNull();
-    expect(page!.incomingLinks).toBe(1);
+    const advancedPage = getPages().find((p) => p.url === "/docs/advanced");
+    expect(advancedPage).not.toBeNull();
+    expect(advancedPage!.incomingLinks).toBe(1);
   });
 });

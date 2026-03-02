@@ -1,22 +1,28 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
-import { createVectorStore } from "../src/vector";
-import type { EmbeddingsProvider, ResolvedSearchSocketConfig } from "../src/types";
+import type { UpstashSearchStore } from "../src/vector/upstash";
+import type { ResolvedSearchSocketConfig } from "../src/types";
 
 const tempDirs: string[] = [];
 
-class FakeEmbeddingsProvider implements EmbeddingsProvider {
-  estimateTokens(text: string): number {
-    return Math.ceil(text.length / 4);
-  }
-
-  async embedTexts(texts: string[]): Promise<number[][]> {
-    return texts.map(() => [1, 0, 0, 0]);
-  }
+function createMockStore(): UpstashSearchStore {
+  return {
+    upsertChunks: vi.fn().mockResolvedValue(undefined),
+    search: vi.fn().mockResolvedValue([]),
+    deleteByIds: vi.fn().mockResolvedValue(undefined),
+    deleteScope: vi.fn().mockResolvedValue(undefined),
+    listScopes: vi.fn().mockResolvedValue([]),
+    getContentHashes: vi.fn().mockResolvedValue(new Map()),
+    upsertPages: vi.fn().mockResolvedValue(undefined),
+    getPage: vi.fn().mockResolvedValue(null),
+    deletePages: vi.fn().mockResolvedValue(undefined),
+    health: vi.fn().mockResolvedValue({ ok: true }),
+    dropAllIndexes: vi.fn().mockResolvedValue(undefined)
+  } as unknown as UpstashSearchStore;
 }
 
 async function createProjectFixture(): Promise<{ cwd: string; config: ResolvedSearchSocketConfig }> {
@@ -44,7 +50,6 @@ async function createProjectFixture(): Promise<{ cwd: string; config: ResolvedSe
   config.source.mode = "static-output";
   config.source.staticOutputDir = "build";
   config.source.strictRouteMapping = true;
-  config.vector.turso.localPath = ".searchsocket/vectors.db";
   config.state.dir = ".searchsocket";
 
   return { cwd, config };
@@ -60,8 +65,7 @@ describe("IndexPipeline strict route mapping", () => {
     const pipeline = await IndexPipeline.create({
       cwd,
       config,
-      embeddingsProvider: new FakeEmbeddingsProvider(),
-      vectorStore: await createVectorStore(config, cwd)
+      store: createMockStore()
     });
 
     await expect(pipeline.run({ changedOnly: true })).rejects.toMatchObject({

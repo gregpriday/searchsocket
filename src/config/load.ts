@@ -122,21 +122,13 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
       ...defaults.chunking,
       ...parsed.chunking
     },
-    embeddings: {
-      ...defaults.embeddings,
-      ...parsed.embeddings
+    upstash: {
+      ...defaults.upstash,
+      ...parsed.upstash
     },
-    vector: {
-      ...defaults.vector,
-      ...parsed.vector,
-      turso: {
-        ...defaults.vector.turso,
-        ...parsed.vector?.turso
-      }
-    },
-    rerank: {
-      ...defaults.rerank,
-      ...parsed.rerank
+    search: {
+      ...defaults.search,
+      ...parsed.search
     },
     ranking: {
       ...defaults.ranking,
@@ -265,7 +257,8 @@ export function writeMinimalConfig(cwd: string): string {
   }
 
   const content = `export default {
-  embeddings: { apiKeyEnv: "JINA_API_KEY" }
+  // Upstash Search credentials (set via env vars or directly here)
+  // upstash: { urlEnv: "UPSTASH_SEARCH_REST_URL", tokenEnv: "UPSTASH_SEARCH_REST_TOKEN" }
 };
 `;
 

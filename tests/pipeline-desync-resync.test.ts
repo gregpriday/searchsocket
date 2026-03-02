@@ -4,53 +4,27 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
-import type { EmbeddingsProvider, PageRecord, ScopeInfo, VectorStore } from "../src/types";
+import type { UpstashSearchStore } from "../src/vector/upstash";
 
 const tempDirs: string[] = [];
 
-class FakeEmbeddingsProvider implements EmbeddingsProvider {
-  estimateTokens(text: string): number {
-    return Math.ceil(text.length / 4);
-  }
-
-  async embedTexts(texts: string[]): Promise<number[][]> {
-    return texts.map(() => [1, 0, 0, 0]);
-  }
-}
-
-function makeStore(
+function createMockStore(
   existingHashes: Map<string, string>,
-  upsertSpy?: (...args: Parameters<VectorStore["upsert"]>) => Promise<void>
-): VectorStore {
-  const upsert = async (...args: Parameters<VectorStore["upsert"]>) => {
-    if (upsertSpy) {
-      await upsertSpy(...args);
-    }
-  };
-
+  upsertSpy?: ReturnType<typeof vi.fn>
+): UpstashSearchStore {
   return {
-    upsert,
-    query: async () => [],
-    deleteByIds: async () => undefined,
-    deleteScope: async () => undefined,
-    listScopes: async () => [
-      {
-        projectId: "searchsocket-resync",
-        scopeName: "main",
-        modelId: "jina-embeddings-v5-text-small",
-        lastIndexedAt: "2026-01-01T00:00:00.000Z",
-        vectorCount: existingHashes.size
-      } satisfies ScopeInfo
-    ],
-    recordScope: async () => undefined,
-    health: async () => ({ ok: true }),
-    getContentHashes: async () => existingHashes,
-    upsertPages: async () => undefined,
-    getPage: async () => null,
-    deletePages: async () => undefined,
-    getScopeModelId: async () => "jina-embeddings-v5-text-small",
-    dropAllTables: async () => undefined
-  };
+    upsertChunks: upsertSpy ?? vi.fn().mockResolvedValue(undefined),
+    search: vi.fn().mockResolvedValue([]),
+    deleteByIds: vi.fn().mockResolvedValue(undefined),
+    deleteScope: vi.fn().mockResolvedValue(undefined),
+    listScopes: vi.fn().mockResolvedValue([]),
+    getContentHashes: vi.fn().mockResolvedValue(existingHashes),
+    upsertPages: vi.fn().mockResolvedValue(undefined),
+    getPage: vi.fn().mockResolvedValue(null),
+    deletePages: vi.fn().mockResolvedValue(undefined),
+    health: vi.fn().mockResolvedValue({ ok: true }),
+    dropAllIndexes: vi.fn().mockResolvedValue(undefined)
+  } as unknown as UpstashSearchStore;
 }
 
 async function createFixture(): Promise<string> {
@@ -80,21 +54,20 @@ afterEach(async () => {
 });
 
 describe("IndexPipeline single-source-of-truth resync", () => {
-  it("performs full index when Turso has no existing hashes (fresh state)", async () => {
+  it("performs full index when store has no existing hashes (fresh state)", async () => {
     const cwd = await createFixture();
     const config = createDefaultConfig("searchsocket-resync");
     config.source.mode = "static-output";
     config.source.staticOutputDir = "build";
     config.state.dir = ".searchsocket";
 
-    const embeddings = new FakeEmbeddingsProvider();
     const upsertSpy = vi.fn().mockResolvedValue(undefined);
+    const store = createMockStore(new Map(), upsertSpy);
 
     const pipeline = await IndexPipeline.create({
       cwd,
       config,
-      embeddingsProvider: embeddings,
-      vectorStore: makeStore(new Map(), upsertSpy)
+      store
     });
 
     const stats = await pipeline.run({ changedOnly: true });
@@ -102,42 +75,42 @@ describe("IndexPipeline single-source-of-truth resync", () => {
     expect(upsertSpy).toHaveBeenCalled();
   });
 
-  it("skips unchanged chunks when Turso has matching hashes", async () => {
+  it("skips unchanged chunks when store has matching hashes", async () => {
     const cwd = await createFixture();
     const config = createDefaultConfig("searchsocket-resync");
     config.source.mode = "static-output";
     config.source.staticOutputDir = "build";
     config.state.dir = ".searchsocket";
 
-    const embeddings = new FakeEmbeddingsProvider();
-
     // First run to get the hashes
     const firstUpsertSpy = vi.fn().mockResolvedValue(undefined);
+    const firstStore = createMockStore(new Map(), firstUpsertSpy);
+
     const firstPipeline = await IndexPipeline.create({
       cwd,
       config,
-      embeddingsProvider: embeddings,
-      vectorStore: makeStore(new Map(), firstUpsertSpy)
+      store: firstStore
     });
     const firstStats = await firstPipeline.run({ changedOnly: true });
     expect(firstStats.chunksChanged).toBeGreaterThan(0);
 
-    // Collect the hashes from the upserted records
+    // Collect the hashes from the upserted chunks
     const existingHashes = new Map<string, string>();
     for (const call of firstUpsertSpy.mock.calls) {
-      const records = call[0];
-      for (const record of records) {
-        existingHashes.set(record.id, record.metadata.contentHash);
+      const chunks = call[0];
+      for (const chunk of chunks) {
+        existingHashes.set(chunk.id, chunk.metadata.contentHash);
       }
     }
 
     // Second run with existing hashes should skip all chunks
     const secondUpsertSpy = vi.fn().mockResolvedValue(undefined);
+    const secondStore = createMockStore(existingHashes, secondUpsertSpy);
+
     const secondPipeline = await IndexPipeline.create({
       cwd,
       config,
-      embeddingsProvider: embeddings,
-      vectorStore: makeStore(existingHashes, secondUpsertSpy)
+      store: secondStore
     });
     const secondStats = await secondPipeline.run({ changedOnly: true });
 

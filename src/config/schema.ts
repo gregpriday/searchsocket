@@ -78,36 +78,18 @@ export const searchSocketConfigSchema = z.object({
       pageSummaryChunk: z.boolean().optional()
     })
     .optional(),
-  embeddings: z
+  upstash: z
     .object({
-      provider: z.literal("jina").optional(),
-      model: z.string().min(1).optional(),
-      apiKey: z.string().min(1).optional(),
-      apiKeyEnv: z.string().min(1).optional(),
-      batchSize: z.number().int().positive().optional(),
-      concurrency: z.number().int().positive().optional(),
-      pricePer1kTokens: z.number().positive().optional()
+      url: z.string().url().optional(),
+      token: z.string().min(1).optional(),
+      urlEnv: z.string().min(1).optional(),
+      tokenEnv: z.string().min(1).optional()
     })
     .optional(),
-  vector: z
+  search: z
     .object({
-      dimension: z.number().int().positive().optional(),
-      turso: z
-        .object({
-          url: z.string().url().optional(),
-          authToken: z.string().min(1).optional(),
-          urlEnv: z.string().optional(),
-          authTokenEnv: z.string().optional(),
-          localPath: z.string().optional()
-        })
-        .optional()
-    })
-    .optional(),
-  rerank: z
-    .object({
-      enabled: z.boolean().optional(),
-      topN: z.number().int().positive().optional(),
-      model: z.string().optional()
+      semanticWeight: z.number().min(0).max(1).optional(),
+      inputEnrichment: z.boolean().optional()
     })
     .optional(),
   ranking: z
@@ -123,7 +105,6 @@ export const searchSocketConfigSchema = z.object({
         .object({
           incomingLinks: z.number().optional(),
           depth: z.number().optional(),
-          rerank: z.number().optional(),
           aggregation: z.number().optional()
         })
         .optional()

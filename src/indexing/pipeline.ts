@@ -2,9 +2,9 @@ import path from "node:path";
 import { loadConfig } from "../config/load";
 import { resolveScope } from "../core/scope";
 import { ensureStateDirs } from "../core/state";
-import { createEmbeddingsProvider } from "../embeddings";
 import { SearchSocketError } from "../errors";
-import { createVectorStore } from "../vector";
+import { createUpstashStore } from "../vector";
+import { UpstashSearchStore } from "../vector/upstash";
 import { buildEmbeddingText, chunkPage } from "./chunker";
 import { extractFromHtml, extractFromMarkdown } from "./extractor";
 import { buildRoutePatterns, mapUrlToRoute } from "./route-mapper";
@@ -20,7 +20,6 @@ import { getUrlDepth, normalizeUrlPath } from "../utils/path";
 import { Logger } from "../core/logger";
 import type {
   Chunk,
-  EmbeddingsProvider,
   ExtractedPage,
   IndexedPage,
   IndexOptions,
@@ -28,59 +27,44 @@ import type {
   PageRecord,
   ResolvedSearchSocketConfig,
   RouteMatch,
-  Scope,
-  ScopeInfo,
-  VectorRecord,
-  VectorStore
+  Scope
 } from "../types";
-
-const EMBEDDING_PRICE_PER_1K_TOKENS_USD: Record<string, number> = {
-  "jina-embeddings-v3": 0.00002,
-  "jina-embeddings-v5-text-small": 0.00005
-};
-const DEFAULT_EMBEDDING_PRICE_PER_1K = 0.00005;
 
 interface IndexPipelineOptions {
   cwd?: string;
   configPath?: string;
   config?: ResolvedSearchSocketConfig;
-  embeddingsProvider?: EmbeddingsProvider;
-  vectorStore?: VectorStore;
+  store?: UpstashSearchStore;
   logger?: Logger;
 }
 
 export class IndexPipeline {
   private readonly cwd: string;
   private readonly config: ResolvedSearchSocketConfig;
-  private readonly embeddings: EmbeddingsProvider;
-  private readonly vectorStore: VectorStore;
+  private readonly store: UpstashSearchStore;
   private readonly logger: Logger;
 
   private constructor(options: {
     cwd: string;
     config: ResolvedSearchSocketConfig;
-    embeddings: EmbeddingsProvider;
-    vectorStore: VectorStore;
+    store: UpstashSearchStore;
     logger: Logger;
   }) {
     this.cwd = options.cwd;
     this.config = options.config;
-    this.embeddings = options.embeddings;
-    this.vectorStore = options.vectorStore;
+    this.store = options.store;
     this.logger = options.logger;
   }
 
   static async create(options: IndexPipelineOptions = {}): Promise<IndexPipeline> {
     const cwd = path.resolve(options.cwd ?? process.cwd());
     const config = options.config ?? (await loadConfig({ cwd, configPath: options.configPath }));
-    const embeddings = options.embeddingsProvider ?? createEmbeddingsProvider(config);
-    const vectorStore = options.vectorStore ?? await createVectorStore(config, cwd);
+    const store = options.store ?? await createUpstashStore(config);
 
     return new IndexPipeline({
       cwd,
       config,
-      embeddings,
-      vectorStore,
+      store,
       logger: options.logger ?? new Logger()
     });
   }
@@ -107,7 +91,7 @@ export class IndexPipeline {
     ensureStateDirs(this.cwd, this.config.state.dir, scope);
 
     const sourceMode = options.sourceOverride ?? this.config.source.mode;
-    this.logger.info(`Indexing scope "${scope.scopeName}" (source: ${sourceMode}, model: ${this.config.embeddings.model})`);
+    this.logger.info(`Indexing scope "${scope.scopeName}" (source: ${sourceMode}, backend: upstash-search)`);
 
     if (options.force) {
       this.logger.info("Force mode enabled — full rebuild");
@@ -118,20 +102,7 @@ export class IndexPipeline {
     }
 
     const manifestStart = stageStart();
-    const existingHashes = await this.vectorStore.getContentHashes(scope);
-    const existingModelId = await this.vectorStore.getScopeModelId(scope);
-
-    if (
-      existingModelId &&
-      existingModelId !== this.config.embeddings.model &&
-      !options.force
-    ) {
-      throw new SearchSocketError(
-        "EMBEDDING_MODEL_MISMATCH",
-        `Scope ${scope.scopeName} uses model ${existingModelId}. Re-run with --force to migrate.`
-      );
-    }
-
+    const existingHashes = options.force ? new Map<string, string>() : await this.store.getContentHashes(scope);
     stageEnd("manifest", manifestStart);
     this.logger.debug(`Manifest: ${existingHashes.size} existing chunk hashes loaded`);
 
@@ -248,7 +219,6 @@ export class IndexPipeline {
     }
 
     // Filter out zero-weight pages at index time.
-    // Effective weight: per-page meta tag (ExtractedPage.weight) > config pageWeights > default (1.0)
     const indexablePages: ExtractedPage[] = [];
     for (const page of uniquePages) {
       const effectiveWeight = page.weight ?? findPageWeight(page.url, this.config.ranking.pageWeights);
@@ -345,7 +315,7 @@ export class IndexPipeline {
       this.logger.event("page_indexed", { url: page.url });
     }
 
-    // Store pages in Turso (replace entire scope to remove stale pages)
+    // Store pages in Upstash (replace entire scope to remove stale pages)
     if (!options.dryRun) {
       const pageRecords: PageRecord[] = pages.map((p) => ({
         url: p.url,
@@ -361,9 +331,8 @@ export class IndexPipeline {
         tags: p.tags,
         indexedAt: p.generatedAt
       }));
-      // Delete old pages first, then insert new ones to avoid stale data
-      await this.vectorStore.deletePages(scope);
-      await this.vectorStore.upsertPages(pageRecords, scope);
+      await this.store.deletePages(scope);
+      await this.store.upsertPages(pageRecords, scope);
     }
 
     stageEnd("pages", pagesStart);
@@ -414,136 +383,54 @@ export class IndexPipeline {
 
     this.logger.info(`Changes detected: ${changedChunks.length} changed, ${deletes.length} deleted, ${chunks.length - changedChunks.length} unchanged`);
 
-    const embedStart = stageStart();
-
-    const chunkTokenEstimates = new Map<string, number>();
-    for (const chunk of changedChunks) {
-      chunkTokenEstimates.set(chunk.chunkKey, this.embeddings.estimateTokens(buildEmbeddingText(chunk, this.config.chunking.prependTitle)));
-    }
-
-    const estimatedTokens = changedChunks.reduce(
-      (sum, chunk) => sum + (chunkTokenEstimates.get(chunk.chunkKey) ?? 0),
-      0
-    );
-
-    const pricePer1k = this.config.embeddings.pricePer1kTokens
-      ?? EMBEDDING_PRICE_PER_1K_TOKENS_USD[this.config.embeddings.model]
-      ?? DEFAULT_EMBEDDING_PRICE_PER_1K;
-
-    const estimatedCostUSD = (estimatedTokens / 1000) * pricePer1k;
-
-    let newEmbeddings = 0;
-    const vectorsByChunk = new Map<string, number[]>();
+    // Upsert changed chunks directly to Upstash Search (no embedding step needed)
+    const upsertStart = stageStart();
+    let documentsUpserted = 0;
 
     if (!options.dryRun && changedChunks.length > 0) {
-      this.logger.info(`Embedding ${changedChunks.length} chunk${changedChunks.length === 1 ? "" : "s"} (~${estimatedTokens.toLocaleString()} tokens, ~$${estimatedCostUSD.toFixed(6)})...`);
-      const embeddings = await this.embeddings.embedTexts(
-        changedChunks.map((chunk) => buildEmbeddingText(chunk, this.config.chunking.prependTitle)),
-        this.config.embeddings.model,
-        "retrieval.passage"
-      );
+      this.logger.info(`Upserting ${changedChunks.length} chunk${changedChunks.length === 1 ? "" : "s"} to Upstash Search...`);
 
-      if (embeddings.length !== changedChunks.length) {
-        throw new SearchSocketError(
-          "VECTOR_BACKEND_UNAVAILABLE",
-          `Embedding provider returned ${embeddings.length} vectors for ${changedChunks.length} chunks.`
-        );
-      }
-
-      for (let i = 0; i < changedChunks.length; i += 1) {
-        const chunk = changedChunks[i];
-        const embedding = embeddings[i];
-        if (!chunk || !embedding || embedding.length === 0 || embedding.some((value) => !Number.isFinite(value))) {
-          throw new SearchSocketError(
-            "VECTOR_BACKEND_UNAVAILABLE",
-            `Embedding provider returned an invalid vector for chunk index ${i}.`
-          );
+      const docs = changedChunks.map((chunk) => ({
+        id: chunk.chunkKey,
+        content: {
+          title: chunk.title,
+          sectionTitle: chunk.sectionTitle ?? "",
+          text: buildEmbeddingText(chunk, this.config.chunking.prependTitle).slice(0, 4000),
+          url: chunk.url,
+          tags: chunk.tags.join(","),
+          headingPath: chunk.headingPath.join(" > ")
+        },
+        metadata: {
+          projectId: scope.projectId,
+          scopeName: scope.scopeName,
+          path: chunk.path,
+          snippet: chunk.snippet,
+          ordinal: chunk.ordinal,
+          contentHash: chunk.contentHash,
+          depth: chunk.depth,
+          incomingLinks: chunk.incomingLinks,
+          routeFile: chunk.routeFile,
+          description: chunk.description ?? "",
+          keywords: (chunk.keywords ?? []).join(",")
         }
-        vectorsByChunk.set(chunk.chunkKey, embedding);
-        newEmbeddings += 1;
-        this.logger.event("embedded_new", { chunkKey: chunk.chunkKey });
-      }
+      }));
+
+      await this.store.upsertChunks(docs, scope);
+      documentsUpserted = docs.length;
+      this.logger.event("upserted", { count: docs.length });
     }
 
-    stageEnd("embedding", embedStart);
+    if (!options.dryRun && deletes.length > 0) {
+      await this.store.deleteByIds(deletes, scope);
+      this.logger.event("deleted", { count: deletes.length });
+    }
+
+    stageEnd("upsert", upsertStart);
     if (changedChunks.length > 0) {
-      this.logger.info(`Embedded ${newEmbeddings} chunk${newEmbeddings === 1 ? "" : "s"} (${stageTimingsMs["embedding"]}ms)`);
+      this.logger.info(`Upserted ${documentsUpserted} document${documentsUpserted === 1 ? "" : "s"} (${stageTimingsMs["upsert"]}ms)`);
     } else {
-      this.logger.info("No chunks to embed — all up to date");
+      this.logger.info("No chunks to upsert — all up to date");
     }
-
-    const syncStart = stageStart();
-    if (!options.dryRun) {
-      this.logger.info("Syncing vectors...");
-      const upserts: VectorRecord[] = [];
-      for (const chunk of changedChunks) {
-        const vector = vectorsByChunk.get(chunk.chunkKey);
-        if (!vector) {
-          continue;
-        }
-
-        upserts.push({
-          id: chunk.chunkKey,
-          vector,
-          metadata: {
-            projectId: scope.projectId,
-            scopeName: scope.scopeName,
-            url: chunk.url,
-            path: chunk.path,
-            title: chunk.title,
-            sectionTitle: chunk.sectionTitle ?? "",
-            headingPath: chunk.headingPath,
-            snippet: chunk.snippet,
-            chunkText: chunk.chunkText.slice(0, 4000),
-            ordinal: chunk.ordinal,
-            contentHash: chunk.contentHash,
-            modelId: this.config.embeddings.model,
-            depth: chunk.depth,
-            incomingLinks: chunk.incomingLinks,
-            routeFile: chunk.routeFile,
-            tags: chunk.tags,
-            description: chunk.description,
-            keywords: chunk.keywords
-          }
-        });
-      }
-
-      if (upserts.length > 0) {
-        await this.vectorStore.upsert(upserts, scope);
-        this.logger.event("upserted", { count: upserts.length });
-      }
-
-      if (deletes.length > 0) {
-        await this.vectorStore.deleteByIds(deletes, scope);
-        this.logger.event("deleted", { count: deletes.length });
-      }
-    }
-
-    stageEnd("sync", syncStart);
-    this.logger.debug(`Sync complete (${stageTimingsMs["sync"]}ms)`);
-
-    const finalizeStart = stageStart();
-
-    if (!options.dryRun) {
-      const scopeInfo: ScopeInfo = {
-        projectId: scope.projectId,
-        scopeName: scope.scopeName,
-        modelId: this.config.embeddings.model,
-        lastIndexedAt: nowIso(),
-        vectorCount: chunks.length,
-        lastEstimateTokens: estimatedTokens,
-        lastEstimateCostUSD: Number(estimatedCostUSD.toFixed(8)),
-        lastEstimateChangedChunks: changedChunks.length
-      };
-
-      await this.vectorStore.recordScope(scopeInfo);
-      this.logger.event("registry_updated", {
-        scope: scope.scopeName,
-        vectorCount: chunks.length
-      });
-    }
-
-    stageEnd("finalize", finalizeStart);
 
     this.logger.info("Done.");
 
@@ -551,10 +438,8 @@ export class IndexPipeline {
       pagesProcessed: pages.length,
       chunksTotal: chunks.length,
       chunksChanged: changedChunks.length,
-      newEmbeddings,
+      documentsUpserted,
       deletes: deletes.length,
-      estimatedTokens,
-      estimatedCostUSD: Number(estimatedCostUSD.toFixed(8)),
       routeExact,
       routeBestEffort,
       stageTimingsMs

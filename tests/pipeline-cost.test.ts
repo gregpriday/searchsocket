@@ -1,22 +1,28 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
-import { createVectorStore } from "../src/vector";
-import type { EmbeddingsProvider, ResolvedSearchSocketConfig } from "../src/types";
+import type { UpstashSearchStore } from "../src/vector/upstash";
+import type { ResolvedSearchSocketConfig } from "../src/types";
 
 const tempDirs: string[] = [];
 
-class PredictableEmbeddings implements EmbeddingsProvider {
-  estimateTokens(_text: string): number {
-    return 200;
-  }
-
-  async embedTexts(texts: string[]): Promise<number[][]> {
-    return texts.map(() => [1, 0, 0]);
-  }
+function createMockStore(existingHashes = new Map<string, string>()): UpstashSearchStore {
+  return {
+    upsertChunks: vi.fn().mockResolvedValue(undefined),
+    search: vi.fn().mockResolvedValue([]),
+    deleteByIds: vi.fn().mockResolvedValue(undefined),
+    deleteScope: vi.fn().mockResolvedValue(undefined),
+    listScopes: vi.fn().mockResolvedValue([]),
+    getContentHashes: vi.fn().mockResolvedValue(existingHashes),
+    upsertPages: vi.fn().mockResolvedValue(undefined),
+    getPage: vi.fn().mockResolvedValue(null),
+    deletePages: vi.fn().mockResolvedValue(undefined),
+    health: vi.fn().mockResolvedValue({ ok: true }),
+    dropAllIndexes: vi.fn().mockResolvedValue(undefined)
+  } as unknown as UpstashSearchStore;
 }
 
 async function createFixture(): Promise<{ cwd: string; config: ResolvedSearchSocketConfig }> {
@@ -36,8 +42,6 @@ async function createFixture(): Promise<{ cwd: string; config: ResolvedSearchSoc
   const config = createDefaultConfig("searchsocket-cost");
   config.source.mode = "static-output";
   config.source.staticOutputDir = "build";
-  config.vector.turso.localPath = ".searchsocket/vectors.db";
-  config.embeddings.pricePer1kTokens = 0.5;
   config.state.dir = ".searchsocket";
 
   return { cwd, config };
@@ -47,19 +51,34 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
-describe("IndexPipeline cost estimation", () => {
-  it("uses embeddings.pricePer1kTokens when provided", async () => {
+describe("IndexPipeline documentsUpserted tracking", () => {
+  it("reports documentsUpserted for changed chunks", async () => {
     const { cwd, config } = await createFixture();
+    const store = createMockStore();
+
     const pipeline = await IndexPipeline.create({
       cwd,
       config,
-      embeddingsProvider: new PredictableEmbeddings(),
-      vectorStore: await createVectorStore(config, cwd)
+      store
+    });
+
+    const stats = await pipeline.run({ changedOnly: true });
+    expect(stats.chunksChanged).toBeGreaterThan(0);
+    expect(stats.documentsUpserted).toBe(stats.chunksChanged);
+  });
+
+  it("reports zero documentsUpserted on dry run", async () => {
+    const { cwd, config } = await createFixture();
+    const store = createMockStore();
+
+    const pipeline = await IndexPipeline.create({
+      cwd,
+      config,
+      store
     });
 
     const stats = await pipeline.run({ changedOnly: true, dryRun: true });
-    expect(stats.chunksChanged).toBe(2); // 1 summary + 1 regular
-    expect(stats.estimatedTokens).toBe(400);
-    expect(stats.estimatedCostUSD).toBe(0.2);
+    expect(stats.chunksChanged).toBeGreaterThan(0);
+    expect(stats.documentsUpserted).toBe(0);
   });
 });

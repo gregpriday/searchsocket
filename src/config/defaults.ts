@@ -50,24 +50,13 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       prependTitle: true,
       pageSummaryChunk: true
     },
-    embeddings: {
-      provider: "jina",
-      model: "jina-embeddings-v5-text-small",
-      apiKeyEnv: "JINA_API_KEY",
-      batchSize: 64,
-      concurrency: 4
+    upstash: {
+      urlEnv: "UPSTASH_SEARCH_REST_URL",
+      tokenEnv: "UPSTASH_SEARCH_REST_TOKEN"
     },
-    vector: {
-      turso: {
-        urlEnv: "TURSO_DATABASE_URL",
-        authTokenEnv: "TURSO_AUTH_TOKEN",
-        localPath: ".searchsocket/vectors.db"
-      }
-    },
-    rerank: {
-      enabled: true,
-      topN: 20,
-      model: "jina-reranker-v3"
+    search: {
+      semanticWeight: 0.75,
+      inputEnrichment: true
     },
     ranking: {
       enableIncomingLinkBoost: true,
@@ -80,7 +69,6 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       weights: {
         incomingLinks: 0.05,
         depth: 0.03,
-        rerank: 1.0,
         aggregation: 0.1
       }
     },

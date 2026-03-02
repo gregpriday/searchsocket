@@ -16,7 +16,7 @@ export interface McpServerOptions {
   httpPath?: string;
 }
 
-function createServer(engine: SearchEngine, config: ResolvedSearchSocketConfig): McpServer {
+function createServer(engine: SearchEngine): McpServer {
   const server = new McpServer({
     name: "searchsocket-mcp",
     version: "0.1.0"
@@ -26,15 +26,14 @@ function createServer(engine: SearchEngine, config: ResolvedSearchSocketConfig):
     "search",
     {
       description:
-        "Semantic site search. Returns url/title/snippet/score/routeFile for each match. Supports optional scope, pathPrefix, tags, topK, and rerank. Enable rerank for better relevance on natural-language queries.",
+        "Semantic site search powered by Upstash Search. Returns url/title/snippet/score/routeFile for each match. Supports optional scope, pathPrefix, tags, topK, and groupBy.",
       inputSchema: {
         query: z.string().min(1),
         scope: z.string().optional(),
         topK: z.number().int().positive().max(100).optional(),
         pathPrefix: z.string().optional(),
         tags: z.array(z.string()).optional(),
-        groupBy: z.enum(["page", "chunk"]).optional(),
-        rerank: z.boolean().optional().describe("Enable reranking for better relevance (uses Jina Reranker). Defaults to true when rerank is enabled in config.")
+        groupBy: z.enum(["page", "chunk"]).optional()
       }
     },
     async (input) => {
@@ -44,8 +43,7 @@ function createServer(engine: SearchEngine, config: ResolvedSearchSocketConfig):
         scope: input.scope,
         pathPrefix: input.pathPrefix,
         tags: input.tags,
-        groupBy: input.groupBy,
-        rerank: input.rerank ?? config.rerank.enabled
+        groupBy: input.groupBy
       });
 
       return {
@@ -190,11 +188,11 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<void
   });
 
   if (resolvedTransport === "http") {
-    await startHttpServer(() => createServer(engine, config), config, options);
+    await startHttpServer(() => createServer(engine), config, options);
     return;
   }
 
-  const server = createServer(engine, config);
+  const server = createServer(engine);
   const stdioTransport = new StdioServerTransport();
   await server.connect(stdioTransport);
 }
