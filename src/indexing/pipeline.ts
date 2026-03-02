@@ -34,7 +34,7 @@ import type {
  * Build a plain-text summary of a page for the page search index.
  * Combines title, description, and stripped markdown body (truncated to maxChars).
  */
-export function buildPageSummary(page: IndexedPage, maxChars = 4000): string {
+export function buildPageSummary(page: IndexedPage, maxChars = 3500): string {
   const parts: string[] = [page.title];
 
   if (page.description) {
@@ -430,30 +430,40 @@ export class IndexPipeline {
     if (!options.dryRun && changedChunks.length > 0) {
       this.logger.info(`Upserting ${changedChunks.length} chunk${changedChunks.length === 1 ? "" : "s"} to Upstash Search...`);
 
-      const docs = changedChunks.map((chunk) => ({
-        id: chunk.chunkKey,
-        content: {
-          title: chunk.title,
-          sectionTitle: chunk.sectionTitle ?? "",
-          text: buildEmbeddingText(chunk, this.config.chunking.prependTitle).slice(0, 4000),
-          url: chunk.url,
-          tags: chunk.tags.join(","),
-          headingPath: chunk.headingPath.join(" > ")
-        },
-        metadata: {
-          projectId: scope.projectId,
-          scopeName: scope.scopeName,
-          path: chunk.path,
-          snippet: chunk.snippet,
-          ordinal: chunk.ordinal,
-          contentHash: chunk.contentHash,
-          depth: chunk.depth,
-          incomingLinks: chunk.incomingLinks,
-          routeFile: chunk.routeFile,
-          description: chunk.description ?? "",
-          keywords: (chunk.keywords ?? []).join(",")
-        }
-      }));
+      // Upstash Search has a 4096-char limit on total content across all fields.
+      // Reserve space for non-text fields, then truncate text to fit.
+      const UPSTASH_CONTENT_LIMIT = 4096;
+      const FIELD_OVERHEAD = 200; // buffer for title, sectionTitle, url, tags, headingPath
+      const MAX_TEXT_CHARS = UPSTASH_CONTENT_LIMIT - FIELD_OVERHEAD;
+
+      const docs = changedChunks.map((chunk) => {
+        const title = chunk.title;
+        const sectionTitle = chunk.sectionTitle ?? "";
+        const url = chunk.url;
+        const tags = chunk.tags.join(",");
+        const headingPath = chunk.headingPath.join(" > ");
+        const otherFieldsLen = title.length + sectionTitle.length + url.length + tags.length + headingPath.length;
+        const textBudget = Math.max(500, UPSTASH_CONTENT_LIMIT - otherFieldsLen - 50);
+        const text = buildEmbeddingText(chunk, this.config.chunking.prependTitle).slice(0, textBudget);
+
+        return {
+          id: chunk.chunkKey,
+          content: { title, sectionTitle, text, url, tags, headingPath },
+          metadata: {
+            projectId: scope.projectId,
+            scopeName: scope.scopeName,
+            path: chunk.path,
+            snippet: chunk.snippet,
+            ordinal: chunk.ordinal,
+            contentHash: chunk.contentHash,
+            depth: chunk.depth,
+            incomingLinks: chunk.incomingLinks,
+            routeFile: chunk.routeFile,
+            description: chunk.description ?? "",
+            keywords: (chunk.keywords ?? []).join(",")
+          }
+        };
+      });
 
       await this.store.upsertChunks(docs, scope);
       documentsUpserted = docs.length;
