@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-03-02
+
+### Added
+
+- **Scroll-to-text navigation** — search result links now include `_sskt` (text target) and `_ssk` (section title) query params plus native `#:~:text=` fragments for smooth scroll-to-text on both SvelteKit client navigations and full page loads
+- **Cross-node text matching** — TreeWalker-based text map concatenates all visible text nodes, enabling matches that span split DOM nodes (e.g. `<em>Install</em>ation`)
+- **CSS Custom Highlight API** — non-destructive highlighting via `::highlight()` pseudo-element in modern browsers, with DOM mutation fallback for older browsers
+- **Two-pass regex matching** — strict pass requires separators between tokens; lenient fallback allows zero-width separators for adjacent DOM nodes without whitespace
+- **Dual page+chunk parallel search** — parallel vector search at both page and chunk granularity with score blending for improved relevance
+- **Reranking, score-gap trimming, and title boost** — search quality improvements with configurable ranking pipeline
+
+### Changed
+
+- **Migrated vector backend from Jina + Turso to Upstash Search** — simplified infrastructure with a single managed search service
+- Removed local markdown mirror feature
+
+### Fixed
+
+- Respect Upstash 4096-char content limit per document during indexing
+- Fixed pnpm version in CI prune workflow
+
 ## [0.4.0] - 2026-02-25
 
 ### Added
@@ -98,6 +119,7 @@ Initial public release.
 - **Request validation** with Zod schemas
 - **Rate limiting** and CORS configuration for the search API
 
+[0.5.0]: https://github.com/gregpriday/searchsocket/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/gregpriday/searchsocket/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/gregpriday/searchsocket/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/gregpriday/searchsocket/compare/v0.3.1...v0.3.2
