@@ -1,6 +1,39 @@
-import type { SearchRequest, SearchResponse, StreamSearchEvent, StreamEvent } from "./types";
+import type { SearchRequest, SearchResponse, SearchResult } from "./types";
 
-export { mergeSearchResults } from "./merge";
+/**
+ * Build a URL for a search result that includes the section title as a query
+ * parameter (`_ss`) and a Text Fragment (`#:~:text=`). When the destination
+ * page uses `searchsocketScrollToText`, the `_ss` parameter triggers a smooth
+ * scroll on SvelteKit client-side navigations. For full page loads, browsers
+ * that support Text Fragments will scroll natively.
+ *
+ * If the result has no `sectionTitle`, the original URL is returned unchanged.
+ */
+export function buildResultUrl(result: SearchResult): string {
+  if (!result.sectionTitle) {
+    return result.url;
+  }
+
+  // Split the URL preserving its original form (relative, absolute, etc.)
+  const hashIdx = result.url.indexOf("#");
+  const beforeHash = hashIdx >= 0 ? result.url.slice(0, hashIdx) : result.url;
+  const existingHash = hashIdx >= 0 ? result.url.slice(hashIdx) : "";
+
+  const queryIdx = beforeHash.indexOf("?");
+  const path = queryIdx >= 0 ? beforeHash.slice(0, queryIdx) : beforeHash;
+  const existingQuery = queryIdx >= 0 ? beforeHash.slice(queryIdx + 1) : "";
+
+  const params = new URLSearchParams(existingQuery);
+  params.set("_ss", result.sectionTitle);
+
+  // Build a Text Fragment for native browser scroll-to-text support
+  const textFragment = `:~:text=${encodeURIComponent(result.sectionTitle)}`;
+  const hash = existingHash
+    ? `${existingHash}${textFragment}`
+    : `#${textFragment}`;
+
+  return `${path}?${params.toString()}${hash}`;
+}
 
 export interface SearchClientOptions {
   endpoint?: string;
@@ -37,94 +70,6 @@ export function createSearchClient(options: SearchClientOptions = {}) {
       }
 
       return payload as SearchResponse;
-    },
-
-    async streamSearch(
-      request: SearchRequest & { stream: true; rerank: true },
-      onPhase: (event: StreamSearchEvent) => void
-    ): Promise<SearchResponse> {
-      const response = await fetchImpl(endpoint, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify(request)
-      });
-
-      if (!response.ok) {
-        let payload: unknown;
-        try {
-          payload = await response.json();
-        } catch {
-          throw new Error("Search failed");
-        }
-        const message = (payload as { error?: { message?: string } }).error?.message ?? "Search failed";
-        throw new Error(message);
-      }
-
-      const contentType = response.headers.get("content-type") ?? "";
-
-      // Fallback: server returned standard JSON (e.g. older server without streaming)
-      if (contentType.includes("application/json")) {
-        const data = (await response.json()) as SearchResponse;
-        onPhase({ phase: "initial", data });
-        return data;
-      }
-
-      // NDJSON stream
-      if (!response.body) {
-        throw new Error("Response body is not readable");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let lastResponse: SearchResponse | null = null;
-
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        let newlineIdx: number;
-        while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
-          const line = buffer.slice(0, newlineIdx).trim();
-          buffer = buffer.slice(newlineIdx + 1);
-
-          if (line.length === 0) continue;
-
-          const event = JSON.parse(line) as StreamEvent;
-
-          if (event.phase === "error") {
-            const errData = event.data as { error: { message?: string } };
-            throw new Error(errData.error.message ?? "Streaming search error");
-          }
-
-          const searchEvent = event as StreamSearchEvent;
-          onPhase(searchEvent);
-          lastResponse = searchEvent.data;
-        }
-      }
-
-      // Process any remaining data in buffer
-      const remaining = buffer.trim();
-      if (remaining.length > 0) {
-        const event = JSON.parse(remaining) as StreamEvent;
-        if (event.phase === "error") {
-          const errData = event.data as { error: { message?: string } };
-          throw new Error(errData.error.message ?? "Streaming search error");
-        }
-        const searchEvent = event as StreamSearchEvent;
-        onPhase(searchEvent);
-        lastResponse = searchEvent.data;
-      }
-
-      if (!lastResponse) {
-        throw new Error("No search results received");
-      }
-
-      return lastResponse;
     }
   };
 }

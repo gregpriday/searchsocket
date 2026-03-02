@@ -1,5 +1,5 @@
 import { matchUrlPattern } from "../utils/pattern";
-import type { ResolvedSearchSocketConfig, VectorHit } from "../types";
+import type { PageHit, ResolvedSearchSocketConfig, VectorHit } from "../types";
 
 export interface RankedHit {
   hit: VectorHit;
@@ -22,7 +22,14 @@ function nonNegativeOrZero(value: number): number {
   return Math.max(0, value);
 }
 
-export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig): RankedHit[] {
+function normalizeForTitleMatch(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+}
+
+export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig, query?: string): RankedHit[] {
+  const normalizedQuery = query ? normalizeForTitleMatch(query) : "";
+  const titleMatchWeight = config.ranking.weights.titleMatch;
+
   return hits
     .map((hit) => {
       let score = Number.isFinite(hit.score) ? hit.score : Number.NEGATIVE_INFINITY;
@@ -37,6 +44,14 @@ export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig):
         score += depthBoost * config.ranking.weights.depth;
       }
 
+      if (normalizedQuery && titleMatchWeight > 0) {
+        const normalizedTitle = normalizeForTitleMatch(hit.metadata.title);
+        if (normalizedQuery.length > 0 && normalizedTitle.length > 0 &&
+            (normalizedTitle.includes(normalizedQuery) || normalizedQuery.includes(normalizedTitle))) {
+          score += titleMatchWeight;
+        }
+      }
+
       return {
         hit,
         finalScore: Number.isFinite(score) ? score : Number.NEGATIVE_INFINITY
@@ -46,6 +61,42 @@ export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig):
       const delta = b.finalScore - a.finalScore;
       return Number.isNaN(delta) ? 0 : delta;
     });
+}
+
+export function trimByScoreGap(
+  results: PageResult[],
+  config: ResolvedSearchSocketConfig
+): PageResult[] {
+  if (results.length === 0) return results;
+
+  const threshold = config.ranking.scoreGapThreshold;
+  const minScore = config.ranking.minScore;
+
+  // Check median score — if below minScore, no strong matches
+  if (minScore > 0 && results.length > 0) {
+    const sortedScores = results.map((r) => r.pageScore).sort((a, b) => a - b);
+    const mid = Math.floor(sortedScores.length / 2);
+    const median = sortedScores.length % 2 === 0
+      ? (sortedScores[mid - 1]! + sortedScores[mid]!) / 2
+      : sortedScores[mid]!;
+    if (median < minScore) return [];
+  }
+
+  // Score-gap trimming
+  if (threshold > 0 && results.length > 1) {
+    for (let i = 1; i < results.length; i++) {
+      const prev = results[i - 1]!.pageScore;
+      const current = results[i]!.pageScore;
+      if (prev > 0) {
+        const gap = (prev - current) / prev;
+        if (gap >= threshold) {
+          return results.slice(0, i);
+        }
+      }
+    }
+  }
+
+  return results;
 }
 
 export function findPageWeight(url: string, pageWeights: Record<string, number>): number {
@@ -120,6 +171,84 @@ export function aggregateByPage(
   // 3. Sort by pageScore desc (NaN-safe)
   return pages.sort((a, b) => {
     const delta = b.pageScore - a.pageScore;
+    return Number.isNaN(delta) ? 0 : delta;
+  });
+}
+
+/**
+ * Merge page-level search results with chunk-level search results.
+ *
+ * - For chunks whose page appeared in page search: blend score = (1 - w) * chunkScore + w * pageScore
+ * - For chunks whose page did NOT appear in page search: keep original score
+ * - For pages found ONLY by page search (no matching chunks): create synthetic RankedHit entries
+ */
+export function mergePageAndChunkResults(
+  pageHits: PageHit[],
+  rankedChunks: RankedHit[],
+  config: ResolvedSearchSocketConfig
+): RankedHit[] {
+  if (pageHits.length === 0) return rankedChunks;
+
+  const w = config.search.pageSearchWeight;
+  const pageScoreMap = new Map<string, PageHit>();
+  for (const ph of pageHits) {
+    pageScoreMap.set(ph.url, ph);
+  }
+
+  // Track which page URLs have chunks
+  const pagesWithChunks = new Set<string>();
+
+  // Blend chunk scores with page scores
+  const merged: RankedHit[] = rankedChunks.map((ranked) => {
+    const url = ranked.hit.metadata.url;
+    const pageHit = pageScoreMap.get(url);
+    if (pageHit) {
+      pagesWithChunks.add(url);
+      const blended = (1 - w) * ranked.finalScore + w * pageHit.score;
+      return {
+        hit: ranked.hit,
+        finalScore: Number.isFinite(blended) ? blended : ranked.finalScore
+      };
+    }
+    return ranked;
+  });
+
+  // Create synthetic entries for pages found only by page search (no chunks)
+  for (const [url, pageHit] of pageScoreMap) {
+    if (pagesWithChunks.has(url)) continue;
+
+    const syntheticScore = pageHit.score * w;
+    const syntheticHit: VectorHit = {
+      id: `page:${url}`,
+      score: pageHit.score,
+      metadata: {
+        projectId: "",
+        scopeName: "",
+        url: pageHit.url,
+        path: pageHit.url,
+        title: pageHit.title,
+        sectionTitle: "",
+        headingPath: [],
+        snippet: pageHit.description || pageHit.title,
+        chunkText: pageHit.description || pageHit.title,
+        ordinal: 0,
+        contentHash: "",
+        depth: pageHit.depth,
+        incomingLinks: pageHit.incomingLinks,
+        routeFile: pageHit.routeFile,
+        tags: pageHit.tags
+      }
+    };
+
+    merged.push({
+      hit: syntheticHit,
+      finalScore: Number.isFinite(syntheticScore) ? syntheticScore : 0
+    });
+  }
+
+  // Re-sort by blended score descending
+  return merged.sort((a, b) => {
+    const delta = b.finalScore - a.finalScore;
     return Number.isNaN(delta) ? 0 : delta;
   });
 }

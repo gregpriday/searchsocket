@@ -23,7 +23,6 @@ describe("createDefaultConfig", () => {
     expect(config.project.id).toBe("my-project");
     expect(config.scope.mode).toBe("fixed");
     expect(config.scope.fixed).toBe("main");
-    expect(config.embeddings.model).toBe("jina-embeddings-v5-text-small");
     expect(config.chunking.maxChars).toBe(2200);
     expect(config.chunking.overlapChars).toBe(200);
     expect(config.chunking.minChars).toBe(250);
@@ -31,11 +30,24 @@ describe("createDefaultConfig", () => {
     expect(config.state.dir).toBe(".searchsocket");
   });
 
-  it("has turso defaults", () => {
+  it("has upstash defaults", () => {
     const config = createDefaultConfig("example");
-    expect(config.vector.turso.urlEnv).toBe("TURSO_DATABASE_URL");
-    expect(config.vector.turso.authTokenEnv).toBe("TURSO_AUTH_TOKEN");
-    expect(config.vector.turso.localPath).toBe(".searchsocket/vectors.db");
+    expect(config.upstash.urlEnv).toBe("UPSTASH_SEARCH_REST_URL");
+    expect(config.upstash.tokenEnv).toBe("UPSTASH_SEARCH_REST_TOKEN");
+  });
+
+  it("has search defaults", () => {
+    const config = createDefaultConfig("example");
+    expect(config.search.semanticWeight).toBe(0.75);
+    expect(config.search.inputEnrichment).toBe(true);
+  });
+
+  it("has ranking weights without rerank", () => {
+    const config = createDefaultConfig("example");
+    expect(config.ranking.weights.incomingLinks).toBe(0.05);
+    expect(config.ranking.weights.depth).toBe(0.03);
+    expect(config.ranking.weights.aggregation).toBe(0.1);
+    expect(config.ranking.weights).not.toHaveProperty("rerank");
   });
 });
 
@@ -48,10 +60,10 @@ describe("mergeConfig", () => {
       chunking: { maxChars: 3000 }
     });
 
-    expect(merged.vector.turso.urlEnv).toBe("TURSO_DATABASE_URL");
+    expect(merged.upstash.urlEnv).toBe("UPSTASH_SEARCH_REST_URL");
     expect(merged.chunking.maxChars).toBe(3000);
-    expect(merged.chunking.overlapChars).toBe(200); // default preserved
-    expect(merged.embeddings.model).toBe("jina-embeddings-v5-text-small");
+    expect(merged.chunking.overlapChars).toBe(200);
+    expect(merged.search.semanticWeight).toBe(0.75);
   });
 
   it("infers project id from package.json name", async () => {
@@ -185,18 +197,57 @@ describe("mergeConfig", () => {
     expect(merged.source.build?.previewTimeout).toBe(30000);
   });
 
-  it("merges turso overrides", async () => {
+  it("merges upstash overrides", async () => {
     const dir = await makeTempDir();
     await fs.mkdir(path.join(dir, "build"), { recursive: true });
 
     const merged = mergeConfig(dir, {
-      vector: {
-        turso: { localPath: "custom/vectors.db" }
+      upstash: { urlEnv: "CUSTOM_UPSTASH_URL" }
+    });
+
+    expect(merged.upstash.urlEnv).toBe("CUSTOM_UPSTASH_URL");
+    expect(merged.upstash.tokenEnv).toBe("UPSTASH_SEARCH_REST_TOKEN");
+  });
+
+  it("merges search overrides", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    const merged = mergeConfig(dir, {
+      search: { semanticWeight: 0.5 }
+    });
+
+    expect(merged.search.semanticWeight).toBe(0.5);
+    expect(merged.search.inputEnrichment).toBe(true);
+  });
+
+  it("allows setting upstash url and token directly", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    const merged = mergeConfig(dir, {
+      upstash: {
+        url: "https://my-index.upstash.io",
+        token: "my-token"
       }
     });
 
-    expect(merged.vector.turso.localPath).toBe("custom/vectors.db");
-    expect(merged.vector.turso.urlEnv).toBe("TURSO_DATABASE_URL"); // default preserved
+    expect(merged.upstash.url).toBe("https://my-index.upstash.io");
+    expect(merged.upstash.token).toBe("my-token");
+    expect(merged.upstash.urlEnv).toBe("UPSTASH_SEARCH_REST_URL");
+    expect(merged.upstash.tokenEnv).toBe("UPSTASH_SEARCH_REST_TOKEN");
+  });
+
+  it("allows disabling input enrichment", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    const merged = mergeConfig(dir, {
+      search: { inputEnrichment: false }
+    });
+
+    expect(merged.search.inputEnrichment).toBe(false);
+    expect(merged.search.semanticWeight).toBe(0.75);
   });
 });
 
@@ -221,13 +272,13 @@ describe("mergeConfigServerless", () => {
     const config = mergeConfigServerless({
       project: { id: "my-site" },
       source: { mode: "static-output" },
-      embeddings: { apiKeyEnv: "JINA_API_KEY" }
+      upstash: { urlEnv: "CUSTOM_UPSTASH_URL" }
     });
 
     expect(config.project.id).toBe("my-site");
     expect(config.source.mode).toBe("static-output");
-    expect(config.embeddings.apiKeyEnv).toBe("JINA_API_KEY");
-    expect(config.vector.turso.urlEnv).toBe("TURSO_DATABASE_URL");
+    expect(config.upstash.urlEnv).toBe("CUSTOM_UPSTASH_URL");
+    expect(config.upstash.tokenEnv).toBe("UPSTASH_SEARCH_REST_TOKEN");
   });
 });
 
@@ -237,10 +288,12 @@ describe("loadConfig", () => {
     await expect(loadConfig({ cwd: dir })).rejects.toThrow("not found");
   });
 
-  it("falls back to turso defaults when allowMissing is true", async () => {
+  it("falls back to upstash defaults when allowMissing is true", async () => {
     const dir = await makeTempDir();
     const config = await loadConfig({ cwd: dir, allowMissing: true });
-    expect(config.vector.turso.urlEnv).toBe("TURSO_DATABASE_URL");
-    expect(config.vector.turso.localPath).toBe(".searchsocket/vectors.db");
+    expect(config.upstash.urlEnv).toBe("UPSTASH_SEARCH_REST_URL");
+    expect(config.upstash.tokenEnv).toBe("UPSTASH_SEARCH_REST_TOKEN");
+    expect(config.search.semanticWeight).toBe(0.75);
+    expect(config.search.inputEnrichment).toBe(true);
   });
 });

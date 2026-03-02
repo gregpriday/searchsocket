@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { rankHits, aggregateByPage, findPageWeight } from "../src/search/ranking";
-import type { RankedHit } from "../src/search/ranking";
+import { rankHits, aggregateByPage, findPageWeight, trimByScoreGap, mergePageAndChunkResults } from "../src/search/ranking";
+import type { RankedHit, PageResult } from "../src/search/ranking";
 import { createDefaultConfig } from "../src/config/defaults";
-import type { VectorHit } from "../src/types";
+import type { PageHit, VectorHit } from "../src/types";
 
 function makeHit(overrides: Partial<VectorHit["metadata"]> & { score: number }): VectorHit {
   const { score, ...meta } = overrides;
@@ -21,7 +21,6 @@ function makeHit(overrides: Partial<VectorHit["metadata"]> & { score: number }):
       chunkText: "full chunk text",
       ordinal: 0,
       contentHash: "hash",
-      modelId: "jina-embeddings-v3",
       depth: 1,
       incomingLinks: 0,
       routeFile: "src/routes/+page.svelte",
@@ -151,7 +150,6 @@ function makeRankedHit(url: string, finalScore: number, overrides?: Partial<Vect
         chunkText: "full chunk text",
         ordinal: 0,
         contentHash: "hash",
-        modelId: "jina-embeddings-v3",
         depth: 1,
         incomingLinks: 0,
         routeFile: overrides?.routeFile ?? "src/routes/+page.svelte",
@@ -338,5 +336,299 @@ describe("findPageWeight", () => {
   it("root '/' is exact-only, not a global prefix", () => {
     expect(findPageWeight("/", { "/": 2.0 })).toBe(2.0);
     expect(findPageWeight("/about", { "/": 2.0 })).toBe(1);
+  });
+});
+
+describe("title-match boost", () => {
+  it("boosts hits whose title matches the query", () => {
+    const config = createDefaultConfig("test");
+    const hits = [
+      makeHit({ score: 0.7, url: "/recipes", title: "Recipes" }),
+      makeHit({ score: 0.75, url: "/about", title: "About Us" })
+    ];
+
+    const ranked = rankHits(hits, config, "recipes");
+    // /recipes should be boosted above /about despite lower base score
+    expect(ranked[0]?.hit.metadata.url).toBe("/recipes");
+  });
+
+  it("matches when query is substring of title", () => {
+    const config = createDefaultConfig("test");
+    const hits = [
+      makeHit({ score: 0.7, url: "/getting-started", title: "Getting Started Guide" }),
+      makeHit({ score: 0.75, url: "/faq", title: "FAQ" })
+    ];
+
+    const ranked = rankHits(hits, config, "getting started");
+    expect(ranked[0]?.hit.metadata.url).toBe("/getting-started");
+  });
+
+  it("matches when title is substring of query", () => {
+    const config = createDefaultConfig("test");
+    const hits = [
+      makeHit({ score: 0.7, url: "/faq", title: "FAQ" }),
+      makeHit({ score: 0.75, url: "/about", title: "About Us" })
+    ];
+
+    const ranked = rankHits(hits, config, "faq page");
+    expect(ranked[0]?.hit.metadata.url).toBe("/faq");
+  });
+
+  it("ignores case and punctuation in title matching", () => {
+    const config = createDefaultConfig("test");
+    const hits = [
+      makeHit({ score: 0.7, url: "/api-ref", title: "API Reference!" }),
+      makeHit({ score: 0.75, url: "/other", title: "Other Page" })
+    ];
+
+    const ranked = rankHits(hits, config, "api reference");
+    expect(ranked[0]?.hit.metadata.url).toBe("/api-ref");
+  });
+
+  it("does not boost when query does not match title", () => {
+    const config = createDefaultConfig("test");
+    const hits = [
+      makeHit({ score: 0.7, url: "/recipes", title: "Recipes" }),
+      makeHit({ score: 0.75, url: "/about", title: "About Us" })
+    ];
+
+    const ranked = rankHits(hits, config, "deployment guide");
+    // No title match, so /about stays on top with higher base score
+    expect(ranked[0]?.hit.metadata.url).toBe("/about");
+  });
+
+  it("does not apply boost when no query is provided", () => {
+    const config = createDefaultConfig("test");
+    const hits = [
+      makeHit({ score: 0.7, url: "/recipes", title: "Recipes" }),
+      makeHit({ score: 0.75, url: "/about", title: "About Us" })
+    ];
+
+    const ranked = rankHits(hits, config);
+    expect(ranked[0]?.hit.metadata.url).toBe("/about");
+  });
+});
+
+describe("trimByScoreGap", () => {
+  const config = createDefaultConfig("test");
+
+  function makePageResult(url: string, pageScore: number): PageResult {
+    return {
+      url,
+      title: "Page",
+      routeFile: "src/routes/+page.svelte",
+      pageScore,
+      bestChunk: makeRankedHit(url, pageScore),
+      matchingChunks: [makeRankedHit(url, pageScore)]
+    };
+  }
+
+  it("trims results after a large score gap", () => {
+    const pages: PageResult[] = [
+      makePageResult("/best", 0.9),
+      makePageResult("/good", 0.85),
+      makePageResult("/weak", 0.3)  // 65% drop from 0.85 → should be trimmed
+    ];
+
+    const trimmed = trimByScoreGap(pages, config);
+    expect(trimmed.length).toBe(2);
+    expect(trimmed.map((p) => p.url)).toEqual(["/best", "/good"]);
+  });
+
+  it("keeps all results when scores are close", () => {
+    const pages: PageResult[] = [
+      makePageResult("/a", 0.9),
+      makePageResult("/b", 0.85),
+      makePageResult("/c", 0.8),
+      makePageResult("/d", 0.75)
+    ];
+
+    const trimmed = trimByScoreGap(pages, config);
+    expect(trimmed.length).toBe(4);
+  });
+
+  it("returns empty when median score is below minScore", () => {
+    const pages: PageResult[] = [
+      makePageResult("/a", 0.4),
+      makePageResult("/b", 0.2),
+      makePageResult("/c", 0.1)
+    ];
+
+    const trimmed = trimByScoreGap(pages, config);
+    expect(trimmed.length).toBe(0);
+  });
+
+  it("returns results when median is above minScore", () => {
+    const pages: PageResult[] = [
+      makePageResult("/a", 0.9),
+      makePageResult("/b", 0.8),
+      makePageResult("/c", 0.7)
+    ];
+
+    const trimmed = trimByScoreGap(pages, config);
+    expect(trimmed.length).toBe(3);
+  });
+
+  it("returns empty array for empty input", () => {
+    const trimmed = trimByScoreGap([], config);
+    expect(trimmed.length).toBe(0);
+  });
+
+  it("does not trim when scoreGapThreshold is 0", () => {
+    const noGapConfig = createDefaultConfig("test");
+    noGapConfig.ranking.scoreGapThreshold = 0;
+
+    const pages: PageResult[] = [
+      makePageResult("/a", 0.9),
+      makePageResult("/b", 0.1)  // huge gap but trimming disabled
+    ];
+
+    const trimmed = trimByScoreGap(pages, noGapConfig);
+    // Median is 0.5 which is above minScore 0.3, and gap trimming disabled
+    expect(trimmed.length).toBe(2);
+  });
+
+  it("handles single result", () => {
+    const pages: PageResult[] = [makePageResult("/only", 0.8)];
+    const trimmed = trimByScoreGap(pages, config);
+    expect(trimmed.length).toBe(1);
+  });
+});
+
+function makePageHit(url: string, score: number, overrides?: Partial<PageHit>): PageHit {
+  return {
+    id: url,
+    score,
+    title: overrides?.title ?? "Page",
+    url,
+    description: overrides?.description ?? "",
+    tags: overrides?.tags ?? [],
+    depth: overrides?.depth ?? 1,
+    incomingLinks: overrides?.incomingLinks ?? 0,
+    routeFile: overrides?.routeFile ?? "src/routes/+page.svelte"
+  };
+}
+
+describe("mergePageAndChunkResults", () => {
+  const config = createDefaultConfig("test");
+
+  it("blends chunk scores with page scores for matching pages", () => {
+    const pageHits: PageHit[] = [
+      makePageHit("/home", 0.9)
+    ];
+    const chunks: RankedHit[] = [
+      makeRankedHit("/home", 0.8),
+      makeRankedHit("/about", 0.7)
+    ];
+
+    const merged = mergePageAndChunkResults(pageHits, chunks, config);
+
+    // /home chunk should have blended score: (1 - 0.3) * 0.8 + 0.3 * 0.9 = 0.56 + 0.27 = 0.83
+    const homeChunk = merged.find((r) => r.hit.metadata.url === "/home");
+    expect(homeChunk).toBeDefined();
+    expect(homeChunk!.finalScore).toBeCloseTo(0.83, 5);
+
+    // /about chunk should keep original score
+    const aboutChunk = merged.find((r) => r.hit.metadata.url === "/about");
+    expect(aboutChunk).toBeDefined();
+    expect(aboutChunk!.finalScore).toBe(0.7);
+  });
+
+  it("creates synthetic entries for page-only results", () => {
+    const pageHits: PageHit[] = [
+      makePageHit("/new-page", 0.85, { title: "New Page", description: "A new page" })
+    ];
+    const chunks: RankedHit[] = [
+      makeRankedHit("/other", 0.7)
+    ];
+
+    const merged = mergePageAndChunkResults(pageHits, chunks, config);
+
+    expect(merged.length).toBe(2);
+    const synthetic = merged.find((r) => r.hit.metadata.url === "/new-page");
+    expect(synthetic).toBeDefined();
+    // Synthetic score = pageScore * w = 0.85 * 0.3 = 0.255
+    expect(synthetic!.finalScore).toBeCloseTo(0.255, 5);
+    expect(synthetic!.hit.metadata.title).toBe("New Page");
+    expect(synthetic!.hit.metadata.snippet).toBe("A new page");
+  });
+
+  it("does not create synthetic entry when page has chunks", () => {
+    const pageHits: PageHit[] = [
+      makePageHit("/home", 0.9)
+    ];
+    const chunks: RankedHit[] = [
+      makeRankedHit("/home", 0.8)
+    ];
+
+    const merged = mergePageAndChunkResults(pageHits, chunks, config);
+
+    // Only one entry (the blended chunk), no synthetic
+    const homeEntries = merged.filter((r) => r.hit.metadata.url === "/home");
+    expect(homeEntries.length).toBe(1);
+  });
+
+  it("returns chunks unchanged when pageHits is empty", () => {
+    const chunks: RankedHit[] = [
+      makeRankedHit("/a", 0.9),
+      makeRankedHit("/b", 0.7)
+    ];
+
+    const merged = mergePageAndChunkResults([], chunks, config);
+
+    expect(merged.length).toBe(2);
+    expect(merged[0]!.finalScore).toBe(0.9);
+    expect(merged[1]!.finalScore).toBe(0.7);
+  });
+
+  it("re-sorts by blended score", () => {
+    const pageHits: PageHit[] = [
+      makePageHit("/boosted", 1.0)  // high page score will boost this chunk
+    ];
+    const chunks: RankedHit[] = [
+      makeRankedHit("/top", 0.9),
+      makeRankedHit("/boosted", 0.7)
+    ];
+
+    const merged = mergePageAndChunkResults(pageHits, chunks, config);
+
+    // /boosted: (1 - 0.3) * 0.7 + 0.3 * 1.0 = 0.49 + 0.3 = 0.79
+    // /top: 0.9 (unchanged)
+    expect(merged[0]!.hit.metadata.url).toBe("/top");
+    expect(merged[1]!.hit.metadata.url).toBe("/boosted");
+  });
+
+  it("handles non-finite scores gracefully", () => {
+    const pageHits: PageHit[] = [
+      makePageHit("/bad", Number.NaN)
+    ];
+    const chunks: RankedHit[] = [
+      makeRankedHit("/bad", 0.8)
+    ];
+
+    const merged = mergePageAndChunkResults(pageHits, chunks, config);
+
+    // When blend produces NaN, should fall back to original score
+    const result = merged.find((r) => r.hit.metadata.url === "/bad");
+    expect(result).toBeDefined();
+    expect(Number.isFinite(result!.finalScore)).toBe(true);
+    expect(result!.finalScore).toBe(0.8);
+  });
+
+  it("respects custom pageSearchWeight", () => {
+    const customConfig = createDefaultConfig("test");
+    customConfig.search.pageSearchWeight = 0.5;
+
+    const pageHits: PageHit[] = [
+      makePageHit("/home", 1.0)
+    ];
+    const chunks: RankedHit[] = [
+      makeRankedHit("/home", 0.6)
+    ];
+
+    const merged = mergePageAndChunkResults(pageHits, chunks, customConfig);
+
+    // Blended: (1 - 0.5) * 0.6 + 0.5 * 1.0 = 0.3 + 0.5 = 0.8
+    expect(merged[0]!.finalScore).toBeCloseTo(0.8, 5);
   });
 });

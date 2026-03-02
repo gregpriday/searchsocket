@@ -1,22 +1,28 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
-import { createVectorStore } from "../src/vector";
-import type { EmbeddingsProvider, ResolvedSearchSocketConfig } from "../src/types";
+import type { UpstashSearchStore } from "../src/vector/upstash";
+import type { ResolvedSearchSocketConfig } from "../src/types";
 
 const tempDirs: string[] = [];
 
-class TinyEmbeddings implements EmbeddingsProvider {
-  estimateTokens(_text: string): number {
-    return 50;
-  }
-
-  async embedTexts(texts: string[]): Promise<number[][]> {
-    return texts.map(() => [1, 0, 0]);
-  }
+function createMockStore(): UpstashSearchStore {
+  return {
+    upsertChunks: vi.fn().mockResolvedValue(undefined),
+    search: vi.fn().mockResolvedValue([]),
+    deleteByIds: vi.fn().mockResolvedValue(undefined),
+    deleteScope: vi.fn().mockResolvedValue(undefined),
+    listScopes: vi.fn().mockResolvedValue([]),
+    getContentHashes: vi.fn().mockResolvedValue(new Map()),
+    upsertPages: vi.fn().mockResolvedValue(undefined),
+    getPage: vi.fn().mockResolvedValue(null),
+    deletePages: vi.fn().mockResolvedValue(undefined),
+    health: vi.fn().mockResolvedValue({ ok: true }),
+    dropAllIndexes: vi.fn().mockResolvedValue(undefined)
+  } as unknown as UpstashSearchStore;
 }
 
 async function createFixture(): Promise<{ cwd: string; config: ResolvedSearchSocketConfig }> {
@@ -48,7 +54,6 @@ async function createFixture(): Promise<{ cwd: string; config: ResolvedSearchSoc
   const config = createDefaultConfig("searchsocket-pipeline-limits");
   config.source.mode = "static-output";
   config.source.staticOutputDir = "build";
-  config.vector.turso.localPath = ".searchsocket/vectors.db";
   config.state.dir = ".searchsocket";
 
   return { cwd, config };
@@ -65,8 +70,7 @@ describe("IndexPipeline maxChunks limits", () => {
     const pipeline = await IndexPipeline.create({
       cwd,
       config,
-      embeddingsProvider: new TinyEmbeddings(),
-      vectorStore: await createVectorStore(config, cwd)
+      store: createMockStore()
     });
 
     const stats = await pipeline.run({
@@ -78,6 +82,5 @@ describe("IndexPipeline maxChunks limits", () => {
     expect(stats.pagesProcessed).toBe(1);
     expect(stats.chunksTotal).toBe(0);
     expect(stats.chunksChanged).toBe(0);
-    expect(stats.estimatedTokens).toBe(0);
   });
 });

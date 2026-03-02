@@ -10,14 +10,14 @@ import { writeMinimalConfig, loadConfig, mergeConfig } from "./config/load";
 import { Logger } from "./core/logger";
 import { resolveScope } from "./core/scope";
 import { ensureStateDirs } from "./core/state";
-import { createEmbeddingsProvider } from "./embeddings";
 import { SearchSocketError } from "./errors";
 import { IndexPipeline } from "./indexing/pipeline";
 import { runMcpServer } from "./mcp/server";
 import { SearchEngine } from "./search/engine";
-import { createVectorStore } from "./vector";
+import { createUpstashStore } from "./vector";
 import { sanitizeScopeName } from "./utils/text";
-import type { IndexStats, ResolvedSearchSocketConfig, Scope, ScopeInfo, VectorStore } from "./types";
+import type { IndexStats, ResolvedSearchSocketConfig, Scope, ScopeInfo } from "./types";
+import type { UpstashSearchStore } from "./vector/upstash";
 
 interface RootCommandOptions {
   cwd?: string;
@@ -61,18 +61,12 @@ function parseDurationMs(value: string): number {
   }
 }
 
-function formatUsd(value: number): string {
-  return `$${value.toFixed(6)}`;
-}
-
 function printIndexSummary(stats: IndexStats): void {
   process.stdout.write(`pages processed: ${stats.pagesProcessed}\n`);
   process.stdout.write(`chunks total: ${stats.chunksTotal}\n`);
   process.stdout.write(`chunks changed: ${stats.chunksChanged}\n`);
-  process.stdout.write(`embeddings created: ${stats.newEmbeddings}\n`);
+  process.stdout.write(`documents upserted: ${stats.documentsUpserted}\n`);
   process.stdout.write(`deletes: ${stats.deletes}\n`);
-  process.stdout.write(`estimated tokens: ${stats.estimatedTokens}\n`);
-  process.stdout.write(`estimated cost (USD): ${formatUsd(stats.estimatedCostUSD)}\n`);
   process.stdout.write(`route mapping: ${stats.routeExact} exact, ${stats.routeBestEffort} best-effort\n`);
   process.stdout.write("stage timings (ms):\n");
   for (const [stage, ms] of Object.entries(stats.stageTimingsMs)) {
@@ -94,7 +88,6 @@ function collectWatchPaths(config: ResolvedSearchSocketConfig, cwd: string): str
   }
 
   if (config.source.mode === "crawl") {
-    // crawl mode has no local source files; route files still trigger reindex
     paths.push("searchsocket.config.ts");
   }
 
@@ -115,9 +108,6 @@ function ensureStateDir(cwd: string): string {
 function ensureGitignore(cwd: string): void {
   const gitignorePath = path.join(cwd, ".gitignore");
   const entries = [
-    ".searchsocket/vectors.db",
-    ".searchsocket/vectors.db-shm",
-    ".searchsocket/vectors.db-wal",
     ".searchsocket/manifest.json",
     ".searchsocket/registry.json"
   ];
@@ -278,12 +268,12 @@ program
 
 program
   .command("index")
-  .description("Index site content into markdown mirror + vector store")
+  .description("Index site content into Upstash Search")
   .option("--scope <name>", "scope override")
   .option("--changed-only", "only process changed chunks", true)
   .option("--no-changed-only", "re-index regardless of previous manifest")
-  .option("--force", "force full mirror rebuild and re-upsert", false)
-  .option("--dry-run", "compute plan and cost, no API writes", false)
+  .option("--force", "force full rebuild", false)
+  .option("--dry-run", "compute plan, no writes", false)
   .option("--source <mode>", "source mode override: static-output|crawl|content-files|build")
   .option("--max-pages <n>", "limit pages processed")
   .option("--max-chunks <n>", "limit chunks processed")
@@ -312,7 +302,7 @@ program
 
 program
   .command("status")
-  .description("Show scope, indexing state, backend health, and recent cost estimate")
+  .description("Show scope, indexing state, and backend health")
   .option("--scope <name>", "scope override")
   .action(async (opts, command) => {
     const rootOpts = getRootOptions(command);
@@ -321,54 +311,45 @@ program
     const config = await loadConfig({ cwd, configPath: rootOpts?.config });
     const scope = resolveScope(config, opts.scope);
 
-    let vectorStore: VectorStore;
+    let store: UpstashSearchStore;
     let health: { ok: boolean; details?: string } = { ok: false, details: "not checked" };
     try {
-      vectorStore = await createVectorStore(config, cwd);
-      health = await vectorStore.health();
+      store = await createUpstashStore(config);
+      health = await store.health();
     } catch (error) {
       health = {
         ok: false,
         details: error instanceof Error ? error.message : "unknown error"
       };
       process.stdout.write(`project: ${config.project.id}\n`);
-      process.stdout.write(`vector health: error (${health.details})\n`);
+      process.stdout.write(`backend health: error (${health.details})\n`);
       process.exitCode = 1;
       return;
     }
 
     let scopeRegistry: ScopeInfo[] = [];
     let scopeInfo: ScopeInfo | undefined;
-    let hashes: Map<string, string> = new Map();
 
     try {
-      scopeRegistry = await vectorStore.listScopes(config.project.id);
+      scopeRegistry = await store.listScopes(config.project.id);
       scopeInfo = scopeRegistry.find((entry) => entry.scopeName === scope.scopeName);
-      hashes = await vectorStore.getContentHashes(scope);
     } catch (error) {
       process.stdout.write(`project: ${config.project.id}\n`);
       process.stdout.write(`resolved scope: ${scope.scopeName}\n`);
-      process.stdout.write(`vector health: error (${error instanceof Error ? error.message : "unknown error"})\n`);
+      process.stdout.write(`backend health: error (${error instanceof Error ? error.message : "unknown error"})\n`);
       process.exitCode = 1;
       return;
     }
 
     process.stdout.write(`project: ${config.project.id}\n`);
     process.stdout.write(`resolved scope: ${scope.scopeName}\n`);
-    process.stdout.write(`embedding model: ${config.embeddings.model}\n`);
-    const tursoUrl = process.env[config.vector.turso.urlEnv];
-    const vectorMode = tursoUrl ? `remote (${tursoUrl})` : `local (${config.vector.turso.localPath})`;
-    process.stdout.write(`vector backend: turso/libsql (${vectorMode})\n`);
-    process.stdout.write(`vector health: ${health.ok ? "ok" : `error (${health.details ?? "n/a"})`}\n`);
+    process.stdout.write(`backend: upstash-search\n`);
+    process.stdout.write(`backend health: ${health.ok ? "ok" : `error (${health.details ?? "n/a"})`}\n`);
 
     if (scopeInfo) {
       process.stdout.write(`last indexed (${scope.scopeName}): ${scopeInfo.lastIndexedAt ?? "never"}\n`);
-      process.stdout.write(`tracked chunks: ${hashes.size}\n`);
-      if (scopeInfo.lastEstimateTokens != null) {
-        process.stdout.write(`last estimated tokens: ${scopeInfo.lastEstimateTokens}\n`);
-      }
-      if (scopeInfo.lastEstimateCostUSD != null) {
-        process.stdout.write(`last estimated cost: ${formatUsd(scopeInfo.lastEstimateCostUSD)}\n`);
+      if (scopeInfo.documentCount != null) {
+        process.stdout.write(`documents: ${scopeInfo.documentCount}\n`);
       }
     } else {
       process.stdout.write(`last indexed (${scope.scopeName}): never\n`);
@@ -378,7 +359,7 @@ program
       process.stdout.write("\nregistry scopes:\n");
       for (const item of scopeRegistry) {
         process.stdout.write(
-          `  - ${item.scopeName} model=${item.modelId} lastIndexedAt=${item.lastIndexedAt} vectors=${item.vectorCount ?? "unknown"}\n`
+          `  - ${item.scopeName} lastIndexedAt=${item.lastIndexedAt} documents=${item.documentCount ?? "unknown"}\n`
         );
       }
     }
@@ -472,24 +453,23 @@ program
 
 program
   .command("clean")
-  .description("Delete local state and optionally delete remote vectors for a scope")
+  .description("Delete local state and optionally delete remote indexes for a scope")
   .option("--scope <name>", "scope override")
-  .option("--remote", "delete remote scope vectors", false)
+  .option("--remote", "delete remote scope indexes", false)
   .action(async (opts, command) => {
     const rootOpts = getRootOptions(command);
     const cwd = path.resolve(rootOpts?.cwd ?? process.cwd());
 
     const config = await loadConfig({ cwd, configPath: rootOpts?.config });
-    const scope = resolveScope(config, opts.scope);
 
     const statePath = path.join(cwd, config.state.dir);
     await fsp.rm(statePath, { recursive: true, force: true });
     process.stdout.write(`deleted local state directory: ${statePath}\n`);
 
     if (opts.remote) {
-      const vectorStore = await createVectorStore(config, cwd);
-      await vectorStore.dropAllTables();
-      process.stdout.write(`dropped all remote tables (chunks, registry, pages)\n`);
+      const store = await createUpstashStore(config);
+      await store.dropAllIndexes(config.project.id);
+      process.stdout.write(`dropped all remote indexes for project ${config.project.id}\n`);
     }
   });
 
@@ -506,20 +486,20 @@ program
     const config = await loadConfig({ cwd, configPath: rootOpts?.config });
     const baseScope = resolveScope(config);
 
-    let vectorStore: VectorStore;
+    let store: UpstashSearchStore;
     let scopes: ScopeInfo[];
     try {
-      vectorStore = await createVectorStore(config, cwd);
-      scopes = await vectorStore.listScopes(config.project.id);
+      store = await createUpstashStore(config);
+      scopes = await store.listScopes(config.project.id);
     } catch (error) {
       process.stderr.write(
-        `error: failed to access Turso vector store: ${error instanceof Error ? error.message : String(error)}\n`
+        `error: failed to access Upstash Search: ${error instanceof Error ? error.message : String(error)}\n`
       );
       process.exitCode = 1;
       return;
     }
 
-    process.stdout.write(`using remote registry\n`);
+    process.stdout.write(`using Upstash Search\n`);
 
     let keepScopes = new Set<string>();
     if (opts.scopesFile) {
@@ -546,7 +526,7 @@ program
       }
 
       let staleByTtl = false;
-      if (olderThanMs) {
+      if (olderThanMs && entry.lastIndexedAt !== "unknown") {
         staleByTtl = now - Date.parse(entry.lastIndexedAt) > olderThanMs;
       }
 
@@ -589,7 +569,7 @@ program
       };
 
       try {
-        await vectorStore.deleteScope(scope);
+        await store.deleteScope(scope);
         deleted += 1;
       } catch (error) {
         process.stdout.write(
@@ -626,21 +606,18 @@ program
     }
 
     if (config) {
-      const embKey = process.env[config.embeddings.apiKeyEnv];
+      const upstashUrl = config.upstash.url ?? process.env[config.upstash.urlEnv];
+      const upstashToken = config.upstash.token ?? process.env[config.upstash.tokenEnv];
       checks.push({
-        name: `env ${config.embeddings.apiKeyEnv}`,
-        ok: Boolean(embKey),
-        details: embKey ? undefined : "missing"
+        name: `env ${config.upstash.urlEnv}`,
+        ok: Boolean(upstashUrl),
+        details: upstashUrl ? undefined : "missing"
       });
-
-      {
-        const tursoUrl = process.env[config.vector.turso.urlEnv];
-        checks.push({
-          name: "turso/libsql",
-          ok: true,
-          details: tursoUrl ? `remote: ${tursoUrl}` : `local file: ${config.vector.turso.localPath}`
-        });
-      }
+      checks.push({
+        name: `env ${config.upstash.tokenEnv}`,
+        ok: Boolean(upstashToken),
+        details: upstashToken ? undefined : "missing"
+      });
 
       // Validate source mode prerequisites
       if (config.source.mode === "static-output") {
@@ -700,58 +677,21 @@ program
         }
       }
 
+      let store: UpstashSearchStore | null = null;
       try {
-        const provider = createEmbeddingsProvider(config);
-        await provider.embedTexts(["searchsocket doctor ping"], config.embeddings.model);
-        checks.push({ name: "embedding provider connectivity", ok: true });
-      } catch (error) {
-        checks.push({
-          name: "embedding provider connectivity",
-          ok: false,
-          details: error instanceof Error ? error.message : "unknown error"
-        });
-      }
-
-      let store: VectorStore | null = null;
-      try {
-        store = await createVectorStore(config, cwd);
+        store = await createUpstashStore(config);
         const health = await store.health();
         checks.push({
-          name: "vector backend connectivity",
+          name: "upstash search connectivity",
           ok: health.ok,
           details: health.details
         });
       } catch (error) {
         checks.push({
-          name: "vector backend connectivity",
+          name: "upstash search connectivity",
           ok: false,
           details: error instanceof Error ? error.message : "unknown error"
         });
-      }
-
-      if (store) {
-        try {
-          const testScope: Scope = {
-            projectId: config.project.id,
-            scopeName: "_searchsocket_doctor_probe",
-            scopeId: `${config.project.id}:_searchsocket_doctor_probe`
-          };
-          await store.recordScope({
-            projectId: testScope.projectId,
-            scopeName: testScope.scopeName,
-            modelId: config.embeddings.model,
-            lastIndexedAt: new Date().toISOString(),
-            vectorCount: 0
-          });
-          await store.deleteScope(testScope);
-          checks.push({ name: "vector backend write permission", ok: true });
-        } catch (error) {
-          checks.push({
-            name: "vector backend write permission",
-            ok: false,
-            details: error instanceof Error ? error.message : "write test failed"
-          });
-        }
       }
 
       try {
@@ -809,12 +749,11 @@ program
 
 program
   .command("search")
-  .description("Quick local CLI search against indexed vectors")
+  .description("Quick CLI search against Upstash Search")
   .requiredOption("--q <query>", "search query")
   .option("--scope <name>", "scope override")
   .option("--top-k <n>", "top K results", "10")
   .option("--path-prefix <prefix>", "path prefix filter")
-  .option("--rerank", "enable configured reranker", false)
   .action(async (opts, command) => {
     const rootOpts = getRootOptions(command);
     const cwd = path.resolve(rootOpts?.cwd ?? process.cwd());
@@ -828,19 +767,14 @@ program
       q: opts.q,
       scope: opts.scope,
       topK: parsePositiveInt(opts.topK, "--top-k"),
-      pathPrefix: opts.pathPrefix,
-      rerank: opts.rerank
+      pathPrefix: opts.pathPrefix
     });
 
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   });
 
 async function main(): Promise<void> {
-  // Load .env from working directory before any config/factory calls.
-  // process.env values take precedence (dotenv's default).
-  // Only runs in CLI — library imports (searchsocketHandle, etc.) are not affected.
   dotenvConfig({ path: path.resolve(process.cwd(), ".env") });
-
   await program.parseAsync(process.argv);
 }
 

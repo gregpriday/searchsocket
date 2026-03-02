@@ -52,32 +52,12 @@ function shouldRunAutoIndex(options: SearchSocketAutoIndexOptions): boolean {
   return false;
 }
 
-export function searchsocketViteConfig(): MinimalVitePlugin {
-  return {
-    name: "searchsocket:config",
-    config() {
-      return {
-        ssr: {
-          external: ["@libsql/client", "libsql"]
-        }
-      };
-    }
-  };
-}
-
 export function searchsocketVitePlugin(options: SearchSocketAutoIndexOptions = {}): MinimalVitePlugin {
   let executed = false;
   let running = false;
 
   return {
     name: "searchsocket:auto-index",
-    config() {
-      return {
-        ssr: {
-          external: ["@libsql/client", "libsql"]
-        }
-      };
-    },
     async closeBundle() {
       if (executed || running) {
         return;
@@ -112,9 +92,8 @@ export function searchsocketVitePlugin(options: SearchSocketAutoIndexOptions = {
         });
 
         logger.info(
-          `[searchsocket] indexed pages=${stats.pagesProcessed} chunks=${stats.chunksTotal} changed=${stats.chunksChanged} embedded=${stats.newEmbeddings}`
+          `[searchsocket] indexed pages=${stats.pagesProcessed} chunks=${stats.chunksTotal} changed=${stats.chunksChanged} upserted=${stats.documentsUpserted}`
         );
-        logger.info("[searchsocket] markdown mirror written under .searchsocket/pages/<scope> (safe to commit for content workflows).");
         executed = true;
       } finally {
         running = false;

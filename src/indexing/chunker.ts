@@ -1,4 +1,4 @@
-import type { Chunk, MirrorPage, ResolvedSearchSocketConfig, Scope } from "../types";
+import type { Chunk, IndexedPage, ResolvedSearchSocketConfig, Scope } from "../types";
 import { sha1, sha256 } from "../utils/hash";
 import { humanizeUrlPath } from "../utils/path";
 import { extractFirstParagraph, normalizeText, toSnippet } from "../utils/text";
@@ -276,7 +276,7 @@ function splitSection(section: Section, config: ResolvedSearchSocketConfig["chun
   }));
 }
 
-export function buildSummaryChunkText(page: MirrorPage): string {
+export function buildSummaryChunkText(page: IndexedPage): string {
   const parts: string[] = [page.title];
 
   const humanized = humanizeUrlPath(page.url);
@@ -300,8 +300,8 @@ export function buildEmbeddingText(chunk: Chunk, prependTitle: boolean): string 
   return `${prefix}\n\n${chunk.chunkText}`;
 }
 
-export function chunkMirrorPage(
-  page: MirrorPage,
+export function chunkPage(
+  page: IndexedPage,
   config: ResolvedSearchSocketConfig,
   scope: Scope
 ): Chunk[] {

@@ -14,7 +14,7 @@ describe("createSearchClient", () => {
         q: "test",
         scope: "main",
         results: [],
-        meta: { timingsMs: { embed: 0, vector: 0, rerank: 0, total: 0 }, usedRerank: false, modelId: "test" }
+        meta: { timingsMs: { search: 0, total: 0 } }
       })
     });
 
@@ -49,9 +49,7 @@ describe("createSearchClient", () => {
         }
       ],
       meta: {
-        timingsMs: { embed: 10, vector: 20, rerank: 0, total: 30 },
-        usedRerank: false,
-        modelId: "jina-embeddings-v3"
+        timingsMs: { search: 10, total: 30 }
       }
     };
 
@@ -125,7 +123,7 @@ describe("createSearchClient", () => {
         q: "test",
         scope: "main",
         results: [],
-        meta: { timingsMs: { embed: 0, vector: 0, rerank: 0, total: 0 }, usedRerank: false, modelId: "test" }
+        meta: { timingsMs: { search: 0, total: 0 } }
       })
     });
 
@@ -137,7 +135,7 @@ describe("createSearchClient", () => {
       scope: "feature",
       pathPrefix: "/docs",
       tags: ["guides"],
-      rerank: true
+      groupBy: "page"
     });
 
     const body = JSON.parse(mockFetch.mock.calls[0]?.[1]?.body as string) as Record<string, unknown>;
@@ -146,6 +144,6 @@ describe("createSearchClient", () => {
     expect(body.scope).toBe("feature");
     expect(body.pathPrefix).toBe("/docs");
     expect(body.tags).toEqual(["guides"]);
-    expect(body.rerank).toBe(true);
+    expect(body.groupBy).toBe("page");
   });
 });

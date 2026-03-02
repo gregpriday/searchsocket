@@ -1,39 +1,75 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndexPipeline } from "../src/indexing/pipeline";
 import { SearchEngine } from "../src/search/engine";
 import { createDefaultConfig } from "../src/config/defaults";
-import { createVectorStore } from "../src/vector";
-import type { EmbeddingsProvider, ResolvedSearchSocketConfig } from "../src/types";
+import type { ResolvedSearchSocketConfig, Scope, VectorHit, PageRecord } from "../src/types";
+import type { UpstashSearchStore } from "../src/vector/upstash";
 
 const tempDirs: string[] = [];
 
-class FakeEmbeddingsProvider implements EmbeddingsProvider {
-  estimateTokens(text: string): number {
-    return Math.ceil(text.length / 4);
-  }
+function createMockStore(): {
+  store: UpstashSearchStore;
+  upsertedChunks: Array<{ id: string; content: Record<string, unknown>; metadata: Record<string, unknown> }>;
+  upsertedPages: PageRecord[];
+} {
+  const upsertedChunks: Array<{ id: string; content: Record<string, unknown>; metadata: Record<string, unknown> }> = [];
+  const upsertedPages: PageRecord[] = [];
 
-  async embedTexts(texts: string[]): Promise<number[][]> {
-    return texts.map((text) => this.embed(text));
-  }
-
-  private embed(text: string): number[] {
-    const dim = 32;
-    const vector = new Array<number>(dim).fill(0);
-
-    for (const token of text.toLowerCase().split(/[^a-z0-9]+/g).filter(Boolean)) {
-      let hash = 0;
-      for (let i = 0; i < token.length; i += 1) {
-        hash = (hash * 31 + token.charCodeAt(i)) >>> 0;
+  const store = {
+    upsertChunks: vi.fn(async (chunks: Array<{ id: string; content: Record<string, unknown>; metadata: Record<string, unknown> }>) => {
+      upsertedChunks.push(...chunks);
+    }),
+    search: vi.fn(async (query: string) => {
+      // Simple keyword matching against upserted chunks
+      const results: VectorHit[] = [];
+      for (const chunk of upsertedChunks) {
+        const text = String(chunk.content.text ?? "").toLowerCase();
+        const title = String(chunk.content.title ?? "").toLowerCase();
+        const q = query.toLowerCase();
+        if (text.includes(q) || title.includes(q)) {
+          results.push({
+            id: chunk.id,
+            score: 0.8,
+            metadata: {
+              projectId: String(chunk.metadata.projectId ?? ""),
+              scopeName: String(chunk.metadata.scopeName ?? ""),
+              url: String(chunk.content.url ?? ""),
+              path: String(chunk.metadata.path ?? ""),
+              title: String(chunk.content.title ?? ""),
+              sectionTitle: String(chunk.content.sectionTitle ?? ""),
+              headingPath: chunk.content.headingPath ? String(chunk.content.headingPath).split(" > ").filter(Boolean) : [],
+              snippet: String(chunk.metadata.snippet ?? ""),
+              chunkText: String(chunk.content.text ?? ""),
+              ordinal: Number(chunk.metadata.ordinal ?? 0),
+              contentHash: String(chunk.metadata.contentHash ?? ""),
+              depth: Number(chunk.metadata.depth ?? 0),
+              incomingLinks: Number(chunk.metadata.incomingLinks ?? 0),
+              routeFile: String(chunk.metadata.routeFile ?? ""),
+              tags: chunk.content.tags ? String(chunk.content.tags).split(",").filter(Boolean) : []
+            }
+          });
+        }
       }
-      const index = hash % dim;
-      vector[index] = (vector[index] ?? 0) + 1;
-    }
+      return results;
+    }),
+    searchPages: vi.fn(async () => []),
+    deleteByIds: vi.fn(async () => undefined),
+    deleteScope: vi.fn(async () => undefined),
+    listScopes: vi.fn(async () => []),
+    health: vi.fn(async () => ({ ok: true })),
+    getContentHashes: vi.fn(async () => new Map<string, string>()),
+    upsertPages: vi.fn(async (pages: PageRecord[]) => {
+      upsertedPages.push(...pages);
+    }),
+    getPage: vi.fn(async () => null),
+    deletePages: vi.fn(async () => undefined),
+    dropAllIndexes: vi.fn(async () => undefined)
+  } as unknown as UpstashSearchStore;
 
-    return vector;
-  }
+  return { store, upsertedChunks, upsertedPages };
 }
 
 async function createProjectFixture(): Promise<{ cwd: string; config: ResolvedSearchSocketConfig }> {
@@ -78,7 +114,6 @@ async function createProjectFixture(): Promise<{ cwd: string; config: ResolvedSe
   const config = createDefaultConfig("searchsocket-int");
   config.source.mode = "static-output";
   config.source.staticOutputDir = "build";
-  config.vector.turso.localPath = ".searchsocket/vectors.db";
   config.state.dir = ".searchsocket";
 
   return { cwd, config };
@@ -91,13 +126,12 @@ afterEach(async () => {
 describe("integration: index -> search", () => {
   it("indexes static output and returns routeFile in search results", async () => {
     const { cwd, config } = await createProjectFixture();
-    const embeddings = new FakeEmbeddingsProvider();
+    const { store } = createMockStore();
 
     const pipeline = await IndexPipeline.create({
       cwd,
       config,
-      embeddingsProvider: embeddings,
-      vectorStore: await createVectorStore(config, cwd)
+      store
     });
 
     const stats = await pipeline.run({ changedOnly: true });
@@ -107,8 +141,7 @@ describe("integration: index -> search", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      embeddingsProvider: embeddings,
-      vectorStore: await createVectorStore(config, cwd)
+      store
     });
 
     const result = await engine.search({

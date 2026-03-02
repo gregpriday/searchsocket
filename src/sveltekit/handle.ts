@@ -2,20 +2,13 @@ import { loadConfig, mergeConfig } from "../config/load";
 import { isServerless } from "../core/serverless";
 import { SearchSocketError, toErrorPayload } from "../errors";
 import { SearchEngine } from "../search/engine";
-import type { ResolvedSearchSocketConfig, SearchRequest, SearchSocketConfig, StreamEvent } from "../types";
+import type { ResolvedSearchSocketConfig, SearchRequest, SearchSocketConfig } from "../types";
 
 interface RateBucket {
   count: number;
   resetAt: number;
 }
 
-/**
- * Simple in-memory rate limiter. Effective for long-lived Node.js processes
- * (e.g. SvelteKit with adapter-node). In serverless environments (Vercel,
- * Netlify, Cloudflare Workers), memory is not shared between invocations and
- * this limiter will reset on each cold start. For serverless deployments, use
- * your platform's built-in WAF or edge rate-limiting instead.
- */
 class InMemoryRateLimiter {
   private readonly buckets = new Map<string, RateBucket>();
 
@@ -47,13 +40,7 @@ export interface SearchSocketHandleOptions {
   cwd?: string;
   path?: string;
   maxBodyBytes?: number;
-  /** Pass a pre-resolved config object to avoid filesystem loading at runtime. */
   config?: ResolvedSearchSocketConfig;
-  /**
-   * Pass a partial config object (same shape as `searchsocket.config.ts`).
-   * Resolved via `mergeConfig()` at startup — avoids jiti/filesystem config loading,
-   * making this the recommended option for serverless deployments (Vercel, Netlify, etc.).
-   */
   rawConfig?: SearchSocketConfig;
 }
 
@@ -209,44 +196,6 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
       const engine = await getEngine();
       const searchRequest = body as SearchRequest;
-
-      if (searchRequest.stream && searchRequest.rerank) {
-        const encoder = new TextEncoder();
-        const stream = new ReadableStream<Uint8Array>({
-          async start(controller) {
-            try {
-              for await (const event of engine.searchStreaming(searchRequest)) {
-                const line = JSON.stringify(event) + "\n";
-                controller.enqueue(encoder.encode(line));
-              }
-            } catch (streamError) {
-              const errorEvent: StreamEvent = {
-                phase: "error",
-                data: {
-                  error: {
-                    code: streamError instanceof SearchSocketError ? streamError.code : "INTERNAL_ERROR",
-                    message: streamError instanceof Error ? streamError.message : "Unknown error"
-                  }
-                }
-              };
-              controller.enqueue(encoder.encode(JSON.stringify(errorEvent) + "\n"));
-            } finally {
-              controller.close();
-            }
-          }
-        });
-
-        return withCors(
-          new Response(stream, {
-            status: 200,
-            headers: {
-              "content-type": "application/x-ndjson"
-            }
-          }),
-          event.request,
-          config
-        );
-      }
 
       const result = await engine.search(searchRequest);
 

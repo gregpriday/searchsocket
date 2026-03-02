@@ -133,10 +133,3 @@ Disable temporarily:
 
 - set `SEARCHSOCKET_DISABLE_AUTO_INDEX=1`
 
-## 6. Committing Markdown Mirror (Content Projects)
-
-If you want deterministic indexed content tracked in git:
-
-- keep `.searchsocket/pages/**` committed
-- ensure `.searchsocket/*.json` remains ignored (recommended)
-- review markdown mirror diffs in PRs to validate indexing input changes

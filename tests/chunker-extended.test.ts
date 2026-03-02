@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultConfig } from "../src/config/defaults";
-import { chunkMirrorPage } from "../src/indexing/chunker";
-import type { MirrorPage, Scope } from "../src/types";
+import { chunkPage } from "../src/indexing/chunker";
+import type { IndexedPage, Scope } from "../src/types";
 
 const config = createDefaultConfig("test");
 const scope: Scope = {
@@ -10,7 +10,7 @@ const scope: Scope = {
   scopeId: "test:main"
 };
 
-function makePage(markdown: string, url = "/test"): MirrorPage {
+function makePage(markdown: string, url = "/test"): IndexedPage {
   return {
     url,
     title: "Test Page",
@@ -26,17 +26,17 @@ function makePage(markdown: string, url = "/test"): MirrorPage {
   };
 }
 
-describe("chunkMirrorPage - extended", () => {
+describe("chunkPage - extended", () => {
   it("handles page with no headings", () => {
     const page = makePage("Just some paragraphs.\n\nAnother paragraph.\n");
-    const chunks = chunkMirrorPage(page, config, scope);
+    const chunks = chunkPage(page, config, scope);
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks[0]?.sectionTitle).toBeUndefined();
   });
 
   it("splits by headings", () => {
     const page = makePage("# Section A\n\nContent A.\n\n## Section B\n\nContent B.\n");
-    const chunks = chunkMirrorPage(page, config, scope);
+    const chunks = chunkPage(page, config, scope);
     // 1 summary chunk + 2 regular chunks
     expect(chunks.length).toBe(3);
     expect(chunks[0]?.sectionTitle).toBeUndefined(); // summary chunk
@@ -46,7 +46,7 @@ describe("chunkMirrorPage - extended", () => {
 
   it("tracks heading path correctly", () => {
     const page = makePage("# Top\n\nIntro.\n\n## Sub\n\nContent.\n\n### Deep\n\nDeep content.\n");
-    const chunks = chunkMirrorPage(page, config, scope);
+    const chunks = chunkPage(page, config, scope);
     const deepChunk = chunks.find((c) => c.sectionTitle === "Deep");
     expect(deepChunk?.headingPath).toEqual(["Top", "Sub", "Deep"]);
   });
@@ -56,7 +56,7 @@ describe("chunkMirrorPage - extended", () => {
     deepConfig.chunking.headingPathDepth = 2;
 
     const page = makePage("# A\n\n## B\n\n### C\n\n#### D\n\nContent.\n");
-    const chunks = chunkMirrorPage(page, deepConfig, scope);
+    const chunks = chunkPage(page, deepConfig, scope);
     const lastChunk = chunks[chunks.length - 1];
     expect(lastChunk?.headingPath.length).toBeLessThanOrEqual(2);
   });
@@ -65,7 +65,7 @@ describe("chunkMirrorPage - extended", () => {
     const page = makePage(
       "# Code Example\n\n```typescript\nfunction hello() {\n  return 'world';\n}\n```\n\nParagraph after code.\n"
     );
-    const chunks = chunkMirrorPage(page, config, scope);
+    const chunks = chunkPage(page, config, scope);
     const codeChunk = chunks.find((c) => c.chunkText.includes("```typescript"));
     expect(codeChunk).toBeDefined();
     expect(codeChunk?.chunkText).toContain("function hello()");
@@ -73,15 +73,15 @@ describe("chunkMirrorPage - extended", () => {
 
   it("produces stable chunk keys", () => {
     const page = makePage("# Hello\n\nWorld.\n");
-    const first = chunkMirrorPage(page, config, scope);
-    const second = chunkMirrorPage(page, config, scope);
+    const first = chunkPage(page, config, scope);
+    const second = chunkPage(page, config, scope);
     expect(first.map((c) => c.chunkKey)).toEqual(second.map((c) => c.chunkKey));
   });
 
   it("produces stable content hashes", () => {
     const page = makePage("# Hello\n\nWorld.\n");
-    const first = chunkMirrorPage(page, config, scope);
-    const second = chunkMirrorPage(page, config, scope);
+    const first = chunkPage(page, config, scope);
+    const second = chunkPage(page, config, scope);
     expect(first.map((c) => c.contentHash)).toEqual(second.map((c) => c.contentHash));
   });
 
@@ -92,7 +92,7 @@ describe("chunkMirrorPage - extended", () => {
     page.tags = ["guides"];
     page.routeFile = "src/routes/docs/example/+page.svelte";
 
-    const chunks = chunkMirrorPage(page, config, scope);
+    const chunks = chunkPage(page, config, scope);
     expect(chunks[0]?.url).toBe("/docs/example");
     expect(chunks[0]?.path).toBe("/docs/example");
     expect(chunks[0]?.incomingLinks).toBe(5);
@@ -103,7 +103,7 @@ describe("chunkMirrorPage - extended", () => {
 
   it("generates snippets", () => {
     const page = makePage("# Hello\n\nThis is a paragraph with some content.\n");
-    const chunks = chunkMirrorPage(page, config, scope);
+    const chunks = chunkPage(page, config, scope);
     expect(chunks[0]?.snippet).toBeTruthy();
     expect(chunks[0]?.snippet).toContain("paragraph");
   });
@@ -111,7 +111,7 @@ describe("chunkMirrorPage - extended", () => {
   it("splits large sections into multiple chunks", () => {
     const longContent = Array.from({ length: 50 }, (_, i) => `Paragraph ${i}. `.repeat(20)).join("\n\n");
     const page = makePage(`# Big Section\n\n${longContent}\n`);
-    const chunks = chunkMirrorPage(page, config, scope);
+    const chunks = chunkPage(page, config, scope);
     expect(chunks.length).toBeGreaterThan(1);
   });
 
@@ -119,7 +119,7 @@ describe("chunkMirrorPage - extended", () => {
     // Create content that would produce a tiny trailing chunk
     const content = "A ".repeat(500) + "\n\nB ".repeat(500) + "\n\nC.\n";
     const page = makePage(`# Section\n\n${content}\n`);
-    const chunks = chunkMirrorPage(page, config, scope);
+    const chunks = chunkPage(page, config, scope);
     // The last chunk should be at least minChars or merged
     for (const chunk of chunks) {
       // Each chunk should either be the only chunk, or have reasonable size
@@ -136,7 +136,7 @@ describe("chunkMirrorPage - extended", () => {
 
     const singleLongParagraph = `# Oversized\n\n${"word ".repeat(250).trim()}\n`;
     const page = makePage(singleLongParagraph);
-    const chunks = chunkMirrorPage(page, constrainedConfig, scope);
+    const chunks = chunkPage(page, constrainedConfig, scope);
 
     expect(chunks.length).toBeGreaterThan(1);
     for (const chunk of chunks) {
@@ -169,7 +169,7 @@ describe("chunkMirrorPage - extended", () => {
       }
 
       const page = makePage(`${lines.join("\n")}\n`);
-      const chunks = chunkMirrorPage(page, fuzzConfig, scope);
+      const chunks = chunkPage(page, fuzzConfig, scope);
 
       for (const chunk of chunks) {
         expect(chunk.chunkText.length).toBeLessThanOrEqual(fuzzConfig.chunking.maxChars);
@@ -186,7 +186,7 @@ describe("chunkMirrorPage - extended", () => {
 
     const codeLines = Array.from({ length: 40 }, (_, i) => `line_${i}: console.log(${i});`).join("\n");
     const page = makePage(`# Tilde Fence\n\n~~~ts\n${codeLines}\n~~~\n`);
-    const chunks = chunkMirrorPage(page, constrainedConfig, scope);
+    const chunks = chunkPage(page, constrainedConfig, scope);
 
     const codeChunks = chunks.filter((chunk) => chunk.chunkText.includes("~~~ts"));
     expect(codeChunks.length).toBe(1);
@@ -197,7 +197,7 @@ describe("chunkMirrorPage - extended", () => {
     const page = makePage(
       "# Intro\n\n~~~md\n## not-a-heading\ncontent in code\n~~~\n\n## Real Heading\nVisible text.\n"
     );
-    const chunks = chunkMirrorPage(page, config, scope);
+    const chunks = chunkPage(page, config, scope);
     const sectionTitles = chunks.map((chunk) => chunk.sectionTitle);
 
     expect(sectionTitles).toContain("Intro");
@@ -213,7 +213,7 @@ describe("chunkMirrorPage - extended", () => {
     constrainedConfig.chunking.pageSummaryChunk = false;
 
     const page = makePage(`# Overlap Stress\n\n${"word ".repeat(600).trim()}\n`);
-    const chunks = chunkMirrorPage(page, constrainedConfig, scope);
+    const chunks = chunkPage(page, constrainedConfig, scope);
 
     expect(chunks.length).toBeGreaterThan(1);
     for (const chunk of chunks) {

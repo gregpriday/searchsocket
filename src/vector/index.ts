@@ -1,2 +1,2 @@
-export { createVectorStore } from "./factory";
-export { TursoVectorStore } from "./turso";
+export { createUpstashStore } from "./factory";
+export { UpstashSearchStore } from "./upstash";

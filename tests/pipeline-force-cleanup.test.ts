@@ -1,22 +1,47 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
-import { createVectorStore } from "../src/vector";
-import type { EmbeddingsProvider, ResolvedSearchSocketConfig } from "../src/types";
+import type { UpstashSearchStore } from "../src/vector/upstash";
+import type { ResolvedSearchSocketConfig } from "../src/types";
 
 const tempDirs: string[] = [];
 
-class FakeEmbeddingsProvider implements EmbeddingsProvider {
-  estimateTokens(text: string): number {
-    return Math.ceil(text.length / 4);
-  }
+/**
+ * Creates a mock UpstashSearchStore that tracks upserted chunk hashes and deleted IDs.
+ * The internal state is shared across calls, simulating a real persistent store.
+ */
+function createStatefulMockStore(): {
+  store: UpstashSearchStore;
+  getHashes: () => Map<string, string>;
+} {
+  const hashes = new Map<string, string>();
 
-  async embedTexts(texts: string[]): Promise<number[][]> {
-    return texts.map(() => [1, 0, 0, 0]);
-  }
+  const store = {
+    upsertChunks: vi.fn().mockImplementation(async (chunks: Array<{ id: string; metadata: { contentHash: string } }>) => {
+      for (const chunk of chunks) {
+        hashes.set(chunk.id, chunk.metadata.contentHash);
+      }
+    }),
+    search: vi.fn().mockResolvedValue([]),
+    deleteByIds: vi.fn().mockImplementation(async (ids: string[]) => {
+      for (const id of ids) {
+        hashes.delete(id);
+      }
+    }),
+    deleteScope: vi.fn().mockResolvedValue(undefined),
+    listScopes: vi.fn().mockResolvedValue([]),
+    getContentHashes: vi.fn().mockImplementation(async () => new Map(hashes)),
+    upsertPages: vi.fn().mockResolvedValue(undefined),
+    getPage: vi.fn().mockResolvedValue(null),
+    deletePages: vi.fn().mockResolvedValue(undefined),
+    health: vi.fn().mockResolvedValue({ ok: true }),
+    dropAllIndexes: vi.fn().mockResolvedValue(undefined)
+  } as unknown as UpstashSearchStore;
+
+  return { store, getHashes: () => new Map(hashes) };
 }
 
 async function createFixture(): Promise<{ cwd: string; config: ResolvedSearchSocketConfig }> {
@@ -45,7 +70,6 @@ async function createFixture(): Promise<{ cwd: string; config: ResolvedSearchSoc
   const config = createDefaultConfig("searchsocket-force");
   config.source.mode = "static-output";
   config.source.staticOutputDir = "build";
-  config.vector.turso.localPath = ".searchsocket/vectors.db";
   config.state.dir = ".searchsocket";
 
   return { cwd, config };
@@ -56,43 +80,38 @@ afterEach(async () => {
 });
 
 describe("IndexPipeline force cleanup", () => {
-  it("removes stale vectors for deleted pages during a force reindex", async () => {
+  it("removes stale documents for deleted pages on reindex", async () => {
     const { cwd, config } = await createFixture();
-    const embeddings = new FakeEmbeddingsProvider();
-    const vectorStore = await createVectorStore(config, cwd);
-
-    const scope = {
-      projectId: config.project.id,
-      scopeName: "main",
-      scopeId: `${config.project.id}:main`
-    };
+    const { store, getHashes } = createStatefulMockStore();
 
     const firstPipeline = await IndexPipeline.create({
       cwd,
       config,
-      embeddingsProvider: embeddings,
-      vectorStore
+      store
     });
 
     const firstStats = await firstPipeline.run({ changedOnly: true });
     expect(firstStats.chunksTotal).toBeGreaterThan(1);
 
-    const firstHashes = await vectorStore.getContentHashes(scope);
+    const firstHashes = getHashes();
     expect(firstHashes.size).toBe(firstStats.chunksTotal);
 
+    // Remove one page from the source
     await fs.rm(path.join(cwd, "build", "docs", "remove"), { recursive: true, force: true });
 
+    // Reindex with changedOnly — the pipeline compares current chunks
+    // against the store's content hashes and deletes stale entries.
     const secondPipeline = await IndexPipeline.create({
       cwd,
       config,
-      embeddingsProvider: embeddings,
-      vectorStore
+      store
     });
 
-    const secondStats = await secondPipeline.run({ changedOnly: true, force: true });
-    const secondHashes = await vectorStore.getContentHashes(scope);
+    const secondStats = await secondPipeline.run({ changedOnly: true });
+    const secondHashes = getHashes();
 
     expect(secondStats.chunksTotal).toBeLessThan(firstStats.chunksTotal);
+    expect(secondStats.deletes).toBeGreaterThan(0);
     expect(secondHashes.size).toBe(secondStats.chunksTotal);
 
     const removedChunkIds = [...firstHashes.keys()].filter((id) => !secondHashes.has(id));

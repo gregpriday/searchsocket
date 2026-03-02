@@ -15,16 +15,6 @@ export function normalizeUrlPath(rawPath: string): string {
   return out;
 }
 
-export function urlPathToMirrorRelative(urlPath: string): string {
-  const normalized = normalizeUrlPath(urlPath);
-
-  if (normalized === "/") {
-    return "index.md";
-  }
-
-  return `${normalized.slice(1)}.md`;
-}
-
 export function staticHtmlFileToUrl(filePath: string, rootDir: string): string {
   const relative = path.relative(rootDir, filePath).replace(/\\/g, "/");
 

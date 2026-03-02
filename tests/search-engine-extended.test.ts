@@ -4,87 +4,43 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SearchEngine } from "../src/search/engine";
 import { createDefaultConfig } from "../src/config/defaults";
-import type { EmbeddingsProvider, PageRecord, VectorHit, VectorStore } from "../src/types";
+import type { PageHit, PageRecord, VectorHit } from "../src/types";
+import type { UpstashSearchStore } from "../src/vector/upstash";
 
 const tempDirs: string[] = [];
 
-class FakeEmbeddings implements EmbeddingsProvider {
-  estimateTokens(text: string): number {
-    return text.length;
-  }
+function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): UpstashSearchStore & {
+  search: ReturnType<typeof vi.fn>;
+  searchPages: ReturnType<typeof vi.fn>;
+  getPage: ReturnType<typeof vi.fn>;
+  _pages: Map<string, PageRecord>;
+} {
+  const pages = new Map<string, PageRecord>();
 
-  async embedTexts(): Promise<number[][]> {
-    return [[1, 0, 0]];
-  }
-}
+  const store = {
+    upsertChunks: vi.fn(async () => undefined),
+    search: vi.fn(async () => hits),
+    searchPages: vi.fn(async () => pageHits),
+    deleteByIds: vi.fn(async () => undefined),
+    deleteScope: vi.fn(async () => undefined),
+    listScopes: vi.fn(async () => []),
+    health: vi.fn(async () => ({ ok: true })),
+    getContentHashes: vi.fn(async () => new Map<string, string>()),
+    upsertPages: vi.fn(async () => undefined),
+    getPage: vi.fn(async (url: string, scope: { projectId: string; scopeName: string }) => {
+      return pages.get(`${scope.projectId}:${scope.scopeName}:${url}`) ?? null;
+    }),
+    deletePages: vi.fn(async () => undefined),
+    dropAllIndexes: vi.fn(async () => undefined),
+    _pages: pages
+  };
 
-class FakeStore implements VectorStore {
-  private pages = new Map<string, PageRecord>();
-  private scopeModelId: string | null = null;
-
-  constructor(private readonly hits: VectorHit[] = []) {}
-
-  withPage(page: PageRecord): FakeStore {
-    this.pages.set(`${page.projectId}:${page.scopeName}:${page.url}`, page);
-    return this;
-  }
-
-  withScopeModelId(modelId: string): FakeStore {
-    this.scopeModelId = modelId;
-    return this;
-  }
-
-  async upsert(): Promise<void> {
-    return;
-  }
-
-  async query(): Promise<VectorHit[]> {
-    return this.hits;
-  }
-
-  async deleteByIds(): Promise<void> {
-    return;
-  }
-
-  async deleteScope(): Promise<void> {
-    return;
-  }
-
-  async listScopes() {
-    return [];
-  }
-
-  async recordScope(): Promise<void> {
-    return;
-  }
-
-  async health() {
-    return { ok: true };
-  }
-
-  async getContentHashes() {
-    return new Map<string, string>();
-  }
-
-  async upsertPages(): Promise<void> {
-    return;
-  }
-
-  async getPage(url: string, scope: { projectId: string; scopeName: string }): Promise<PageRecord | null> {
-    return this.pages.get(`${scope.projectId}:${scope.scopeName}:${url}`) ?? null;
-  }
-
-  async deletePages(): Promise<void> {
-    return;
-  }
-
-  async getScopeModelId(): Promise<string | null> {
-    return this.scopeModelId;
-  }
-
-  async dropAllTables(): Promise<void> {
-    return;
-  }
+  return store as unknown as UpstashSearchStore & {
+    search: ReturnType<typeof vi.fn>;
+    searchPages: ReturnType<typeof vi.fn>;
+    getPage: ReturnType<typeof vi.fn>;
+    _pages: Map<string, PageRecord>;
+  };
 }
 
 function makeHit(id: string, url: string): VectorHit {
@@ -103,7 +59,6 @@ function makeHit(id: string, url: string): VectorHit {
       chunkText: "Full chunk text",
       ordinal: 0,
       contentHash: `hash-${id}`,
-      modelId: "jina-embeddings-v3",
       depth: 1,
       incomingLinks: 0,
       routeFile: "src/routes/+page.svelte",
@@ -130,8 +85,7 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: new FakeStore()
+      store: createMockStore()
     });
 
     await expect(engine.search({ q: "   " })).rejects.toMatchObject({
@@ -147,8 +101,7 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: new FakeStore()
+      store: createMockStore()
     });
 
     await expect(engine.search({ q: "test", topK: 0 })).rejects.toMatchObject({
@@ -161,49 +114,12 @@ describe("SearchEngine - adversarial cases", () => {
     });
   });
 
-  it("rejects rerank=true when rerank is disabled", async () => {
-    const cwd = await makeTempCwd();
-    const config = createDefaultConfig("searchsocket-engine-test");
-    config.rerank.enabled = false;
-
-    const engine = await SearchEngine.create({
-      cwd,
-      config,
-      embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: new FakeStore([makeHit("a", "/a")])
-    });
-
-    await expect(engine.search({ q: "test", rerank: true })).rejects.toMatchObject({
-      code: "INVALID_REQUEST",
-      status: 400
-    });
-  });
-
-  it("rejects rerank=true when rerank is enabled but API key is missing", async () => {
-    const cwd = await makeTempCwd();
-    const config = createDefaultConfig("searchsocket-engine-test");
-    config.rerank.enabled = true;
-    config.embeddings.apiKeyEnv = "SEARCHSOCKET_TEST_MISSING_JINA_KEY";
-    delete process.env.SEARCHSOCKET_TEST_MISSING_JINA_KEY;
-
-    const engine = await SearchEngine.create({
-      cwd,
-      config,
-      embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: new FakeStore([makeHit("a", "/a")])
-    });
-
-    await expect(engine.search({ q: "test", rerank: true })).rejects.toMatchObject({
-      code: "CONFIG_MISSING",
-      status: 400
-    });
-  });
-
   it("normalizes full URLs when loading indexed pages", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
 
-    const store = new FakeStore().withPage({
+    const store = createMockStore();
+    store._pages.set(`${config.project.id}:main:/docs/getting-started`, {
       url: "/docs/getting-started",
       title: "Getting Started",
       markdown: "## Install\n\nRun pnpm add searchsocket.",
@@ -221,8 +137,7 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: store
+      store
     });
 
     const page = await engine.getPage("https://example.com/docs/getting-started?ref=nav#install");
@@ -236,7 +151,8 @@ describe("SearchEngine - adversarial cases", () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
 
-    const store = new FakeStore().withPage({
+    const store = createMockStore();
+    store._pages.set(`${config.project.id}:main:/docs/faq`, {
       url: "/docs/faq",
       title: "FAQ",
       markdown: "Frequently asked questions.",
@@ -254,8 +170,7 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: store
+      store
     });
 
     const page = await engine.getPage("/docs/faq?ref=nav#pricing");
@@ -270,8 +185,7 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: new FakeStore()
+      store: createMockStore()
     });
 
     await expect(engine.getPage("/missing")).rejects.toMatchObject({
@@ -284,7 +198,8 @@ describe("SearchEngine - adversarial cases", () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
 
-    const store = new FakeStore().withPage({
+    const store = createMockStore();
+    store._pages.set(`${config.project.id}:main:/`, {
       url: "/",
       title: "Home",
       markdown: "Welcome home.",
@@ -302,8 +217,7 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: store
+      store
     });
 
     const page = await engine.getPage("https://example.com");
@@ -311,136 +225,26 @@ describe("SearchEngine - adversarial cases", () => {
     expect(page.frontmatter.title).toBe("Home");
   });
 
-  it("fails fast when scope model does not match active embedding model", async () => {
-    const cwd = await makeTempCwd();
-    const config = createDefaultConfig("searchsocket-engine-test");
-
-    const store = new FakeStore().withScopeModelId("jina-embeddings-v2-base-en");
-
-    const engine = await SearchEngine.create({
-      cwd,
-      config,
-      embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: store
-    });
-
-    await expect(engine.search({ q: "test" })).rejects.toMatchObject({
-      code: "EMBEDDING_MODEL_MISMATCH"
-    });
-  });
-
-  it("rejects empty embedding vectors instead of querying the backend with invalid data", async () => {
-    const cwd = await makeTempCwd();
-    const config = createDefaultConfig("searchsocket-engine-test");
-
-    const query = vi.fn().mockResolvedValue([]);
-    const store: VectorStore = {
-      upsert: async () => undefined,
-      query,
-      deleteByIds: async () => undefined,
-      deleteScope: async () => undefined,
-      listScopes: async () => [],
-      recordScope: async () => undefined,
-      health: async () => ({ ok: true }),
-      getContentHashes: async () => new Map(),
-      upsertPages: async () => undefined,
-      getPage: async () => null,
-      deletePages: async () => undefined,
-      getScopeModelId: async () => null,
-      dropAllTables: async () => undefined
-    };
-
-    const embeddings: EmbeddingsProvider = {
-      estimateTokens: (text) => text.length,
-      embedTexts: async () => [[]]
-    };
-
-    const engine = await SearchEngine.create({
-      cwd,
-      config,
-      embeddingsProvider: embeddings,
-      vectorStore: store
-    });
-
-    await expect(engine.search({ q: "test" })).rejects.toMatchObject({
-      code: "VECTOR_BACKEND_UNAVAILABLE"
-    });
-    expect(query).not.toHaveBeenCalled();
-  });
-
-  it("rejects non-finite query embedding values", async () => {
-    const cwd = await makeTempCwd();
-    const config = createDefaultConfig("searchsocket-engine-test");
-
-    const query = vi.fn().mockResolvedValue([]);
-    const store: VectorStore = {
-      upsert: async () => undefined,
-      query,
-      deleteByIds: async () => undefined,
-      deleteScope: async () => undefined,
-      listScopes: async () => [],
-      recordScope: async () => undefined,
-      health: async () => ({ ok: true }),
-      getContentHashes: async () => new Map(),
-      upsertPages: async () => undefined,
-      getPage: async () => null,
-      deletePages: async () => undefined,
-      getScopeModelId: async () => null,
-      dropAllTables: async () => undefined
-    };
-
-    const embeddings: EmbeddingsProvider = {
-      estimateTokens: (text) => text.length,
-      embedTexts: async () => [[0.12, Number.NaN, 0.34]]
-    };
-
-    const engine = await SearchEngine.create({
-      cwd,
-      config,
-      embeddingsProvider: embeddings,
-      vectorStore: store
-    });
-
-    await expect(engine.search({ q: "test" })).rejects.toMatchObject({
-      code: "VECTOR_BACKEND_UNAVAILABLE"
-    });
-    expect(query).not.toHaveBeenCalled();
-  });
-
   it("overfetches vector candidates with higher multiplier in page mode (default)", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
+    // Disable dual search to test legacy overfetch behavior
+    config.search.dualSearch = false;
 
-    const query = vi.fn(async () => [] as VectorHit[]);
-    const store: VectorStore = {
-      upsert: async () => undefined,
-      query,
-      deleteByIds: async () => undefined,
-      deleteScope: async () => undefined,
-      listScopes: async () => [],
-      recordScope: async () => undefined,
-      health: async () => ({ ok: true }),
-      getContentHashes: async () => new Map(),
-      upsertPages: async () => undefined,
-      getPage: async () => null,
-      deletePages: async () => undefined,
-      getScopeModelId: async () => null,
-      dropAllTables: async () => undefined
-    };
+    const store = createMockStore();
 
     const engine = await SearchEngine.create({
       cwd,
       config,
-      embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: store
+      store
     });
 
     await engine.search({ q: "test", topK: 2 });
 
     // Default is page mode: Math.max(2 * 10, 50) = 50
-    expect(query).toHaveBeenCalledWith(
-      [1, 0, 0],
-      expect.objectContaining({ topK: 50 }),
+    expect(store.search).toHaveBeenCalledWith(
+      "test",
+      expect.objectContaining({ limit: 50 }),
       expect.any(Object)
     );
   });
@@ -449,36 +253,20 @@ describe("SearchEngine - adversarial cases", () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
 
-    const query = vi.fn(async () => [] as VectorHit[]);
-    const store: VectorStore = {
-      upsert: async () => undefined,
-      query,
-      deleteByIds: async () => undefined,
-      deleteScope: async () => undefined,
-      listScopes: async () => [],
-      recordScope: async () => undefined,
-      health: async () => ({ ok: true }),
-      getContentHashes: async () => new Map(),
-      upsertPages: async () => undefined,
-      getPage: async () => null,
-      deletePages: async () => undefined,
-      getScopeModelId: async () => null,
-      dropAllTables: async () => undefined
-    };
+    const store = createMockStore();
 
     const engine = await SearchEngine.create({
       cwd,
       config,
-      embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: store
+      store
     });
 
     await engine.search({ q: "test", topK: 2, groupBy: "chunk" });
 
     // Chunk mode: Math.max(50, 2) = 50
-    expect(query).toHaveBeenCalledWith(
-      [1, 0, 0],
-      expect.objectContaining({ topK: 50 }),
+    expect(store.search).toHaveBeenCalledWith(
+      "test",
+      expect.objectContaining({ limit: 50 }),
       expect.any(Object)
     );
   });
@@ -497,8 +285,7 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: new FakeStore(hits)
+      store: createMockStore(hits)
     });
 
     const result = await engine.search({ q: "test", topK: 10 });
@@ -526,16 +313,15 @@ describe("SearchEngine - adversarial cases", () => {
 
     const hits: VectorHit[] = [
       { ...makeHit("chunk-1", "/page"), score: 1.0 },
-      { ...makeHit("chunk-2", "/page"), score: 0.85 },  // 85% of best — passes
-      { ...makeHit("chunk-3", "/page"), score: 0.5 },   // 50% of best — filtered
-      { ...makeHit("chunk-4", "/page"), score: 0.3 }    // 30% of best — filtered
+      { ...makeHit("chunk-2", "/page"), score: 0.85 },  // 85% of best -- passes
+      { ...makeHit("chunk-3", "/page"), score: 0.5 },   // 50% of best -- filtered
+      { ...makeHit("chunk-4", "/page"), score: 0.3 }    // 30% of best -- filtered
     ];
 
     const engine = await SearchEngine.create({
       cwd,
       config,
-      embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: new FakeStore(hits)
+      store: createMockStore(hits)
     });
 
     const result = await engine.search({ q: "test", topK: 10 });
@@ -559,8 +345,7 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: new FakeStore(hits)
+      store: createMockStore(hits)
     });
 
     const result = await engine.search({ q: "test", topK: 10, groupBy: "chunk" });
@@ -576,38 +361,261 @@ describe("SearchEngine - adversarial cases", () => {
   it("uses requested topK when it exceeds the candidate floor", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
+    // Disable dual search to test legacy overfetch behavior
+    config.search.dualSearch = false;
 
-    const query = vi.fn(async () => [] as VectorHit[]);
-    const store: VectorStore = {
-      upsert: async () => undefined,
-      query,
-      deleteByIds: async () => undefined,
-      deleteScope: async () => undefined,
-      listScopes: async () => [],
-      recordScope: async () => undefined,
-      health: async () => ({ ok: true }),
-      getContentHashes: async () => new Map(),
-      upsertPages: async () => undefined,
-      getPage: async () => null,
-      deletePages: async () => undefined,
-      getScopeModelId: async () => null,
-      dropAllTables: async () => undefined
-    };
+    const store = createMockStore();
 
     const engine = await SearchEngine.create({
       cwd,
       config,
-      embeddingsProvider: new FakeEmbeddings(),
-      vectorStore: store
+      store
     });
 
     await engine.search({ q: "test", topK: 80 });
 
     // Page mode: Math.max(80 * 10, 50) = 800
-    expect(query).toHaveBeenCalledWith(
-      [1, 0, 0],
-      expect.objectContaining({ topK: 800 }),
+    expect(store.search).toHaveBeenCalledWith(
+      "test",
+      expect.objectContaining({ limit: 800 }),
       expect.any(Object)
     );
+  });
+
+  it("falls back to chunkText snippet when snippet is too short", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minScore = 0;
+    config.ranking.scoreGapThreshold = 0;
+
+    const hits: VectorHit[] = [
+      {
+        ...makeHit("chunk-short", "/features"),
+        score: 0.9,
+        metadata: {
+          ...makeHit("chunk-short", "/features").metadata,
+          snippet: "Terminal Features",
+          chunkText: "Terminal Features provide a rich set of tools for interacting with your development environment efficiently."
+        }
+      }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits)
+    });
+
+    const result = await engine.search({ q: "terminal features", topK: 10 });
+    expect(result.results.length).toBe(1);
+    // Should use the chunkText-derived snippet since "Terminal Features" is < 30 chars
+    expect(result.results[0]!.snippet.length).toBeGreaterThan(29);
+    expect(result.results[0]!.snippet).toContain("Terminal Features");
+  });
+
+  it("keeps original snippet when it is long enough", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minScore = 0;
+    config.ranking.scoreGapThreshold = 0;
+
+    const longSnippet = "This is a sufficiently long snippet that should not be replaced by chunk text fallback.";
+    const hits: VectorHit[] = [
+      {
+        ...makeHit("chunk-long", "/docs"),
+        score: 0.9,
+        metadata: {
+          ...makeHit("chunk-long", "/docs").metadata,
+          snippet: longSnippet,
+          chunkText: "Different chunk text content."
+        }
+      }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits)
+    });
+
+    const result = await engine.search({ q: "docs", topK: 10 });
+    expect(result.results[0]!.snippet).toBe(longSnippet);
+  });
+
+  it("trims low-confidence results via score-gap trimming", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    // Use default scoreGapThreshold (0.4) and minScore (0.3)
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/relevant"), score: 0.8 },
+      { ...makeHit("chunk-2", "/also-relevant"), score: 0.75 },
+      { ...makeHit("chunk-3", "/weak"), score: 0.3 }  // big gap from 0.75
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits)
+    });
+
+    const result = await engine.search({ q: "test query", topK: 10 });
+    // The weak result should be trimmed due to score gap
+    expect(result.results.length).toBe(2);
+    expect(result.results.map((r) => r.url)).toEqual(["/relevant", "/also-relevant"]);
+  });
+
+  it("returns empty results for gibberish queries with low scores", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    // Use default minScore (0.3) — median of these scores is below 0.3
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/a"), score: 0.25 },
+      { ...makeHit("chunk-2", "/b"), score: 0.2 },
+      { ...makeHit("chunk-3", "/c"), score: 0.15 }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits)
+    });
+
+    const result = await engine.search({ q: "xyzzy gibberish asdf", topK: 10 });
+    expect(result.results.length).toBe(0);
+  });
+});
+
+describe("SearchEngine - dual search", () => {
+  it("calls both searchPages and search in parallel when dualSearch is enabled", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    // dualSearch is true by default
+
+    const chunkHits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/docs"), score: 0.8 }
+    ];
+    const pageHits: PageHit[] = [
+      {
+        id: "/docs",
+        score: 0.9,
+        title: "Docs",
+        url: "/docs",
+        description: "Documentation page",
+        tags: [],
+        depth: 1,
+        incomingLinks: 2,
+        routeFile: "src/routes/docs/+page.svelte"
+      }
+    ];
+
+    const store = createMockStore(chunkHits, pageHits);
+    const engine = await SearchEngine.create({ cwd, config, store });
+
+    const result = await engine.search({ q: "documentation", topK: 10 });
+
+    // Both search methods should have been called
+    expect(store.searchPages).toHaveBeenCalledTimes(1);
+    expect(store.search).toHaveBeenCalledTimes(1);
+
+    // Chunk search should NOT have reranking (dual search disables it for chunks)
+    expect(store.search).toHaveBeenCalledWith(
+      "documentation",
+      expect.objectContaining({ reranking: false }),
+      expect.any(Object)
+    );
+
+    expect(result.results.length).toBeGreaterThan(0);
+    expect(result.results[0]!.url).toBe("/docs");
+  });
+
+  it("falls back to single search when dualSearch is disabled", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.search.dualSearch = false;
+
+    const store = createMockStore([makeHit("chunk-1", "/home")]);
+    const engine = await SearchEngine.create({ cwd, config, store });
+
+    await engine.search({ q: "test", topK: 5 });
+
+    expect(store.searchPages).not.toHaveBeenCalled();
+    expect(store.search).toHaveBeenCalledTimes(1);
+    // Single search should use the configured reranking setting
+    expect(store.search).toHaveBeenCalledWith(
+      "test",
+      expect.objectContaining({ reranking: true }),
+      expect.any(Object)
+    );
+  });
+
+  it("falls back to single search in chunk groupBy mode", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    // dualSearch is true, but groupBy=chunk should bypass it
+
+    const store = createMockStore([makeHit("chunk-1", "/home")]);
+    const engine = await SearchEngine.create({ cwd, config, store });
+
+    await engine.search({ q: "test", topK: 5, groupBy: "chunk" });
+
+    expect(store.searchPages).not.toHaveBeenCalled();
+    expect(store.search).toHaveBeenCalledTimes(1);
+  });
+
+  it("handles empty page search results gracefully", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+
+    const chunkHits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/home"), score: 0.8 },
+      { ...makeHit("chunk-2", "/about"), score: 0.75 }
+    ];
+    // No page hits (e.g., page index not yet populated)
+    const store = createMockStore(chunkHits, []);
+    const engine = await SearchEngine.create({ cwd, config, store });
+
+    const result = await engine.search({ q: "test", topK: 10 });
+
+    expect(result.results.length).toBe(2);
+    expect(result.results.map((r) => r.url)).toContain("/home");
+    expect(result.results.map((r) => r.url)).toContain("/about");
+  });
+
+  it("blends page scores into chunk results", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minScore = 0;
+    config.ranking.scoreGapThreshold = 0;
+
+    const chunkHits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/top"), score: 0.9 },
+      { ...makeHit("chunk-2", "/boosted"), score: 0.6 }
+    ];
+    const pageHits: PageHit[] = [
+      {
+        id: "/boosted",
+        score: 1.0,
+        title: "Boosted",
+        url: "/boosted",
+        description: "Gets a page boost",
+        tags: [],
+        depth: 1,
+        incomingLinks: 5,
+        routeFile: "src/routes/+page.svelte"
+      }
+    ];
+
+    const store = createMockStore(chunkHits, pageHits);
+    const engine = await SearchEngine.create({ cwd, config, store });
+
+    const result = await engine.search({ q: "test", topK: 10 });
+
+    expect(result.results.length).toBe(2);
+    // /top should still be first since its chunk score (0.9) is higher than /boosted's blended score
+    // /boosted blended: (1-0.3)*0.6 + 0.3*1.0 = 0.42 + 0.3 = 0.72 (plus ranking boosts)
+    expect(result.results[0]!.url).toBe("/top");
+    expect(result.results[1]!.url).toBe("/boosted");
   });
 });

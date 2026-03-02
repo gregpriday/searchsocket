@@ -24,11 +24,9 @@ afterEach(async () => {
 });
 
 describe("ensureStateDirs", () => {
-  it("creates state and pages directories", async () => {
+  it("creates state directory", async () => {
     const cwd = await makeTempDir();
-    const { statePath, pagesPath } = ensureStateDirs(cwd, ".searchsocket", scope);
+    const { statePath } = ensureStateDirs(cwd, ".searchsocket", scope);
     expect(fs.existsSync(statePath)).toBe(true);
-    expect(fs.existsSync(pagesPath)).toBe(true);
-    expect(pagesPath).toContain("pages/main");
   });
 });

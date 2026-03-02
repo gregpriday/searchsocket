@@ -2,12 +2,11 @@ import path from "node:path";
 import { loadConfig } from "../config/load";
 import { resolveScope } from "../core/scope";
 import { ensureStateDirs } from "../core/state";
-import { createEmbeddingsProvider } from "../embeddings";
 import { SearchSocketError } from "../errors";
-import { createVectorStore } from "../vector";
-import { buildEmbeddingText, chunkMirrorPage } from "./chunker";
+import { createUpstashStore } from "../vector";
+import { UpstashSearchStore } from "../vector/upstash";
+import { buildEmbeddingText, chunkPage } from "./chunker";
 import { extractFromHtml, extractFromMarkdown } from "./extractor";
-import { cleanMirrorForScope, writeMirrorPage } from "./mirror";
 import { buildRoutePatterns, mapUrlToRoute } from "./route-mapper";
 import { loadBuildPages } from "./sources/build";
 import { loadContentFilesPages } from "./sources/content-files";
@@ -21,67 +20,85 @@ import { getUrlDepth, normalizeUrlPath } from "../utils/path";
 import { Logger } from "../core/logger";
 import type {
   Chunk,
-  EmbeddingsProvider,
   ExtractedPage,
+  IndexedPage,
   IndexOptions,
   IndexStats,
-  MirrorPage,
   PageRecord,
   ResolvedSearchSocketConfig,
   RouteMatch,
-  Scope,
-  ScopeInfo,
-  VectorRecord,
-  VectorStore
+  Scope
 } from "../types";
 
-const EMBEDDING_PRICE_PER_1K_TOKENS_USD: Record<string, number> = {
-  "jina-embeddings-v3": 0.00002,
-  "jina-embeddings-v5-text-small": 0.00005
-};
-const DEFAULT_EMBEDDING_PRICE_PER_1K = 0.00005;
+/**
+ * Build a plain-text summary of a page for the page search index.
+ * Combines title, description, and stripped markdown body (truncated to maxChars).
+ */
+export function buildPageSummary(page: IndexedPage, maxChars = 3500): string {
+  const parts: string[] = [page.title];
+
+  if (page.description) {
+    parts.push(page.description);
+  }
+
+  if (page.keywords && page.keywords.length > 0) {
+    parts.push(page.keywords.join(", "));
+  }
+
+  // Strip markdown formatting to get plain body text
+  const plainBody = page.markdown
+    .replace(/```[\s\S]*?```/g, " ")   // remove code blocks
+    .replace(/`([^`]+)`/g, "$1")       // inline code → text
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1") // links/images → text
+    .replace(/^#{1,6}\s+/gm, "")       // headings → text
+    .replace(/[>*_|~\-]/g, " ")        // strip formatting chars
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (plainBody) {
+    parts.push(plainBody);
+  }
+
+  const joined = parts.join("\n\n");
+  if (joined.length <= maxChars) return joined;
+  return joined.slice(0, maxChars).trim();
+}
 
 interface IndexPipelineOptions {
   cwd?: string;
   configPath?: string;
   config?: ResolvedSearchSocketConfig;
-  embeddingsProvider?: EmbeddingsProvider;
-  vectorStore?: VectorStore;
+  store?: UpstashSearchStore;
   logger?: Logger;
 }
 
 export class IndexPipeline {
   private readonly cwd: string;
   private readonly config: ResolvedSearchSocketConfig;
-  private readonly embeddings: EmbeddingsProvider;
-  private readonly vectorStore: VectorStore;
+  private readonly store: UpstashSearchStore;
   private readonly logger: Logger;
 
   private constructor(options: {
     cwd: string;
     config: ResolvedSearchSocketConfig;
-    embeddings: EmbeddingsProvider;
-    vectorStore: VectorStore;
+    store: UpstashSearchStore;
     logger: Logger;
   }) {
     this.cwd = options.cwd;
     this.config = options.config;
-    this.embeddings = options.embeddings;
-    this.vectorStore = options.vectorStore;
+    this.store = options.store;
     this.logger = options.logger;
   }
 
   static async create(options: IndexPipelineOptions = {}): Promise<IndexPipeline> {
     const cwd = path.resolve(options.cwd ?? process.cwd());
     const config = options.config ?? (await loadConfig({ cwd, configPath: options.configPath }));
-    const embeddings = options.embeddingsProvider ?? createEmbeddingsProvider(config);
-    const vectorStore = options.vectorStore ?? await createVectorStore(config, cwd);
+    const store = options.store ?? await createUpstashStore(config);
 
     return new IndexPipeline({
       cwd,
       config,
-      embeddings,
-      vectorStore,
+      store,
       logger: options.logger ?? new Logger()
     });
   }
@@ -105,14 +122,13 @@ export class IndexPipeline {
     };
 
     const scope = resolveScope(this.config, options.scopeOverride);
-    const { statePath } = ensureStateDirs(this.cwd, this.config.state.dir, scope);
+    ensureStateDirs(this.cwd, this.config.state.dir, scope);
 
     const sourceMode = options.sourceOverride ?? this.config.source.mode;
-    this.logger.info(`Indexing scope "${scope.scopeName}" (source: ${sourceMode}, model: ${this.config.embeddings.model})`);
+    this.logger.info(`Indexing scope "${scope.scopeName}" (source: ${sourceMode}, backend: upstash-search)`);
 
     if (options.force) {
       this.logger.info("Force mode enabled — full rebuild");
-      await cleanMirrorForScope(statePath, scope);
     }
 
     if (options.dryRun) {
@@ -120,20 +136,7 @@ export class IndexPipeline {
     }
 
     const manifestStart = stageStart();
-    const existingHashes = await this.vectorStore.getContentHashes(scope);
-    const existingModelId = await this.vectorStore.getScopeModelId(scope);
-
-    if (
-      existingModelId &&
-      existingModelId !== this.config.embeddings.model &&
-      !options.force
-    ) {
-      throw new SearchSocketError(
-        "EMBEDDING_MODEL_MISMATCH",
-        `Scope ${scope.scopeName} uses model ${existingModelId}. Re-run with --force to migrate.`
-      );
-    }
-
+    const existingHashes = options.force ? new Map<string, string>() : await this.store.getContentHashes(scope);
     stageEnd("manifest", manifestStart);
     this.logger.debug(`Manifest: ${existingHashes.size} existing chunk hashes loaded`);
 
@@ -250,7 +253,6 @@ export class IndexPipeline {
     }
 
     // Filter out zero-weight pages at index time.
-    // Effective weight: per-page meta tag (ExtractedPage.weight) > config pageWeights > default (1.0)
     const indexablePages: ExtractedPage[] = [];
     for (const page of uniquePages) {
       const effectiveWeight = page.weight ?? findPageWeight(page.url, this.config.ranking.pageWeights);
@@ -290,9 +292,9 @@ export class IndexPipeline {
     stageEnd("links", linkStart);
     this.logger.debug(`Link analysis: computed incoming links for ${incomingLinkCount.size} pages (${stageTimingsMs["links"]}ms)`);
 
-    const mirrorStart = stageStart();
-    this.logger.info("Writing mirror pages...");
-    const mirrorPages: MirrorPage[] = [];
+    const pagesStart = stageStart();
+    this.logger.info("Building indexed pages...");
+    const pages: IndexedPage[] = [];
     let routeExact = 0;
     let routeBestEffort = 0;
 
@@ -327,7 +329,7 @@ export class IndexPipeline {
         routeExact += 1;
       }
 
-      const mirror: MirrorPage = {
+      const indexedPage: IndexedPage = {
         url: page.url,
         title: page.title,
         scope: scope.scopeName,
@@ -343,40 +345,42 @@ export class IndexPipeline {
         keywords: page.keywords
       };
 
-      mirrorPages.push(mirror);
-      if (this.config.state.writeMirror) {
-        await writeMirrorPage(statePath, scope, mirror);
-      }
-      this.logger.event("markdown_written", { url: page.url });
+      pages.push(indexedPage);
+      this.logger.event("page_indexed", { url: page.url });
     }
 
-    // Store pages in Turso (replace entire scope to remove stale pages)
+    // Store pages in Upstash (replace entire scope to remove stale pages)
     if (!options.dryRun) {
-      const pageRecords: PageRecord[] = mirrorPages.map((mp) => ({
-        url: mp.url,
-        title: mp.title,
-        markdown: mp.markdown,
-        projectId: scope.projectId,
-        scopeName: scope.scopeName,
-        routeFile: mp.routeFile,
-        routeResolution: mp.routeResolution,
-        incomingLinks: mp.incomingLinks,
-        outgoingLinks: mp.outgoingLinks,
-        depth: mp.depth,
-        tags: mp.tags,
-        indexedAt: mp.generatedAt
-      }));
-      // Delete old pages first, then insert new ones to avoid stale data
-      await this.vectorStore.deletePages(scope);
-      await this.vectorStore.upsertPages(pageRecords, scope);
+      const pageRecords: PageRecord[] = pages.map((p) => {
+        const summary = buildPageSummary(p);
+        return {
+          url: p.url,
+          title: p.title,
+          markdown: p.markdown,
+          projectId: scope.projectId,
+          scopeName: scope.scopeName,
+          routeFile: p.routeFile,
+          routeResolution: p.routeResolution,
+          incomingLinks: p.incomingLinks,
+          outgoingLinks: p.outgoingLinks,
+          depth: p.depth,
+          tags: p.tags,
+          indexedAt: p.generatedAt,
+          summary,
+          description: p.description,
+          keywords: p.keywords
+        };
+      });
+      await this.store.deletePages(scope);
+      await this.store.upsertPages(pageRecords, scope);
     }
 
-    stageEnd("mirror", mirrorStart);
-    this.logger.info(`Mirrored ${mirrorPages.length} page${mirrorPages.length === 1 ? "" : "s"} (${routeExact} exact, ${routeBestEffort} best-effort) (${stageTimingsMs["mirror"]}ms)`);
+    stageEnd("pages", pagesStart);
+    this.logger.info(`Indexed ${pages.length} page${pages.length === 1 ? "" : "s"} (${routeExact} exact, ${routeBestEffort} best-effort) (${stageTimingsMs["pages"]}ms)`);
 
     const chunkStart = stageStart();
     this.logger.info("Chunking pages...");
-    let chunks: Chunk[] = mirrorPages.flatMap((page) => chunkMirrorPage(page, this.config, scope));
+    let chunks: Chunk[] = pages.flatMap((page) => chunkPage(page, this.config, scope));
 
     const maxChunks = typeof options.maxChunks === "number" ? Math.max(0, Math.floor(options.maxChunks)) : undefined;
     if (typeof maxChunks === "number") {
@@ -419,147 +423,73 @@ export class IndexPipeline {
 
     this.logger.info(`Changes detected: ${changedChunks.length} changed, ${deletes.length} deleted, ${chunks.length - changedChunks.length} unchanged`);
 
-    const embedStart = stageStart();
-
-    const chunkTokenEstimates = new Map<string, number>();
-    for (const chunk of changedChunks) {
-      chunkTokenEstimates.set(chunk.chunkKey, this.embeddings.estimateTokens(buildEmbeddingText(chunk, this.config.chunking.prependTitle)));
-    }
-
-    const estimatedTokens = changedChunks.reduce(
-      (sum, chunk) => sum + (chunkTokenEstimates.get(chunk.chunkKey) ?? 0),
-      0
-    );
-
-    const pricePer1k = this.config.embeddings.pricePer1kTokens
-      ?? EMBEDDING_PRICE_PER_1K_TOKENS_USD[this.config.embeddings.model]
-      ?? DEFAULT_EMBEDDING_PRICE_PER_1K;
-
-    const estimatedCostUSD = (estimatedTokens / 1000) * pricePer1k;
-
-    let newEmbeddings = 0;
-    const vectorsByChunk = new Map<string, number[]>();
+    // Upsert changed chunks directly to Upstash Search (no embedding step needed)
+    const upsertStart = stageStart();
+    let documentsUpserted = 0;
 
     if (!options.dryRun && changedChunks.length > 0) {
-      this.logger.info(`Embedding ${changedChunks.length} chunk${changedChunks.length === 1 ? "" : "s"} (~${estimatedTokens.toLocaleString()} tokens, ~$${estimatedCostUSD.toFixed(6)})...`);
-      const embeddings = await this.embeddings.embedTexts(
-        changedChunks.map((chunk) => buildEmbeddingText(chunk, this.config.chunking.prependTitle)),
-        this.config.embeddings.model,
-        "retrieval.passage"
-      );
+      this.logger.info(`Upserting ${changedChunks.length} chunk${changedChunks.length === 1 ? "" : "s"} to Upstash Search...`);
 
-      if (embeddings.length !== changedChunks.length) {
-        throw new SearchSocketError(
-          "VECTOR_BACKEND_UNAVAILABLE",
-          `Embedding provider returned ${embeddings.length} vectors for ${changedChunks.length} chunks.`
-        );
-      }
+      // Upstash Search has a 4096-char limit on total content across all fields.
+      // Reserve space for non-text fields, then truncate text to fit.
+      const UPSTASH_CONTENT_LIMIT = 4096;
+      const FIELD_OVERHEAD = 200; // buffer for title, sectionTitle, url, tags, headingPath
+      const MAX_TEXT_CHARS = UPSTASH_CONTENT_LIMIT - FIELD_OVERHEAD;
 
-      for (let i = 0; i < changedChunks.length; i += 1) {
-        const chunk = changedChunks[i];
-        const embedding = embeddings[i];
-        if (!chunk || !embedding || embedding.length === 0 || embedding.some((value) => !Number.isFinite(value))) {
-          throw new SearchSocketError(
-            "VECTOR_BACKEND_UNAVAILABLE",
-            `Embedding provider returned an invalid vector for chunk index ${i}.`
-          );
-        }
-        vectorsByChunk.set(chunk.chunkKey, embedding);
-        newEmbeddings += 1;
-        this.logger.event("embedded_new", { chunkKey: chunk.chunkKey });
-      }
-    }
+      const docs = changedChunks.map((chunk) => {
+        const title = chunk.title;
+        const sectionTitle = chunk.sectionTitle ?? "";
+        const url = chunk.url;
+        const tags = chunk.tags.join(",");
+        const headingPath = chunk.headingPath.join(" > ");
+        const otherFieldsLen = title.length + sectionTitle.length + url.length + tags.length + headingPath.length;
+        const textBudget = Math.max(500, UPSTASH_CONTENT_LIMIT - otherFieldsLen - 50);
+        const text = buildEmbeddingText(chunk, this.config.chunking.prependTitle).slice(0, textBudget);
 
-    stageEnd("embedding", embedStart);
-    if (changedChunks.length > 0) {
-      this.logger.info(`Embedded ${newEmbeddings} chunk${newEmbeddings === 1 ? "" : "s"} (${stageTimingsMs["embedding"]}ms)`);
-    } else {
-      this.logger.info("No chunks to embed — all up to date");
-    }
-
-    const syncStart = stageStart();
-    if (!options.dryRun) {
-      this.logger.info("Syncing vectors...");
-      const upserts: VectorRecord[] = [];
-      for (const chunk of changedChunks) {
-        const vector = vectorsByChunk.get(chunk.chunkKey);
-        if (!vector) {
-          continue;
-        }
-
-        upserts.push({
+        return {
           id: chunk.chunkKey,
-          vector,
+          content: { title, sectionTitle, text, url, tags, headingPath },
           metadata: {
             projectId: scope.projectId,
             scopeName: scope.scopeName,
-            url: chunk.url,
             path: chunk.path,
-            title: chunk.title,
-            sectionTitle: chunk.sectionTitle ?? "",
-            headingPath: chunk.headingPath,
             snippet: chunk.snippet,
-            chunkText: chunk.chunkText.slice(0, 4000),
             ordinal: chunk.ordinal,
             contentHash: chunk.contentHash,
-            modelId: this.config.embeddings.model,
             depth: chunk.depth,
             incomingLinks: chunk.incomingLinks,
             routeFile: chunk.routeFile,
-            tags: chunk.tags,
-            description: chunk.description,
-            keywords: chunk.keywords
+            description: chunk.description ?? "",
+            keywords: (chunk.keywords ?? []).join(",")
           }
-        });
-      }
-
-      if (upserts.length > 0) {
-        await this.vectorStore.upsert(upserts, scope);
-        this.logger.event("upserted", { count: upserts.length });
-      }
-
-      if (deletes.length > 0) {
-        await this.vectorStore.deleteByIds(deletes, scope);
-        this.logger.event("deleted", { count: deletes.length });
-      }
-    }
-
-    stageEnd("sync", syncStart);
-    this.logger.debug(`Sync complete (${stageTimingsMs["sync"]}ms)`);
-
-    const finalizeStart = stageStart();
-
-    if (!options.dryRun) {
-      const scopeInfo: ScopeInfo = {
-        projectId: scope.projectId,
-        scopeName: scope.scopeName,
-        modelId: this.config.embeddings.model,
-        lastIndexedAt: nowIso(),
-        vectorCount: chunks.length,
-        lastEstimateTokens: estimatedTokens,
-        lastEstimateCostUSD: Number(estimatedCostUSD.toFixed(8)),
-        lastEstimateChangedChunks: changedChunks.length
-      };
-
-      await this.vectorStore.recordScope(scopeInfo);
-      this.logger.event("registry_updated", {
-        scope: scope.scopeName,
-        vectorCount: chunks.length
+        };
       });
+
+      await this.store.upsertChunks(docs, scope);
+      documentsUpserted = docs.length;
+      this.logger.event("upserted", { count: docs.length });
     }
 
-    stageEnd("finalize", finalizeStart);
+    if (!options.dryRun && deletes.length > 0) {
+      await this.store.deleteByIds(deletes, scope);
+      this.logger.event("deleted", { count: deletes.length });
+    }
+
+    stageEnd("upsert", upsertStart);
+    if (changedChunks.length > 0) {
+      this.logger.info(`Upserted ${documentsUpserted} document${documentsUpserted === 1 ? "" : "s"} (${stageTimingsMs["upsert"]}ms)`);
+    } else {
+      this.logger.info("No chunks to upsert — all up to date");
+    }
 
     this.logger.info("Done.");
 
     return {
-      pagesProcessed: mirrorPages.length,
+      pagesProcessed: pages.length,
       chunksTotal: chunks.length,
       chunksChanged: changedChunks.length,
-      newEmbeddings,
+      documentsUpserted,
       deletes: deletes.length,
-      estimatedTokens,
-      estimatedCostUSD: Number(estimatedCostUSD.toFixed(8)),
       routeExact,
       routeBestEffort,
       stageTimingsMs

@@ -53,15 +53,16 @@
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:quality": "SEARCHSOCKET_QUALITY_TESTS=1 vitest run tests/quality.test.ts"
   },
   "engines": {
     "node": ">=20"
   },
   "packageManager": "pnpm@10.29.2",
   "dependencies": {
-    "@libsql/client": "^0.17.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "@upstash/search": "^0.1.7",
     "cheerio": "^1.2.0",
     "chokidar": "^5.0.0",
     "commander": "^14.0.3",
@@ -79,6 +80,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "^25.2.2",
     "@types/turndown": "^5.0.6",
+    "jsdom": "^28.1.0",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
