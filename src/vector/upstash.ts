@@ -200,7 +200,7 @@ export class UpstashSearchStore {
     if (ids.length === 0) return;
 
     const index = this.chunkIndex(scope);
-    const BATCH_SIZE = 500;
+    const BATCH_SIZE = 100;
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const batch = ids.slice(i, i + BATCH_SIZE);
       await index.delete(batch);
