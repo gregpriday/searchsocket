@@ -30,6 +30,8 @@ function createMockStoreWithPages(): {
       return pages.find((p) => p.url === url) ?? null;
     }),
     deletePages: vi.fn().mockResolvedValue(undefined),
+    getPageHashes: vi.fn().mockResolvedValue(new Map()),
+    deletePagesByIds: vi.fn().mockResolvedValue(undefined),
     health: vi.fn().mockResolvedValue({ ok: true }),
     dropAllIndexes: vi.fn().mockResolvedValue(undefined)
   } as unknown as UpstashSearchStore;

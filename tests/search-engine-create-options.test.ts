@@ -16,6 +16,8 @@ function createMockStore(): UpstashSearchStore {
     upsertPages: vi.fn(async () => undefined),
     getPage: vi.fn(async () => null),
     deletePages: vi.fn(async () => undefined),
+    getPageHashes: vi.fn(async () => new Map()),
+    deletePagesByIds: vi.fn(async () => undefined),
     dropAllIndexes: vi.fn(async () => undefined)
   } as unknown as UpstashSearchStore;
 }

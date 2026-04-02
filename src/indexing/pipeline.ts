@@ -18,6 +18,7 @@ import { matchUrlPatterns } from "../utils/pattern";
 import { hrTimeMs, nowIso } from "../utils/time";
 import { getUrlDepth, normalizeUrlPath } from "../utils/path";
 import { Logger } from "../core/logger";
+import { sha256 } from "../utils/hash";
 import type {
   Chunk,
   ExtractedPage,
@@ -62,6 +63,22 @@ export function buildPageSummary(page: IndexedPage, maxChars = 3500): string {
   const joined = parts.join("\n\n");
   if (joined.length <= maxChars) return joined;
   return joined.slice(0, maxChars).trim();
+}
+
+/**
+ * Build a deterministic content hash for a page.
+ * Used to detect whether a page has changed between index runs.
+ */
+export function buildPageContentHash(page: IndexedPage): string {
+  const parts = [
+    page.title,
+    page.description ?? "",
+    (page.keywords ?? []).slice().sort().join(","),
+    page.tags.slice().sort().join(","),
+    page.markdown,
+    String(page.outgoingLinks)
+  ];
+  return sha256(parts.join("|"));
 }
 
 interface IndexPipelineOptions {
@@ -137,8 +154,9 @@ export class IndexPipeline {
 
     const manifestStart = stageStart();
     const existingHashes = options.force ? new Map<string, string>() : await this.store.getContentHashes(scope);
+    const existingPageHashes = (options.force || options.dryRun) ? new Map<string, string>() : await this.store.getPageHashes(scope);
     stageEnd("manifest", manifestStart);
-    this.logger.debug(`Manifest: ${existingHashes.size} existing chunk hashes loaded`);
+    this.logger.debug(`Manifest: ${existingHashes.size} existing chunk hashes, ${existingPageHashes.size} existing page hashes loaded`);
 
     const sourceStart = stageStart();
     this.logger.info(`Loading pages (source: ${sourceMode})...`);
@@ -349,33 +367,55 @@ export class IndexPipeline {
       this.logger.event("page_indexed", { url: page.url });
     }
 
-    // Store pages in Upstash (replace entire scope to remove stale pages)
+    // Build page records with content hashes for incremental comparison
+    const pageRecords: PageRecord[] = pages.map((p) => {
+      const summary = buildPageSummary(p);
+      return {
+        url: p.url,
+        title: p.title,
+        markdown: p.markdown,
+        projectId: scope.projectId,
+        scopeName: scope.scopeName,
+        routeFile: p.routeFile,
+        routeResolution: p.routeResolution,
+        incomingLinks: p.incomingLinks,
+        outgoingLinks: p.outgoingLinks,
+        depth: p.depth,
+        tags: p.tags,
+        indexedAt: p.generatedAt,
+        summary,
+        description: p.description,
+        keywords: p.keywords,
+        contentHash: buildPageContentHash(p)
+      };
+    });
+
+    // Determine changed and stale pages
+    const currentPageUrls = new Set(pageRecords.map((r) => r.url));
+    const changedPages = pageRecords.filter((r) =>
+      !existingPageHashes.has(r.url) || existingPageHashes.get(r.url) !== r.contentHash
+    );
+    const deletedPageUrls = [...existingPageHashes.keys()].filter((url) => !currentPageUrls.has(url));
+
     if (!options.dryRun) {
-      const pageRecords: PageRecord[] = pages.map((p) => {
-        const summary = buildPageSummary(p);
-        return {
-          url: p.url,
-          title: p.title,
-          markdown: p.markdown,
-          projectId: scope.projectId,
-          scopeName: scope.scopeName,
-          routeFile: p.routeFile,
-          routeResolution: p.routeResolution,
-          incomingLinks: p.incomingLinks,
-          outgoingLinks: p.outgoingLinks,
-          depth: p.depth,
-          tags: p.tags,
-          indexedAt: p.generatedAt,
-          summary,
-          description: p.description,
-          keywords: p.keywords
-        };
-      });
-      await this.store.deletePages(scope);
-      await this.store.upsertPages(pageRecords, scope);
+      if (options.force) {
+        await this.store.deletePages(scope);
+        await this.store.upsertPages(pageRecords, scope);
+      } else {
+        if (changedPages.length > 0) {
+          await this.store.upsertPages(changedPages, scope);
+        }
+        if (deletedPageUrls.length > 0) {
+          await this.store.deletePagesByIds(deletedPageUrls, scope);
+        }
+      }
     }
 
+    const pagesChanged = options.force ? pageRecords.length : changedPages.length;
+    const pagesDeleted = deletedPageUrls.length;
+
     stageEnd("pages", pagesStart);
+    this.logger.info(`Page changes: ${pagesChanged} changed/new, ${pagesDeleted} deleted, ${pageRecords.length - changedPages.length} unchanged`);
     this.logger.info(`Indexed ${pages.length} page${pages.length === 1 ? "" : "s"} (${routeExact} exact, ${routeBestEffort} best-effort) (${stageTimingsMs["pages"]}ms)`);
 
     const chunkStart = stageStart();
@@ -486,6 +526,8 @@ export class IndexPipeline {
 
     return {
       pagesProcessed: pages.length,
+      pagesChanged,
+      pagesDeleted,
       chunksTotal: chunks.length,
       chunksChanged: changedChunks.length,
       documentsUpserted,
