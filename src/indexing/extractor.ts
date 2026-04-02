@@ -1,4 +1,4 @@
-import { load, type Cheerio, type CheerioAPI, type AnyNode } from "cheerio";
+import { load, type CheerioAPI } from "cheerio";
 import matter from "gray-matter";
 import TurndownService from "turndown";
 import { gfm, highlightedCodeBlock, strikethrough, tables, taskListItems } from "turndown-plugin-gfm";
@@ -42,7 +42,7 @@ function isMeaningfulAlt(alt: string): boolean {
 }
 
 function resolveImageText(
-  img: Cheerio<AnyNode>,
+  img: ReturnType<CheerioAPI>,
   $: CheerioAPI,
   imageDescAttr: string
 ): string | null {
@@ -86,7 +86,7 @@ function escapeHtml(text: string): string {
 }
 
 function preprocessImages(
-  root: Cheerio<AnyNode>,
+  root: ReturnType<CheerioAPI>,
   $: CheerioAPI,
   imageDescAttr: string
 ): void {
