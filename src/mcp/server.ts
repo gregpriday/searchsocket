@@ -141,7 +141,8 @@ export function createServer(engine: SearchEngine): McpServer {
         };
       }
 
-      const { url, routeFile, sectionTitle, snippet } = result.results[0];
+      const match = result.results[0]!;
+      const { url, routeFile, sectionTitle, snippet } = match;
       return {
         content: [
           {

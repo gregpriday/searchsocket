@@ -210,7 +210,7 @@ describe("find_source_file tool", () => {
 
     const handler = getHandler(mockEngine);
     const result = await handler({ query: "about us" });
-    const parsed = JSON.parse(result.content[0].text);
+    const parsed = JSON.parse(result.content[0]!.text);
 
     expect(parsed).toEqual({
       url: "/about",
@@ -235,7 +235,7 @@ describe("find_source_file tool", () => {
 
     const handler = getHandler(mockEngine);
     const result = await handler({ query: "nonexistent" });
-    const parsed = JSON.parse(result.content[0].text);
+    const parsed = JSON.parse(result.content[0]!.text);
 
     expect(parsed).toEqual({
       error: "No matching content found for the given query."
@@ -260,7 +260,7 @@ describe("find_source_file tool", () => {
 
     const handler = getHandler(mockEngine);
     const result = await handler({ query: "home" });
-    const parsed = JSON.parse(result.content[0].text);
+    const parsed = JSON.parse(result.content[0]!.text);
 
     expect(parsed).toEqual({
       url: "/home",
