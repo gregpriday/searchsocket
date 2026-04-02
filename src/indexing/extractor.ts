@@ -94,8 +94,10 @@ function preprocessImages(
   root.find("picture").each((_i, el) => {
     const picture = $(el);
     const img = picture.find("img").first();
+    const parentFigure = picture.closest("figure");
     const text = img.length ? resolveImageText(img, $, imageDescAttr) : null;
     if (text) {
+      if (parentFigure.length) parentFigure.find("figcaption").remove();
       picture.replaceWith(`<span>${escapeHtml(text)}</span>`);
     } else {
       picture.remove();
@@ -105,8 +107,10 @@ function preprocessImages(
   // Pass 2: bare <img> elements (not already removed with <picture>)
   root.find("img").each((_i, el) => {
     const img = $(el);
+    const parentFigure = img.closest("figure");
     const text = resolveImageText(img, $, imageDescAttr);
     if (text) {
+      if (parentFigure.length) parentFigure.find("figcaption").remove();
       img.replaceWith(`<span>${escapeHtml(text)}</span>`);
     } else {
       img.remove();

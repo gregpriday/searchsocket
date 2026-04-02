@@ -193,12 +193,15 @@ describe("image preprocessing", () => {
     expect(extracted?.markdown).not.toContain("Figure desc");
   });
 
-  it("combines meaningful alt with figcaption", () => {
+  it("combines meaningful alt with figcaption without duplication", () => {
     const html = `<html><body><main><figure><img src="chart.png" alt="Revenue chart for Q4"/><figcaption>Quarterly revenue breakdown</figcaption></figure></main></body></html>`;
     const extracted = extractFromHtml("/test", html, config);
     expect(extracted?.markdown).toContain("Revenue chart for Q4");
     expect(extracted?.markdown).toContain("Quarterly revenue breakdown");
     expect(extracted?.markdown).not.toContain("chart.png");
+    // Figcaption text should appear only once (inside the combined replacement), not duplicated
+    const count = extracted!.markdown.split("Quarterly revenue breakdown").length - 1;
+    expect(count).toBe(1);
   });
 
   it("uses meaningful alt alone when no figcaption", () => {
@@ -260,6 +263,28 @@ describe("image preprocessing", () => {
     const extracted = extractFromHtml("/test", html, config);
     expect(extracted?.markdown).toContain("A detailed explanation");
     expect(extracted?.markdown).not.toMatch(/!\[/);
+  });
+
+  it("handles picture inside figure with figcaption without duplication", () => {
+    const html = `<html><body><main><figure><picture><source srcset="x.webp"/><img src="x.png" alt="Architecture diagram overview"/></picture><figcaption>System architecture</figcaption></figure></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.markdown).toContain("Architecture diagram overview");
+    expect(extracted?.markdown).toContain("System architecture");
+    const count = extracted!.markdown.split("System architecture").length - 1;
+    expect(count).toBe(1);
+  });
+
+  it("suppresses figcaption when data-search-description is present", () => {
+    const html = `<html><body><main><figure><img src="x.png" data-search-description="Explicit description"/><figcaption>Caption text</figcaption></figure></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.markdown).toContain("Explicit description");
+    expect(extracted?.markdown).not.toContain("Caption text");
+  });
+
+  it("handles whitespace-only data-search-description by falling through", () => {
+    const html = `<html><body><main><img src="x.png" data-search-description="   " alt="Valid alt text here"/></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.markdown).toContain("Valid alt text here");
   });
 
   it("handles HTML special chars in description text", () => {
