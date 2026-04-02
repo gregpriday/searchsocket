@@ -259,10 +259,13 @@ export class SearchEngine {
     nextCursor?: string;
   }> {
     const resolvedScope = resolveScope(this.config, opts?.scope);
+    const pathPrefix = opts?.pathPrefix
+      ? (opts.pathPrefix.startsWith("/") ? opts.pathPrefix : `/${opts.pathPrefix}`)
+      : undefined;
     return this.store.listPages(resolvedScope, {
       cursor: opts?.cursor,
       limit: opts?.limit,
-      pathPrefix: opts?.pathPrefix
+      pathPrefix
     });
   }
 

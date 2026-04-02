@@ -697,6 +697,20 @@ describe("SearchEngine - listPages", () => {
     expect("nextCursor" in result).toBe(false);
   });
 
+  it("normalizes pathPrefix by prepending / if missing", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    const store = createMockStore();
+
+    const engine = await SearchEngine.create({ cwd, config, store });
+    await engine.listPages({ pathPrefix: "docs" });
+
+    expect(store.listPages).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ pathPrefix: "/docs" })
+    );
+  });
+
   it("defaults cursor and limit when not provided", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
