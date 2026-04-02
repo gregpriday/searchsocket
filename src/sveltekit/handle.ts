@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
 import nodePath from "node:path";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -131,17 +132,19 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
   return async ({ event, resolve }: { event: any; resolve: (event: any) => Promise<Response> }) => {
     if (apiPath && event.url.pathname !== apiPath && event.url.pathname !== llmsServePath) {
-      // If config is loaded, also check MCP path before bailing
       if (mcpPath && event.url.pathname === mcpPath) {
         return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
       }
-      if (mcpPath || !configPromise) {
+      if (mcpPath) {
+        // Config loaded and path matches neither endpoint
         return resolve(event);
       }
-      // Config is pending — need to resolve to learn mcpPath
-      await getConfig();
-      if (mcpPath && event.url.pathname === mcpPath) {
-        return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
+      // Config not yet loaded — if config is pending or available, resolve to learn mcpPath
+      if (configPromise || options.config || options.rawConfig) {
+        await getConfig();
+        if (mcpPath && event.url.pathname === mcpPath) {
+          return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
+        }
       }
       return resolve(event);
     }
@@ -304,7 +307,9 @@ async function handleMcpRequest(
   if (apiKey) {
     const authHeader = event.request.headers.get("authorization") ?? "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (token !== apiKey) {
+    const tokenBuf = Buffer.from(token);
+    const keyBuf = Buffer.from(apiKey);
+    if (tokenBuf.length !== keyBuf.length || !timingSafeEqual(tokenBuf, keyBuf)) {
       return new Response(
         JSON.stringify({
           jsonrpc: "2.0",
@@ -321,20 +326,28 @@ async function handleMcpRequest(
     enableJsonResponse
   });
 
+  let server: { close(): Promise<void> } | undefined;
+
   try {
     const engine = await getEngine();
-    const server = createMcpServer(engine);
+    server = createMcpServer(engine);
 
-    await server.connect(transport);
+    await (server as ReturnType<typeof createMcpServer>).connect(transport);
     const response = await transport.handleRequest(event.request);
 
-    // Clean up after response is created
-    await transport.close();
-    await server.close();
+    if (enableJsonResponse) {
+      // JSON mode: response is complete, clean up immediately
+      await transport.close();
+      await server.close();
+    }
+    // SSE mode: response body is a ReadableStream — transport and server
+    // will be garbage collected when the stream ends. Closing early would
+    // terminate the stream before the client receives data.
 
     return response;
   } catch (error) {
     try { await transport.close(); } catch {}
+    try { await server?.close(); } catch {}
 
     return new Response(
       JSON.stringify({
