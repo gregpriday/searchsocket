@@ -543,6 +543,43 @@ describe("searchsocketHandle llms.txt serving", () => {
     expect(resolve).toHaveBeenCalled();
   });
 
+  it("serves llms.txt even after API search requests have been made", async () => {
+    const staticDir = path.join(tmpDir, "static");
+    await fs.mkdir(staticDir, { recursive: true });
+    await fs.writeFile(path.join(staticDir, "llms.txt"), "# My Site\n", "utf8");
+
+    const config = makeConfig({
+      llmsTxt: {
+        enable: true,
+        outputPath: "static/llms.txt",
+        generateFull: false
+      }
+    } as Partial<ResolvedSearchSocketConfig>);
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn().mockResolvedValue({
+        q: "ok",
+        scope: "main",
+        results: [],
+        meta: { timingsMs: { search: 0, total: 0 } }
+      })
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config, cwd: tmpDir });
+    const resolve = vi.fn().mockResolvedValue(new Response("fallback"));
+
+    // First: a POST to /api/search (triggers config loading and sets apiPath)
+    const searchEvent = makeEvent({ pathname: "/api/search", method: "POST", body: { q: "test" } });
+    const searchResponse = await handle({ event: searchEvent, resolve });
+    expect(searchResponse.status).toBe(200);
+
+    // Second: a GET to /llms.txt should still work
+    const llmsEvent = makeEvent({ pathname: "/llms.txt", method: "GET" });
+    const llmsResponse = await handle({ event: llmsEvent, resolve });
+    expect(llmsResponse.status).toBe(200);
+    expect(await llmsResponse.text()).toContain("# My Site");
+  });
+
   it("does not intercept POST requests to /llms.txt", async () => {
     const staticDir = path.join(tmpDir, "static");
     await fs.mkdir(staticDir, { recursive: true });
