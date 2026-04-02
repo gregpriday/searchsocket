@@ -154,7 +154,7 @@ export class IndexPipeline {
 
     const manifestStart = stageStart();
     const existingHashes = options.force ? new Map<string, string>() : await this.store.getContentHashes(scope);
-    const existingPageHashes = (options.force || options.dryRun) ? new Map<string, string>() : await this.store.getPageHashes(scope);
+    const existingPageHashes = options.force ? new Map<string, string>() : await this.store.getPageHashes(scope);
     stageEnd("manifest", manifestStart);
     this.logger.debug(`Manifest: ${existingHashes.size} existing chunk hashes, ${existingPageHashes.size} existing page hashes loaded`);
 

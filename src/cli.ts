@@ -64,6 +64,8 @@ function parseDurationMs(value: string): number {
 
 function printIndexSummary(stats: IndexStats): void {
   process.stdout.write(`pages processed: ${stats.pagesProcessed}\n`);
+  process.stdout.write(`pages changed: ${stats.pagesChanged}\n`);
+  process.stdout.write(`pages deleted: ${stats.pagesDeleted}\n`);
   process.stdout.write(`chunks total: ${stats.chunksTotal}\n`);
   process.stdout.write(`chunks changed: ${stats.chunksChanged}\n`);
   process.stdout.write(`documents upserted: ${stats.documentsUpserted}\n`);

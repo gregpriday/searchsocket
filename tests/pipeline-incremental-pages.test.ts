@@ -164,9 +164,9 @@ describe("IndexPipeline incremental pages", () => {
     expect(store.upsertPages).toHaveBeenCalledTimes(1);
 
     // Verify only the changed page was upserted
-    const upsertedPages = vi.mocked(store.upsertPages).mock.calls[0][0] as PageRecord[];
+    const upsertedPages = vi.mocked(store.upsertPages).mock.calls[0]![0] as PageRecord[];
     expect(upsertedPages).toHaveLength(1);
-    expect(upsertedPages[0].url).toBe("/docs/alpha");
+    expect(upsertedPages[0]!.url).toBe("/docs/alpha");
   });
 
   it("deletes stale pages when a page is removed", async () => {
@@ -195,7 +195,7 @@ describe("IndexPipeline incremental pages", () => {
     expect(store.deletePagesByIds).toHaveBeenCalledTimes(1);
     expect(store.deletePages).not.toHaveBeenCalled();
 
-    const deletedIds = vi.mocked(store.deletePagesByIds).mock.calls[0][0] as string[];
+    const deletedIds = vi.mocked(store.deletePagesByIds).mock.calls[0]![0] as string[];
     expect(deletedIds).toContain("/docs/beta");
   });
 
