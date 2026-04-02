@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { tick } from "svelte";
-import { createSearch } from "../../src/svelte/index.svelte.ts";
+import { createSearch } from "../../src/svelte/index.svelte";
 import type { SearchResponse } from "../../src/types";
 
 function mockResponse(results: SearchResponse["results"] = []): SearchResponse {
@@ -356,9 +356,31 @@ describe("createSearch", () => {
     expect(search.results).toHaveLength(1);
   });
 
-  it("exposes destroy for cleanup", () => {
-    const search = createSearch({ fetchImpl: createMockFetch() });
-    expect(typeof search.destroy).toBe("function");
+  it("destroy stops reactivity", async () => {
+    const mockFetch = createMockFetch();
+    const search = createSearch({ fetchImpl: mockFetch, debounce: 0 });
     search.destroy();
+
+    search.query = "test";
+    await tick();
+    await advanceAndSettle(0);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("sets error on invalid JSON in success response", async () => {
+    const mockFetch = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response("not json", {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      })
+    );
+    const search = tracked(createSearch({ fetchImpl: mockFetch, debounce: 0 }));
+
+    await setQueryAndFlush(search, "test");
+    await advanceAndSettle(0);
+
+    expect(search.error).toBeInstanceOf(Error);
+    expect(search.error!.message).toBe("Invalid search response");
   });
 });

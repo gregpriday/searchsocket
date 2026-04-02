@@ -36,10 +36,6 @@ class LruCache<K, V> {
     }
   }
 
-  has(key: K): boolean {
-    return this.map.has(key);
-  }
-
   get size(): number {
     return this.map.size;
   }
