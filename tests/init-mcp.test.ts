@@ -82,6 +82,31 @@ describe("ensureMcpJson", () => {
     expect(fs.readFileSync(mcpPath, "utf8")).toBe("not valid json {{{");
   });
 
+  it("updates a stale searchsocket entry", async () => {
+    const dir = await makeTempDir();
+    const stale = {
+      mcpServers: {
+        searchsocket: { command: "npx", args: ["old-searchsocket"] },
+      },
+    };
+    fs.writeFileSync(path.join(dir, ".mcp.json"), JSON.stringify(stale, null, 2), "utf8");
+
+    ensureMcpJson(dir);
+
+    const content = JSON.parse(fs.readFileSync(path.join(dir, ".mcp.json"), "utf8"));
+    expect(content.mcpServers.searchsocket).toEqual(expectedEntry);
+  });
+
+  it("handles mcpServers being a non-object type gracefully", async () => {
+    const dir = await makeTempDir();
+    fs.writeFileSync(path.join(dir, ".mcp.json"), JSON.stringify({ mcpServers: "invalid" }, null, 2), "utf8");
+
+    ensureMcpJson(dir);
+
+    const content = JSON.parse(fs.readFileSync(path.join(dir, ".mcp.json"), "utf8"));
+    expect(content.mcpServers).toEqual({ searchsocket: expectedEntry });
+  });
+
   it("writes JSON with 2-space indent and trailing newline", async () => {
     const dir = await makeTempDir();
     ensureMcpJson(dir);

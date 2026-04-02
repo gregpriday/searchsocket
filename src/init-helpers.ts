@@ -29,7 +29,8 @@ export function ensureMcpJson(cwd: string): void {
     }
   }
 
-  const servers = (existing.mcpServers ?? {}) as Record<string, unknown>;
+  const raw_servers = existing.mcpServers ?? {};
+  const servers = (typeof raw_servers === "object" && !Array.isArray(raw_servers) ? raw_servers : {}) as Record<string, unknown>;
   if (JSON.stringify(servers["searchsocket"]) === JSON.stringify(entry)) {
     return;
   }
