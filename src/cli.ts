@@ -18,6 +18,7 @@ import { createUpstashStore } from "./vector";
 import { sanitizeScopeName } from "./utils/text";
 import type { IndexStats, ResolvedSearchSocketConfig, Scope, ScopeInfo } from "./types";
 import type { UpstashSearchStore } from "./vector/upstash";
+import { ensureMcpJson } from "./init-helpers";
 
 interface RootCommandOptions {
   cwd?: string;
@@ -251,9 +252,11 @@ program
     const configPath = writeMinimalConfig(cwd);
     const stateDir = ensureStateDir(cwd);
     ensureGitignore(cwd);
+    ensureMcpJson(cwd);
 
     process.stdout.write(`created/verified config: ${configPath}\n`);
-    process.stdout.write(`created/verified state dir: ${stateDir}\n\n`);
+    process.stdout.write(`created/verified state dir: ${stateDir}\n`);
+    process.stdout.write("created/verified .mcp.json (MCP server config for Claude Code)\n\n");
 
     process.stdout.write("SvelteKit hook snippet:\n\n");
     process.stdout.write('import { searchsocketHandle } from "searchsocket/sveltekit";\n\n');
