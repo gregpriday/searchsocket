@@ -141,6 +141,13 @@ export const searchSocketConfigSchema = z.object({
           port: z.number().int().positive().optional(),
           path: z.string().optional()
         })
+        .optional(),
+      handle: z
+        .object({
+          path: z.string().optional(),
+          apiKey: z.string().min(1).optional(),
+          enableJsonResponse: z.boolean().optional()
+        })
         .optional()
     })
     .optional(),

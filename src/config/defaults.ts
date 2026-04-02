@@ -90,6 +90,10 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       http: {
         port: 3338,
         path: "/mcp"
+      },
+      handle: {
+        path: "/api/mcp",
+        enableJsonResponse: true
       }
     },
     llmsTxt: {

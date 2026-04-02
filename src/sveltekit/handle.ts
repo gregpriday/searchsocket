@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
 import nodePath from "node:path";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { loadConfig, mergeConfig } from "../config/load";
 import { isServerless } from "../core/serverless";
 import { SearchSocketError, toErrorPayload } from "../errors";
+import { createServer as createMcpServer } from "../mcp/server";
 import { SearchEngine } from "../search/engine";
 import type { ResolvedSearchSocketConfig, SearchRequest, SearchSocketConfig } from "../types";
 
@@ -51,6 +53,9 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
   let configPromise: Promise<ResolvedSearchSocketConfig> | null = null;
   let apiPath = options.path;
   let llmsServePath: string | null = null;
+  let mcpPath: string | undefined;
+  let mcpApiKey: string | undefined;
+  let mcpEnableJsonResponse = true;
   let rateLimiter: InMemoryRateLimiter | null = null;
   let notConfigured = false;
 
@@ -72,6 +77,9 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
       configPromise = configP.then((config) => {
         apiPath = apiPath ?? config.api.path;
+        mcpPath = config.mcp.handle.path;
+        mcpApiKey = config.mcp.handle.apiKey;
+        mcpEnableJsonResponse = config.mcp.handle.enableJsonResponse;
 
         if (config.llmsTxt.enable) {
           llmsServePath = "/" + config.llmsTxt.outputPath.replace(/^static\//, "");
@@ -123,6 +131,18 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
   return async ({ event, resolve }: { event: any; resolve: (event: any) => Promise<Response> }) => {
     if (apiPath && event.url.pathname !== apiPath && event.url.pathname !== llmsServePath) {
+      // If config is loaded, also check MCP path before bailing
+      if (mcpPath && event.url.pathname === mcpPath) {
+        return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
+      }
+      if (mcpPath || !configPromise) {
+        return resolve(event);
+      }
+      // Config is pending — need to resolve to learn mcpPath
+      await getConfig();
+      if (mcpPath && event.url.pathname === mcpPath) {
+        return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
+      }
       return resolve(event);
     }
 
@@ -143,6 +163,10 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
       }
     }
 
+    // MCP endpoint handling
+    if (mcpPath && event.url.pathname === mcpPath) {
+      return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
+    }
     const targetPath = apiPath ?? config.api.path;
 
     if (event.url.pathname !== targetPath) {
@@ -268,6 +292,62 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
       );
     }
   };
+}
+
+async function handleMcpRequest(
+  event: any,
+  apiKey: string | undefined,
+  enableJsonResponse: boolean,
+  getEngine: () => Promise<SearchEngine>
+): Promise<Response> {
+  // Auth check
+  if (apiKey) {
+    const authHeader = event.request.headers.get("authorization") ?? "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    if (token !== apiKey) {
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          error: { code: -32001, message: "Unauthorized" },
+          id: null
+        }),
+        { status: 401, headers: { "content-type": "application/json" } }
+      );
+    }
+  }
+
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse
+  });
+
+  try {
+    const engine = await getEngine();
+    const server = createMcpServer(engine);
+
+    await server.connect(transport);
+    const response = await transport.handleRequest(event.request);
+
+    // Clean up after response is created
+    await transport.close();
+    await server.close();
+
+    return response;
+  } catch (error) {
+    try { await transport.close(); } catch {}
+
+    return new Response(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: {
+          code: -32603,
+          message: error instanceof Error ? error.message : "Internal server error"
+        },
+        id: null
+      }),
+      { status: 500, headers: { "content-type": "application/json" } }
+    );
+  }
 }
 
 function buildCorsHeaders(request: Request, config: ResolvedSearchSocketConfig): Record<string, string> {
