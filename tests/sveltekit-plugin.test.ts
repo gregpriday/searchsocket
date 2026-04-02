@@ -62,6 +62,20 @@ describe("searchsocketVitePlugin", () => {
     expect(create).toHaveBeenCalledTimes(2);
   });
 
+  it("does not trigger indexing when only CI=true is set", async () => {
+    process.env.CI = "true";
+    delete process.env.SEARCHSOCKET_AUTO_INDEX;
+
+    vi.spyOn(IndexPipeline, "create").mockResolvedValue({
+      run: vi.fn()
+    } as unknown as IndexPipeline);
+
+    const plugin = searchsocketVitePlugin({ cwd: process.cwd(), verbose: false });
+    await plugin.closeBundle?.();
+
+    expect(IndexPipeline.create).not.toHaveBeenCalled();
+  });
+
   it("does not start duplicate indexing runs when closeBundle is invoked concurrently", async () => {
     process.env.SEARCHSOCKET_AUTO_INDEX = "true";
 

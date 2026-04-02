@@ -44,11 +44,6 @@ function shouldRunAutoIndex(options: SearchSocketAutoIndexOptions): boolean {
     return true;
   }
 
-  // CI defaults to enabled when explicitly configured for content deployments.
-  if (process.env.CI && /^(1|true)$/i.test(process.env.CI)) {
-    return true;
-  }
-
   return false;
 }
 
