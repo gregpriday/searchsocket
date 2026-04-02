@@ -56,6 +56,7 @@ export const searchSocketConfigSchema = z.object({
       dropSelectors: z.array(z.string()).optional(),
       ignoreAttr: z.string().optional(),
       noindexAttr: z.string().optional(),
+      imageDescAttr: z.string().optional(),
       respectRobotsNoindex: z.boolean().optional()
     })
     .optional(),

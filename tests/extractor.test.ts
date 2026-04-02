@@ -170,6 +170,105 @@ describe("extractFromHtml", () => {
   });
 });
 
+describe("image preprocessing", () => {
+  it("replaces img with data-search-description text", () => {
+    const html = `<html><body><main><p>Before</p><img src="x.png" data-search-description="Product checkout flow"/><p>After</p></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.markdown).toContain("Product checkout flow");
+    expect(extracted?.markdown).not.toMatch(/!\[.*\]\(.*\)/);
+    expect(extracted?.markdown).not.toContain("x.png");
+  });
+
+  it("reads data-search-description from closest figure when not on img", () => {
+    const html = `<html><body><main><figure data-search-description="Dashboard overview"><img src="dash.png" alt="screenshot"/></figure></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.markdown).toContain("Dashboard overview");
+    expect(extracted?.markdown).not.toContain("dash.png");
+  });
+
+  it("prefers img attr over figure attr for data-search-description", () => {
+    const html = `<html><body><main><figure data-search-description="Figure desc"><img src="x.png" data-search-description="Img desc"/></figure></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.markdown).toContain("Img desc");
+    expect(extracted?.markdown).not.toContain("Figure desc");
+  });
+
+  it("combines meaningful alt with figcaption", () => {
+    const html = `<html><body><main><figure><img src="chart.png" alt="Revenue chart for Q4"/><figcaption>Quarterly revenue breakdown</figcaption></figure></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.markdown).toContain("Revenue chart for Q4");
+    expect(extracted?.markdown).toContain("Quarterly revenue breakdown");
+    expect(extracted?.markdown).not.toContain("chart.png");
+  });
+
+  it("uses meaningful alt alone when no figcaption", () => {
+    const html = `<html><body><main><img src="photo.jpg" alt="Team celebrating product launch"/></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.markdown).toContain("Team celebrating product launch");
+    expect(extracted?.markdown).not.toContain("photo.jpg");
+  });
+
+  it("removes img with empty alt (decorative)", () => {
+    const html = `<html><body><main><p>Content here</p><img src="spacer.gif" alt=""/></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.markdown).not.toContain("spacer.gif");
+    expect(extracted?.markdown).not.toMatch(/!\[/);
+  });
+
+  it("removes img with garbage alt text", () => {
+    const html = `<html><body><main><p>Content</p><img src="hero.png" alt="image"/></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.markdown).not.toContain("hero.png");
+    expect(extracted?.markdown).not.toMatch(/!\[/);
+  });
+
+  it("removes img with filename-like alt", () => {
+    const html = `<html><body><main><p>Content</p><img src="/assets/hero-v2.jpg" alt="hero-v2.jpg"/></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.markdown).not.toContain("hero-v2.jpg");
+    expect(extracted?.markdown).not.toMatch(/!\[/);
+  });
+
+  it("removes img with short alt (< 5 chars)", () => {
+    const html = `<html><body><main><p>Content</p><img src="x.png" alt="btn"/></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.markdown).not.toContain("btn");
+    expect(extracted?.markdown).not.toMatch(/!\[/);
+  });
+
+  it("handles picture wrapper — replaces entire picture element", () => {
+    const html = `<html><body><main><picture><source srcset="x.webp" type="image/webp"/><img src="x.png" data-search-description="Workflow diagram"/></picture></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.markdown).toContain("Workflow diagram");
+    expect(extracted?.markdown).not.toContain("x.png");
+    expect(extracted?.markdown).not.toContain("x.webp");
+  });
+
+  it("supports custom imageDescAttr config", () => {
+    const customConfig = {
+      ...config,
+      extract: { ...config.extract, imageDescAttr: "data-alt-search" }
+    };
+    const html = `<html><body><main><img src="x.png" data-alt-search="Custom desc"/></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, customConfig);
+    expect(extracted?.markdown).toContain("Custom desc");
+    expect(extracted?.markdown).not.toContain("x.png");
+  });
+
+  it("uses figcaption alone when alt is not meaningful", () => {
+    const html = `<html><body><main><figure><img src="x.png" alt="image"/><figcaption>A detailed explanation</figcaption></figure></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.markdown).toContain("A detailed explanation");
+    expect(extracted?.markdown).not.toMatch(/!\[/);
+  });
+
+  it("handles HTML special chars in description text", () => {
+    const html = `<html><body><main><img src="x.png" data-search-description="Compare A &lt; B &amp; C > D"/></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    expect(extracted?.markdown).toContain("Compare A < B & C > D");
+  });
+});
+
 describe("extractFromMarkdown description/keywords", () => {
   it("extracts description from frontmatter", () => {
     const md = `---

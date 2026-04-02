@@ -1,4 +1,4 @@
-import { load } from "cheerio";
+import { load, type Cheerio, type CheerioAPI, type AnyNode } from "cheerio";
 import matter from "gray-matter";
 import TurndownService from "turndown";
 import { gfm, highlightedCodeBlock, strikethrough, tables, taskListItems } from "turndown-plugin-gfm";
@@ -23,6 +23,95 @@ function hasTopLevelNoindexComment(markdown: string): boolean {
   }
 
   return false;
+}
+
+const GARBAGE_ALT_WORDS = new Set([
+  "image", "photo", "picture", "icon", "logo", "banner",
+  "screenshot", "thumbnail", "img", "graphic", "illustration",
+  "spacer", "pixel", "placeholder", "avatar", "background"
+]);
+
+const IMAGE_EXT_RE = /\.(jpg|jpeg|png|gif|svg|webp|avif|bmp|ico)(\?.*)?$/i;
+
+function isMeaningfulAlt(alt: string): boolean {
+  const trimmed = alt.trim();
+  if (!trimmed || trimmed.length < 5) return false;
+  if (IMAGE_EXT_RE.test(trimmed)) return false;
+  if (GARBAGE_ALT_WORDS.has(trimmed.toLowerCase())) return false;
+  return true;
+}
+
+function resolveImageText(
+  img: Cheerio<AnyNode>,
+  $: CheerioAPI,
+  imageDescAttr: string
+): string | null {
+  // Priority 1: data-search-description on the img itself
+  const imgDesc = img.attr(imageDescAttr)?.trim();
+  if (imgDesc) return imgDesc;
+
+  // Priority 2: data-search-description on the closest <figure>
+  const figure = img.closest("figure");
+  if (figure.length) {
+    const figDesc = figure.attr(imageDescAttr)?.trim();
+    if (figDesc) return figDesc;
+  }
+
+  const alt = img.attr("alt")?.trim() ?? "";
+  const caption = figure.length
+    ? figure.find("figcaption").first().text().trim()
+    : "";
+
+  // Priority 3: meaningful alt + figcaption
+  if (isMeaningfulAlt(alt) && caption) {
+    return `${alt} — ${caption}`;
+  }
+
+  // Priority 4: meaningful alt alone
+  if (isMeaningfulAlt(alt)) {
+    return alt;
+  }
+
+  // Priority 5: figcaption alone (no meaningful alt)
+  if (caption) {
+    return caption;
+  }
+
+  // No useful text — remove
+  return null;
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function preprocessImages(
+  root: Cheerio<AnyNode>,
+  $: CheerioAPI,
+  imageDescAttr: string
+): void {
+  // Pass 1: <picture> elements — process inner <img>, replace whole <picture>
+  root.find("picture").each((_i, el) => {
+    const picture = $(el);
+    const img = picture.find("img").first();
+    const text = img.length ? resolveImageText(img, $, imageDescAttr) : null;
+    if (text) {
+      picture.replaceWith(`<span>${escapeHtml(text)}</span>`);
+    } else {
+      picture.remove();
+    }
+  });
+
+  // Pass 2: bare <img> elements (not already removed with <picture>)
+  root.find("img").each((_i, el) => {
+    const img = $(el);
+    const text = resolveImageText(img, $, imageDescAttr);
+    if (text) {
+      img.replaceWith(`<span>${escapeHtml(text)}</span>`);
+    } else {
+      img.remove();
+    }
+  });
 }
 
 export function extractFromHtml(
@@ -90,6 +179,9 @@ export function extractFromHtml(
   }
 
   root.find(`[${config.extract.ignoreAttr}]`).remove();
+
+  // Replace <img> elements with descriptive text before Turndown
+  preprocessImages(root, $, config.extract.imageDescAttr);
 
   const outgoingLinks: string[] = [];
   root.find("a[href]").each((_index, node) => {
