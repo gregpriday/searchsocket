@@ -19,6 +19,7 @@ import { hrTimeMs, nowIso } from "../utils/time";
 import { getUrlDepth, normalizeUrlPath } from "../utils/path";
 import { Logger } from "../core/logger";
 import { sha256 } from "../utils/hash";
+import { writeLlmsTxt } from "./llms-txt";
 import type {
   Chunk,
   ExtractedPage,
@@ -520,6 +521,13 @@ export class IndexPipeline {
       this.logger.info(`Upserted ${documentsUpserted} document${documentsUpserted === 1 ? "" : "s"} (${stageTimingsMs["upsert"]}ms)`);
     } else {
       this.logger.info("No chunks to upsert — all up to date");
+    }
+
+    // Generate llms.txt if enabled
+    if (this.config.llmsTxt.enable && !options.dryRun) {
+      const llmsStart = stageStart();
+      await writeLlmsTxt(pages, this.config, this.cwd, this.logger);
+      stageEnd("llms_txt", llmsStart);
     }
 
     this.logger.info("Done.");

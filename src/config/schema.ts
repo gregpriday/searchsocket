@@ -144,6 +144,15 @@ export const searchSocketConfigSchema = z.object({
         .optional()
     })
     .optional(),
+  llmsTxt: z
+    .object({
+      enable: z.boolean().optional(),
+      outputPath: z.string().optional(),
+      title: z.string().optional(),
+      description: z.string().optional(),
+      generateFull: z.boolean().optional()
+    })
+    .optional(),
   state: z
     .object({
       dir: z.string().optional()

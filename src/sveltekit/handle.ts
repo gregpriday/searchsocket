@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import nodePath from "node:path";
 import { loadConfig, mergeConfig } from "../config/load";
 import { isServerless } from "../core/serverless";
 import { SearchSocketError, toErrorPayload } from "../errors";
@@ -100,6 +102,25 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
     }
 
     const config = await getConfig();
+
+    // Serve llms.txt if enabled and the file exists
+    if (config.llmsTxt.enable && event.request.method === "GET") {
+      const llmsPath = "/" + config.llmsTxt.outputPath.replace(/^static\//, "");
+      if (event.url.pathname === llmsPath) {
+        const cwd = options.cwd ?? process.cwd();
+        const filePath = nodePath.resolve(cwd, config.llmsTxt.outputPath);
+        try {
+          const content = await fs.readFile(filePath, "utf8");
+          return new Response(content, {
+            status: 200,
+            headers: { "content-type": "text/plain; charset=utf-8" }
+          });
+        } catch {
+          return resolve(event);
+        }
+      }
+    }
+
     const targetPath = apiPath ?? config.api.path;
 
     if (event.url.pathname !== targetPath) {

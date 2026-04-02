@@ -165,6 +165,10 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
         ...parsed.mcp?.http
       }
     },
+    llmsTxt: {
+      ...defaults.llmsTxt,
+      ...parsed.llmsTxt
+    },
     state: {
       ...defaults.state,
       ...parsed.state
