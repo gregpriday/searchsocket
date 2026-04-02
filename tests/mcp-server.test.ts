@@ -221,6 +221,11 @@ describe("find_source_file tool", () => {
     expect(parsed).not.toHaveProperty("score");
     expect(parsed).not.toHaveProperty("title");
     expect(parsed).not.toHaveProperty("chunks");
+    expect(mockEngine.search).toHaveBeenCalledWith({
+      q: "about us",
+      topK: 1,
+      scope: undefined
+    });
   });
 
   it("returns error message when no results found", async () => {
@@ -289,5 +294,16 @@ describe("find_source_file tool", () => {
       topK: 1,
       scope: "my-scope"
     });
+  });
+
+  it("propagates engine.search errors", async () => {
+    const mockEngine = {
+      search: vi.fn().mockRejectedValue(new Error("Upstash unreachable"))
+    };
+
+    const handler = getHandler(mockEngine);
+    await expect(handler({ query: "fail" })).rejects.toThrow(
+      "Upstash unreachable"
+    );
   });
 });
