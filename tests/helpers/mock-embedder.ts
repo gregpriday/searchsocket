@@ -7,7 +7,7 @@ import type { GeminiEmbedder } from "../../src/vector/gemini";
  */
 export function createMockEmbedder(dimensions = 1024): GeminiEmbedder {
   return {
-    embedTexts: vi.fn(async (texts: string[]) => {
+    embedTexts: vi.fn(async (texts: string[], _taskType?: string, _titles?: string[]) => {
       return texts.map(() => new Array(dimensions).fill(0));
     }),
     embedQuery: vi.fn(async () => {

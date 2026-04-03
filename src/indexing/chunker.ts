@@ -5,6 +5,7 @@ import { extractFirstParagraph, normalizeText, toSnippet } from "../utils/text";
 
 interface Section {
   sectionTitle?: string;
+  headingLevel?: number;
   headingPath: string[];
   text: string;
 }
@@ -28,6 +29,7 @@ function parseHeadingSections(markdown: string, headingPathDepth: number): Secti
     if (normalizeText(current.text)) {
       sections.push({
         sectionTitle: current.sectionTitle,
+        headingLevel: current.headingLevel,
         headingPath: current.headingPath,
         text: current.text.trim()
       });
@@ -50,6 +52,7 @@ function parseHeadingSections(markdown: string, headingPathDepth: number): Secti
 
       current = {
         sectionTitle: title,
+        headingLevel: level,
         headingPath: headingStack.filter((entry): entry is string => Boolean(entry)).slice(0, headingPathDepth),
         text: `${line}\n`
       };
@@ -203,7 +206,7 @@ function splitOversizedBlock(block: string, config: ResolvedSearchSocketConfig["
   return chunks.length > 0 ? chunks : [trimmed];
 }
 
-function splitSection(section: Section, config: ResolvedSearchSocketConfig["chunking"]): Array<Pick<Chunk, "sectionTitle" | "headingPath" | "chunkText">> {
+function splitSection(section: Section, config: ResolvedSearchSocketConfig["chunking"]): Array<Pick<Chunk, "sectionTitle" | "headingLevel" | "headingPath" | "chunkText">> {
   const text = section.text.trim();
   if (!text) {
     return [];
@@ -213,6 +216,7 @@ function splitSection(section: Section, config: ResolvedSearchSocketConfig["chun
     return [
       {
         sectionTitle: section.sectionTitle,
+        headingLevel: section.headingLevel,
         headingPath: section.headingPath,
         chunkText: text
       }
@@ -271,6 +275,7 @@ function splitSection(section: Section, config: ResolvedSearchSocketConfig["chun
 
   return merged.map((chunkText) => ({
     sectionTitle: section.sectionTitle,
+    headingLevel: section.headingLevel,
     headingPath: section.headingPath,
     chunkText
   }));
@@ -290,6 +295,16 @@ export function buildSummaryChunkText(page: IndexedPage): string {
   }
 
   return parts.join("\n\n");
+}
+
+export function buildEmbeddingTitle(chunk: Chunk): string | undefined {
+  if (!chunk.sectionTitle || chunk.headingLevel === undefined) return undefined;
+
+  if (chunk.headingPath.length > 1) {
+    return `${chunk.title} — ${chunk.headingPath.join(" > ")}`;
+  }
+
+  return `${chunk.title} — ${chunk.sectionTitle}`;
 }
 
 export function buildEmbeddingText(chunk: Chunk, prependTitle: boolean): string {
@@ -355,6 +370,7 @@ export function chunkPage(
       path: page.url,
       title: page.title,
       sectionTitle: entry.sectionTitle,
+      headingLevel: entry.headingLevel,
       headingPath: entry.headingPath,
       chunkText: entry.chunkText,
       snippet: toSnippet(entry.chunkText),
@@ -369,7 +385,11 @@ export function chunkPage(
     };
 
     const embeddingText = buildEmbeddingText(chunk, config.chunking.prependTitle);
-    chunk.contentHash = sha256(normalizeText(embeddingText));
+    const embeddingTitle = config.chunking.weightHeadings ? buildEmbeddingTitle(chunk) : undefined;
+    const hashInput = embeddingTitle
+      ? `${normalizeText(embeddingText)}|title:${embeddingTitle}`
+      : normalizeText(embeddingText);
+    chunk.contentHash = sha256(hashInput);
     chunks.push(chunk);
   }
 

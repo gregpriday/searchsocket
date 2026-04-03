@@ -6,7 +6,7 @@ import { SearchSocketError } from "../errors";
 import { createUpstashStore } from "../vector";
 import { UpstashSearchStore } from "../vector/upstash";
 import { GeminiEmbedder } from "../vector/gemini";
-import { buildEmbeddingText, chunkPage } from "./chunker";
+import { buildEmbeddingText, buildEmbeddingTitle, chunkPage } from "./chunker";
 import { extractFromHtml, extractFromMarkdown } from "./extractor";
 import { buildRoutePatterns, mapUrlToRoute } from "./route-mapper";
 import { loadBuildPages } from "./sources/build";
@@ -632,7 +632,10 @@ export class IndexPipeline {
       const embeddingTexts = changedChunks.map((chunk) =>
         buildEmbeddingText(chunk, this.config.chunking.prependTitle)
       );
-      const vectors = await this.embedder.embedTexts(embeddingTexts, this.config.embedding.taskType);
+      const embeddingTitles = this.config.chunking.weightHeadings
+        ? changedChunks.map((chunk) => buildEmbeddingTitle(chunk) ?? "")
+        : undefined;
+      const vectors = await this.embedder.embedTexts(embeddingTexts, this.config.embedding.taskType, embeddingTitles);
 
       this.logger.info(`Upserting ${changedChunks.length} chunk${changedChunks.length === 1 ? "" : "s"} to Upstash Vector...`);
 

@@ -63,6 +63,7 @@ export interface SearchSocketConfig {
     dontSplitInside?: Array<"code" | "table" | "blockquote">;
     prependTitle?: boolean;
     pageSummaryChunk?: boolean;
+    weightHeadings?: boolean;
   };
   upstash?: {
     url?: string;
@@ -202,6 +203,7 @@ export interface ResolvedSearchSocketConfig {
     dontSplitInside: Array<"code" | "table" | "blockquote">;
     prependTitle: boolean;
     pageSummaryChunk: boolean;
+    weightHeadings: boolean;
   };
   upstash: {
     url?: string;
@@ -341,6 +343,7 @@ export interface Chunk {
   path: string;
   title: string;
   sectionTitle?: string;
+  headingLevel?: number;
   headingPath: string[];
   chunkText: string;
   snippet: string;
