@@ -72,7 +72,7 @@ export default {
 ## Chunking
 
 - `chunking.strategy` (`hybrid`) — chunking strategy
-- `chunking.maxChars` (default `2200`) — maximum characters per chunk
+- `chunking.maxChars` (default `1500`) — maximum characters per chunk
 - `chunking.overlapChars` (default `200`) — overlap between consecutive chunks
 - `chunking.minChars` (default `250`) — minimum characters per chunk (smaller chunks are merged)
 - `chunking.headingPathDepth` (default `3`) — max heading depth for section path tracking
