@@ -80,9 +80,9 @@ describe("IndexPipeline hooks", () => {
       expect(transformPage).toHaveBeenCalledTimes(1);
       expect(stats.pagesProcessed).toBe(1);
 
-      const upsertCall = (store.upsertChunks as ReturnType<typeof vi.fn>).mock.calls[0];
+      const upsertCall = (store.upsertChunks as ReturnType<typeof vi.fn>).mock.calls[0]!;
       const docs = upsertCall[0] as Array<{ content: { title: string } }>;
-      expect(docs[0].content.title).toBe("Modified Title");
+      expect(docs[0]!.content.title).toBe("Modified Title");
     });
 
     it("skips pages when returning null", async () => {
@@ -200,7 +200,7 @@ describe("IndexPipeline hooks", () => {
       await pipeline.run({ changedOnly: true });
 
       expect(beforeIndex).toHaveBeenCalledTimes(1);
-      const receivedChunks = beforeIndex.mock.calls[0][0] as Chunk[];
+      const receivedChunks = beforeIndex.mock.calls[0]![0] as Chunk[];
       expect(receivedChunks.length).toBeGreaterThan(0);
     });
 
@@ -238,7 +238,7 @@ describe("IndexPipeline hooks", () => {
       const stats = await pipeline.run({ changedOnly: true });
 
       expect(afterIndex).toHaveBeenCalledTimes(1);
-      const receivedStats = afterIndex.mock.calls[0][0] as IndexStats;
+      const receivedStats = afterIndex.mock.calls[0]![0] as IndexStats;
       expect(receivedStats.pagesProcessed).toBe(stats.pagesProcessed);
       expect(receivedStats.documentsUpserted).toBe(stats.documentsUpserted);
     });

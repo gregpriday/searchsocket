@@ -257,18 +257,20 @@ export class IndexPipeline {
         continue;
       }
 
+      let accepted: ExtractedPage;
       if (this.hooks.transformPage) {
         const transformed = await this.hooks.transformPage(extracted);
         if (transformed === null) {
           this.logger.debug(`Page ${sourcePage.url} skipped by transformPage hook`);
           continue;
         }
-        extractedPages.push(transformed);
+        accepted = transformed;
       } else {
-        extractedPages.push(extracted);
+        accepted = extracted;
       }
+      extractedPages.push(accepted);
       this.logger.event("page_extracted", {
-        url: extractedPages[extractedPages.length - 1].url
+        url: accepted.url
       });
     }
 
