@@ -84,7 +84,7 @@ export class UpstashSearchStore {
   ): Promise<void> {
     if (chunks.length === 0) return;
 
-    const BATCH_SIZE = 100;
+    const BATCH_SIZE = 90;
     for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
       const batch = chunks.slice(i, i + BATCH_SIZE);
       await this.chunksNs.upsert(
@@ -285,7 +285,7 @@ export class UpstashSearchStore {
   async deleteByIds(ids: string[], _scope: Scope): Promise<void> {
     if (ids.length === 0) return;
 
-    const BATCH_SIZE = 100;
+    const BATCH_SIZE = 90;
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const batch = ids.slice(i, i + BATCH_SIZE);
       await this.chunksNs.delete(batch);
@@ -320,7 +320,7 @@ export class UpstashSearchStore {
       }
 
       if (ids.length > 0) {
-        const BATCH_SIZE = 100;
+        const BATCH_SIZE = 90;
         for (let i = 0; i < ids.length; i += BATCH_SIZE) {
           const batch = ids.slice(i, i + BATCH_SIZE);
           await ns.delete(batch);
@@ -376,7 +376,7 @@ export class UpstashSearchStore {
     const map = new Map<string, string>();
     if (keys.length === 0) return map;
 
-    const BATCH_SIZE = 100;
+    const BATCH_SIZE = 90;
     for (let i = 0; i < keys.length; i += BATCH_SIZE) {
       const batch = keys.slice(i, i + BATCH_SIZE);
       try {
@@ -546,7 +546,7 @@ export class UpstashSearchStore {
   async deletePagesByIds(ids: string[], _scope: Scope): Promise<void> {
     if (ids.length === 0) return;
 
-    const BATCH_SIZE = 100;
+    const BATCH_SIZE = 90;
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const batch = ids.slice(i, i + BATCH_SIZE);
       await this.pagesNs.delete(batch);
@@ -563,7 +563,7 @@ export class UpstashSearchStore {
   ): Promise<void> {
     if (pages.length === 0) return;
 
-    const BATCH_SIZE = 100;
+    const BATCH_SIZE = 90;
     for (let i = 0; i < pages.length; i += BATCH_SIZE) {
       const batch = pages.slice(i, i + BATCH_SIZE);
       await this.pagesNs.upsert(
@@ -739,7 +739,7 @@ export class UpstashSearchStore {
       }
 
       if (ids.length > 0) {
-        const BATCH_SIZE = 100;
+        const BATCH_SIZE = 90;
         for (let i = 0; i < ids.length; i += BATCH_SIZE) {
           const batch = ids.slice(i, i + BATCH_SIZE);
           await ns.delete(batch);
