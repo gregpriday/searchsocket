@@ -432,13 +432,13 @@ describe("SearchEngine - adversarial cases", () => {
     expect(result.results[0]!.snippet).toContain("Terminal Features");
   });
 
-  it("keeps original snippet when it is long enough", async () => {
+  it("generates query-aware snippet from chunkText when query is present", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
     config.ranking.minScore = 0;
     config.ranking.scoreGapThreshold = 0;
 
-    const longSnippet = "This is a sufficiently long snippet that should not be replaced by chunk text fallback.";
+    const longSnippet = "This is the original stored snippet that was computed at index time without query context.";
     const hits: VectorHit[] = [
       {
         ...makeHit("chunk-long", "/docs"),
@@ -446,7 +446,7 @@ describe("SearchEngine - adversarial cases", () => {
         metadata: {
           ...makeHit("chunk-long", "/docs").metadata,
           snippet: longSnippet,
-          chunkText: "Different chunk text content."
+          chunkText: "Different chunk text content about docs and documentation features."
         }
       }
     ];
@@ -459,7 +459,9 @@ describe("SearchEngine - adversarial cases", () => {
     });
 
     const result = await engine.search({ q: "docs", topK: 10 });
-    expect(result.results[0]!.snippet).toBe(longSnippet);
+    // Query-aware excerpt regenerates from chunkText, so it won't match the stored snippet
+    expect(result.results[0]!.snippet).not.toBe(longSnippet);
+    expect(result.results[0]!.snippet).toContain("docs");
   });
 
   it("trims low-confidence results via score-gap trimming", async () => {
@@ -484,6 +486,108 @@ describe("SearchEngine - adversarial cases", () => {
     // The weak result should be trimmed due to score gap
     expect(result.results.length).toBe(2);
     expect(result.results.map((r) => r.url)).toEqual(["/relevant", "/also-relevant"]);
+  });
+
+  it("populates chunkText on top-level result when metadata.chunkText is present", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minScore = 0;
+    config.ranking.scoreGapThreshold = 0;
+
+    const hits: VectorHit[] = [
+      {
+        ...makeHit("chunk-1", "/page"),
+        score: 0.9,
+        metadata: {
+          ...makeHit("chunk-1", "/page").metadata,
+          chunkText: "Full markdown content of the chunk."
+        }
+      }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
+    });
+
+    const result = await engine.search({ q: "test", topK: 10 });
+    expect(result.results[0]!.chunkText).toBe("Full markdown content of the chunk.");
+  });
+
+  it("chunkText is undefined when metadata.chunkText is empty", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minScore = 0;
+    config.ranking.scoreGapThreshold = 0;
+
+    const hits: VectorHit[] = [
+      {
+        ...makeHit("chunk-1", "/page"),
+        score: 0.9,
+        metadata: {
+          ...makeHit("chunk-1", "/page").metadata,
+          chunkText: ""
+        }
+      }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
+    });
+
+    const result = await engine.search({ q: "test", topK: 10 });
+    expect(result.results[0]!.chunkText).toBeUndefined();
+  });
+
+  it("populates chunkText on nested chunk entries", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minScore = 0;
+    config.ranking.scoreGapThreshold = 0;
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/page"), score: 0.9, metadata: { ...makeHit("chunk-1", "/page").metadata, chunkText: "Chunk one content." } },
+      { ...makeHit("chunk-2", "/page"), score: 0.85, metadata: { ...makeHit("chunk-2", "/page").metadata, chunkText: "Chunk two content." } }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
+    });
+
+    const result = await engine.search({ q: "test", topK: 10 });
+    const pageResult = result.results[0]!;
+    expect(pageResult.chunks).toBeDefined();
+    expect(pageResult.chunks![0]!.chunkText).toBe("Chunk one content.");
+    expect(pageResult.chunks![1]!.chunkText).toBe("Chunk two content.");
+  });
+
+  it("populates chunkText in chunk-mode results", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minScore = 0;
+    config.ranking.scoreGapThreshold = 0;
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/page"), score: 0.9, metadata: { ...makeHit("chunk-1", "/page").metadata, chunkText: "Chunk markdown here." } }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
+    });
+
+    const result = await engine.search({ q: "test", topK: 10, groupBy: "chunk" });
+    expect(result.results[0]!.chunkText).toBe("Chunk markdown here.");
   });
 
   it("returns empty results for gibberish queries with low scores", async () => {

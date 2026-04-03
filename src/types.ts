@@ -430,6 +430,7 @@ export interface ScoreBreakdown {
 export interface SearchResultChunk {
   sectionTitle?: string;
   snippet: string;
+  chunkText?: string;
   headingPath: string[];
   score: number;
 }
@@ -439,6 +440,7 @@ export interface SearchResult {
   title: string;
   sectionTitle?: string;
   snippet: string;
+  chunkText?: string;
   score: number;
   routeFile: string;
   chunks?: SearchResultChunk[];
