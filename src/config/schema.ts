@@ -174,11 +174,6 @@ export const searchSocketConfigSchema = z.object({
       generateFull: z.boolean().optional()
     })
     .optional(),
-  analytics: z
-    .object({
-      enabled: z.boolean().optional()
-    })
-    .optional(),
   state: z
     .object({
       dir: z.string().optional()
