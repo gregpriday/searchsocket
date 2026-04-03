@@ -1039,7 +1039,6 @@ export default defineConfig({
 
 | Variable | Description |
 |----------|-------------|
-| `GEMINI_API_KEY` | Google Gemini API key — only for experimental image embedding (`embedding.images.enable: true`). Not needed for standard text search. |
 | `SEARCHSOCKET_SCOPE` | Override scope (when `scope.mode: "env"`) |
 | `SEARCHSOCKET_AUTO_INDEX` | Enable build-triggered indexing (`1`, `true`, or `yes`) |
 | `SEARCHSOCKET_DISABLE_AUTO_INDEX` | Disable build-triggered indexing |

@@ -95,7 +95,7 @@ Upstash handles embedding server-side via the `data` field. These settings must 
 - `embedding.dimensions` (default `1024`) — vector dimensions
 - `embedding.taskType` (default `RETRIEVAL_DOCUMENT`) — embedding task type
 - `embedding.batchSize` (default `100`) — vectors per upsert batch
-- `embedding.images.enable` (default `false`) — experimental image embedding via Google Gemini (requires `GEMINI_API_KEY`)
+- `embedding.images.enable` — unused, kept for backwards compatibility. Images are made searchable via text descriptions (`data-search-description`, `alt`, `figcaption`), not image embeddings.
 
 ### Non-English / multilingual sites
 
@@ -280,7 +280,6 @@ Required:
 
 Optional:
 
-- `GEMINI_API_KEY` — Google Gemini API key. Only required for experimental image embedding (`embedding.images.enable: true`). Not needed for standard text search.
 - `SEARCHSOCKET_SCOPE` — override scope (when `scope.mode: "env"`)
 - `SEARCHSOCKET_AUTO_INDEX` — enable build-triggered indexing (`1`, `true`, or `yes`)
 - `SEARCHSOCKET_DISABLE_AUTO_INDEX` — disable build-triggered indexing

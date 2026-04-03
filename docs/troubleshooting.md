@@ -86,7 +86,9 @@ SearchSocket automatically detects serverless environments (Vercel, Netlify, Clo
 
 ### `GEMINI_API_KEY` — do I need it?
 
-No, not for standard usage. Upstash handles all text embeddings server-side. The `GEMINI_API_KEY` environment variable is only needed if you enable experimental image embedding (`embedding.images.enable: true`), which uses Google's Gemini API to generate embeddings for images. For the default text-based search, you only need the two Upstash variables.
+No. SearchSocket does not use the Gemini API. Upstash handles all embeddings server-side. You only need the two Upstash environment variables (`UPSTASH_VECTOR_REST_URL` and `UPSTASH_VECTOR_REST_TOKEN`).
+
+Images are made searchable by extracting their text descriptions (`data-search-description`, `alt` text, `figcaption`) during indexing — no separate embedding API is needed.
 
 ## Diagnostic commands
 
