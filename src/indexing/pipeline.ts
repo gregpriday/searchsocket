@@ -81,7 +81,8 @@ export function buildPageContentHash(page: IndexedPage): string {
     (page.keywords ?? []).slice().sort().join(","),
     page.tags.slice().sort().join(","),
     page.markdown,
-    String(page.outgoingLinks)
+    String(page.outgoingLinks),
+    String(page.publishedAt ?? "")
   ];
   return sha256(parts.join("|"));
 }
@@ -450,7 +451,8 @@ export class IndexPipeline {
         tags: page.tags,
         markdown: page.markdown,
         description: page.description,
-        keywords: page.keywords
+        keywords: page.keywords,
+        publishedAt: page.publishedAt
       };
 
       pages.push(indexedPage);
@@ -476,7 +478,8 @@ export class IndexPipeline {
         summary,
         description: p.description,
         keywords: p.keywords,
-        contentHash: buildPageContentHash(p)
+        contentHash: buildPageContentHash(p),
+        publishedAt: p.publishedAt
       };
     });
 
@@ -511,7 +514,8 @@ export class IndexPipeline {
             outgoingLinks: r.outgoingLinks,
             depth: r.depth,
             indexedAt: r.indexedAt,
-            contentHash: r.contentHash ?? ""
+            contentHash: r.contentHash ?? "",
+            publishedAt: r.publishedAt ?? null
           }
         }));
         await this.store.upsertPages(pageDocs, scope);
@@ -537,7 +541,8 @@ export class IndexPipeline {
               outgoingLinks: r.outgoingLinks,
               depth: r.depth,
               indexedAt: r.indexedAt,
-              contentHash: r.contentHash ?? ""
+              contentHash: r.contentHash ?? "",
+              publishedAt: r.publishedAt ?? null
             }
           }));
           await this.store.upsertPages(pageDocs, scope);
@@ -649,7 +654,8 @@ export class IndexPipeline {
           incomingLinks: chunk.incomingLinks,
           routeFile: chunk.routeFile,
           description: chunk.description ?? "",
-          keywords: chunk.keywords ?? []
+          keywords: chunk.keywords ?? [],
+          publishedAt: chunk.publishedAt ?? null
         }
       }));
 

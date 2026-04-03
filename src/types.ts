@@ -87,6 +87,8 @@ export interface SearchSocketConfig {
   ranking?: {
     enableIncomingLinkBoost?: boolean;
     enableDepthBoost?: boolean;
+    enableFreshnessBoost?: boolean;
+    freshnessDecayRate?: number;
     pageWeights?: Record<string, number>;
     aggregationCap?: number;
     aggregationDecay?: number;
@@ -98,6 +100,7 @@ export interface SearchSocketConfig {
       depth?: number;
       aggregation?: number;
       titleMatch?: number;
+      freshness?: number;
     };
   };
   api?: {
@@ -223,6 +226,8 @@ export interface ResolvedSearchSocketConfig {
   ranking: {
     enableIncomingLinkBoost: boolean;
     enableDepthBoost: boolean;
+    enableFreshnessBoost: boolean;
+    freshnessDecayRate: number;
     pageWeights: Record<string, number>;
     aggregationCap: number;
     aggregationDecay: number;
@@ -234,6 +239,7 @@ export interface ResolvedSearchSocketConfig {
       depth: number;
       aggregation: number;
       titleMatch: number;
+      freshness: number;
     };
   };
   api: {
@@ -308,6 +314,7 @@ export interface ExtractedPage {
   description?: string;
   keywords?: string[];
   weight?: number;
+  publishedAt?: number;
 }
 
 export interface IndexedPage {
@@ -324,6 +331,7 @@ export interface IndexedPage {
   markdown: string;
   description?: string;
   keywords?: string[];
+  publishedAt?: number;
 }
 
 export interface Chunk {
@@ -343,6 +351,7 @@ export interface Chunk {
   contentHash: string;
   description?: string;
   keywords?: string[];
+  publishedAt?: number;
 }
 
 export interface VectorHit {
@@ -369,6 +378,7 @@ export interface VectorHit {
     keywords?: string[];
     imageSrc?: string;
     imageAlt?: string;
+    publishedAt?: number;
   };
 }
 
@@ -389,6 +399,7 @@ export interface PageRecord {
   description?: string;
   keywords?: string[];
   contentHash?: string;
+  publishedAt?: number;
 }
 
 export interface PageHit {
@@ -401,6 +412,7 @@ export interface PageHit {
   depth: number;
   incomingLinks: number;
   routeFile: string;
+  publishedAt?: number;
 }
 
 export interface ScopeInfo {
@@ -426,6 +438,7 @@ export interface ScoreBreakdown {
   incomingLinkBoost: number;
   depthBoost: number;
   titleMatchBoost: number;
+  freshnessBoost: number;
 }
 
 export interface SearchResultChunk {

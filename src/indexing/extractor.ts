@@ -6,6 +6,84 @@ import type { ExtractedPage, ResolvedSearchSocketConfig } from "../types";
 import { normalizeMarkdown, normalizeText } from "../utils/text";
 import { normalizeUrlPath } from "../utils/path";
 
+export function normalizeDateToMs(value: unknown): number | undefined {
+  if (value == null) return undefined;
+  if (value instanceof Date) {
+    const ts = value.getTime();
+    return Number.isFinite(ts) ? ts : undefined;
+  }
+  if (typeof value === "string") {
+    const ts = new Date(value).getTime();
+    return Number.isFinite(ts) ? ts : undefined;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
+  }
+  return undefined;
+}
+
+const FRONTMATTER_DATE_FIELDS = ["date", "publishedAt", "updatedAt", "published_at", "updated_at"] as const;
+
+export function extractPublishedAtFromFrontmatter(data: Record<string, unknown>): number | undefined {
+  for (const field of FRONTMATTER_DATE_FIELDS) {
+    const val = normalizeDateToMs(data[field]);
+    if (val !== undefined) return val;
+  }
+  return undefined;
+}
+
+export function extractPublishedAtFromHtml($: CheerioAPI): number | undefined {
+  // 1. JSON-LD
+  const jsonLdScripts = $('script[type="application/ld+json"]');
+  for (let i = 0; i < jsonLdScripts.length; i++) {
+    try {
+      const raw = $(jsonLdScripts[i]).html();
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      // Handle top-level object, arrays, and @graph patterns
+      const candidates: Record<string, unknown>[] = [];
+      if (Array.isArray(parsed)) {
+        candidates.push(...(parsed as Record<string, unknown>[]));
+      } else if (parsed && typeof parsed === "object") {
+        candidates.push(parsed);
+        if (Array.isArray((parsed as Record<string, unknown>)["@graph"])) {
+          candidates.push(...((parsed as Record<string, unknown>)["@graph"] as Record<string, unknown>[]));
+        }
+      }
+      for (const candidate of candidates) {
+        const val = normalizeDateToMs(candidate.datePublished);
+        if (val !== undefined) return val;
+      }
+    } catch {
+      // malformed JSON-LD — fall through
+    }
+  }
+
+  // 2. Open Graph article:published_time
+  const ogTime = $('meta[property="article:published_time"]').attr("content")?.trim();
+  if (ogTime) {
+    const val = normalizeDateToMs(ogTime);
+    if (val !== undefined) return val;
+  }
+
+  // 3. Schema.org itemprop
+  const itempropDate = $('meta[itemprop="datePublished"]').attr("content")?.trim()
+    || $('time[itemprop="datePublished"]').attr("datetime")?.trim();
+  if (itempropDate) {
+    const val = normalizeDateToMs(itempropDate);
+    if (val !== undefined) return val;
+  }
+
+  // 4. <time datetime> fallback
+  const timeEl = $("time[datetime]").first().attr("datetime")?.trim();
+  if (timeEl) {
+    const val = normalizeDateToMs(timeEl);
+    if (val !== undefined) return val;
+  }
+
+  return undefined;
+}
+
 function hasTopLevelNoindexComment(markdown: string): boolean {
   const lines = markdown.split(/\r?\n/);
   let inFence = false;
@@ -237,6 +315,8 @@ export function extractFromHtml(
     .filter(Boolean)
     .slice(0, 1);
 
+  const publishedAt = extractPublishedAtFromHtml($);
+
   return {
     url: normalizeUrlPath(url),
     title,
@@ -246,7 +326,8 @@ export function extractFromHtml(
     tags,
     description,
     keywords,
-    weight
+    weight,
+    publishedAt
   };
 }
 
@@ -292,6 +373,8 @@ export function extractFromMarkdown(url: string, markdown: string, title?: strin
   }
   if (fmKeywords && fmKeywords.length === 0) fmKeywords = undefined;
 
+  const publishedAt = extractPublishedAtFromFrontmatter(frontmatter);
+
   return {
     url: normalizeUrlPath(url),
     title: resolvedTitle,
@@ -304,6 +387,7 @@ export function extractFromMarkdown(url: string, markdown: string, title?: strin
       .slice(0, 1),
     description: fmDescription,
     keywords: fmKeywords,
-    weight: mdWeight
+    weight: mdWeight,
+    publishedAt
   };
 }
