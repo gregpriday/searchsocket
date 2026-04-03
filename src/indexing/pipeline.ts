@@ -84,7 +84,8 @@ export function buildPageContentHash(page: IndexedPage): string {
     String(page.outgoingLinks),
     String(page.publishedAt ?? ""),
     page.incomingAnchorText ?? "",
-    (page.outgoingLinkUrls ?? []).slice().sort().join(",")
+    (page.outgoingLinkUrls ?? []).slice().sort().join(","),
+    page.meta ? JSON.stringify(page.meta, Object.keys(page.meta).sort()) : ""
   ];
   return sha256(parts.join("|"));
 }
@@ -485,7 +486,8 @@ export class IndexPipeline {
         description: page.description,
         keywords: page.keywords,
         publishedAt: page.publishedAt,
-        incomingAnchorText
+        incomingAnchorText,
+        meta: page.meta
       };
 
       pages.push(indexedPage);
@@ -513,7 +515,8 @@ export class IndexPipeline {
         description: p.description,
         keywords: p.keywords,
         contentHash: buildPageContentHash(p),
-        publishedAt: p.publishedAt
+        publishedAt: p.publishedAt,
+        meta: p.meta
       };
     });
 
@@ -550,7 +553,8 @@ export class IndexPipeline {
             depth: r.depth,
             indexedAt: r.indexedAt,
             contentHash: r.contentHash ?? "",
-            publishedAt: r.publishedAt ?? null
+            publishedAt: r.publishedAt ?? null,
+            ...(r.meta && Object.keys(r.meta).length > 0 ? { meta: r.meta } : {})
           }
         }));
         await this.store.upsertPages(pageDocs, scope);
@@ -695,7 +699,8 @@ export class IndexPipeline {
           description: chunk.description ?? "",
           keywords: chunk.keywords ?? [],
           publishedAt: chunk.publishedAt ?? null,
-          incomingAnchorText: chunk.incomingAnchorText ?? ""
+          incomingAnchorText: chunk.incomingAnchorText ?? "",
+          ...(chunk.meta && Object.keys(chunk.meta).length > 0 ? { meta: chunk.meta } : {})
         }
       }));
 

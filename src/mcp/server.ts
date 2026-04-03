@@ -29,13 +29,14 @@ export function createServer(engine: SearchEngine): McpServer {
     "search",
     {
       description:
-        "Semantic site search powered by Upstash Search. Returns url, title, snippet, chunkText, score, and routeFile per result. chunkText contains the full raw chunk markdown. When groupBy is 'page' (default), each result includes a chunks array with section-level sub-results containing sectionTitle, headingPath (breadcrumb trail), snippet, and score. Use chunks[].headingPath to navigate to specific sections.",
+        "Semantic site search powered by Upstash Search. Returns url, title, snippet, chunkText, score, and routeFile per result. chunkText contains the full raw chunk markdown. When groupBy is 'page' (default), each result includes a chunks array with section-level sub-results containing sectionTitle, headingPath, snippet, and score. Supports optional filters for structured metadata (e.g. {\"version\": 2, \"deprecated\": false}).",
       inputSchema: {
         query: z.string().min(1),
         scope: z.string().optional(),
         topK: z.number().int().positive().max(100).optional(),
         pathPrefix: z.string().optional(),
         tags: z.array(z.string()).optional(),
+        filters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
         groupBy: z.enum(["page", "chunk"]).optional(),
         maxSubResults: z.number().int().positive().max(20).optional()
       },
@@ -71,6 +72,7 @@ export function createServer(engine: SearchEngine): McpServer {
         scope: input.scope,
         pathPrefix: input.pathPrefix,
         tags: input.tags,
+        filters: input.filters,
         groupBy: input.groupBy,
         maxSubResults: input.maxSubResults
       });

@@ -25,6 +25,7 @@ import type { UpstashSearchStore } from "../vector/upstash";
 import type { RankedHit, PageResult } from "./ranking";
 import { diceScore, compositeScore, dominantRelationshipType } from "./related-pages";
 import { toSnippet, queryAwareExcerpt } from "../utils/text";
+import { buildMetaFilterString } from "../utils/structured-meta";
 
 const rankingOverridesSchema = z.object({
   ranking: z.object({
@@ -53,6 +54,7 @@ const requestSchema = z.object({
   scope: z.string().optional(),
   pathPrefix: z.string().optional(),
   tags: z.array(z.string()).optional(),
+  filters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   groupBy: z.enum(["page", "chunk"]).optional(),
   maxSubResults: z.number().int().positive().max(20).optional(),
   debug: z.boolean().optional(),
@@ -238,6 +240,11 @@ export class SearchEngine {
       : undefined;
     const filterTags = input.tags && input.tags.length > 0 ? input.tags : undefined;
 
+    // Build server-side Upstash filter for structured metadata
+    const metaFilter = input.filters && Object.keys(input.filters).length > 0
+      ? buildMetaFilterString(input.filters)
+      : undefined;
+
     const applyPostFilters = (hits: VectorHit[]): VectorHit[] => {
       let filtered = hits;
       if (pathPrefix) {
@@ -269,18 +276,18 @@ export class SearchEngine {
       const chunkLimit = Math.max(topK * 10, 100);
       const pageLimit = 20;
 
-      // Over-fetch when filters are active
+      // Over-fetch when post-filters are active (metadata filters are server-side, no multiplier needed)
       const fetchMultiplier = (pathPrefix || filterTags) ? 2 : 1;
 
       const [pageHits, chunkHits] = await Promise.all([
         this.store.searchPages(
           queryVector,
-          { limit: pageLimit * fetchMultiplier },
+          { limit: pageLimit * fetchMultiplier, filter: metaFilter },
           resolvedScope
         ),
         this.store.search(
           queryVector,
-          { limit: chunkLimit * fetchMultiplier },
+          { limit: chunkLimit * fetchMultiplier, filter: metaFilter },
           resolvedScope
         )
       ]);
@@ -296,7 +303,7 @@ export class SearchEngine {
 
       const hits = await this.store.search(
         queryVector,
-        { limit: candidateK * fetchMultiplier },
+        { limit: candidateK * fetchMultiplier, filter: metaFilter },
         resolvedScope
       );
       const filtered = applyPostFilters(hits);

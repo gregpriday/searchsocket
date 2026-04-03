@@ -326,6 +326,7 @@ export interface ExtractedPage {
   keywords?: string[];
   weight?: number;
   publishedAt?: number;
+  meta?: Record<string, string | number | boolean | string[]>;
 }
 
 export interface IndexedPage {
@@ -345,6 +346,7 @@ export interface IndexedPage {
   keywords?: string[];
   publishedAt?: number;
   incomingAnchorText?: string;
+  meta?: Record<string, string | number | boolean | string[]>;
 }
 
 export interface Chunk {
@@ -367,6 +369,7 @@ export interface Chunk {
   keywords?: string[];
   publishedAt?: number;
   incomingAnchorText?: string;
+  meta?: Record<string, string | number | boolean | string[]>;
 }
 
 export interface VectorHit {
@@ -417,6 +420,7 @@ export interface PageRecord {
   keywords?: string[];
   contentHash?: string;
   publishedAt?: number;
+  meta?: Record<string, string | number | boolean | string[]>;
 }
 
 export interface PageHit {
@@ -466,6 +470,7 @@ export interface SearchRequest {
   scope?: string;
   pathPrefix?: string;
   tags?: string[];
+  filters?: Record<string, string | number | boolean>;
   groupBy?: "page" | "chunk";
   maxSubResults?: number;
   debug?: boolean;

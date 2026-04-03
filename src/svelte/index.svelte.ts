@@ -1,4 +1,5 @@
 import type { SearchRequest, SearchResponse, SearchResult } from "../types";
+export { default as SearchSocket } from "./SearchSocket.svelte";
 
 export interface CreateSearchOptions {
   endpoint?: string;
@@ -10,6 +11,7 @@ export interface CreateSearchOptions {
   scope?: string;
   pathPrefix?: string;
   tags?: string[];
+  filters?: Record<string, string | number | boolean>;
   groupBy?: "page" | "chunk";
   maxSubResults?: number;
 }
@@ -48,6 +50,7 @@ function buildCacheKey(query: string, options: CreateSearchOptions): string {
   if (options.scope !== undefined) parts.scope = options.scope;
   if (options.pathPrefix !== undefined) parts.pathPrefix = options.pathPrefix;
   if (options.tags !== undefined) parts.tags = options.tags;
+  if (options.filters !== undefined) parts.filters = options.filters;
   if (options.groupBy !== undefined) parts.groupBy = options.groupBy;
   if (options.maxSubResults !== undefined) parts.maxSubResults = options.maxSubResults;
   return JSON.stringify(parts);
@@ -107,6 +110,7 @@ export function createSearch(options: CreateSearchOptions = {}): SearchState {
         if (options.scope !== undefined) request.scope = options.scope;
         if (options.pathPrefix !== undefined) request.pathPrefix = options.pathPrefix;
         if (options.tags !== undefined) request.tags = options.tags;
+        if (options.filters !== undefined) request.filters = options.filters;
         if (options.groupBy !== undefined) request.groupBy = options.groupBy;
         if (options.maxSubResults !== undefined) request.maxSubResults = options.maxSubResults;
 
