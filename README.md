@@ -6,16 +6,15 @@ Semantic site search and MCP retrieval for SvelteKit content projects.
 
 ## Features
 
-- **Embeddings**: Jina AI `jina-embeddings-v5-text-small` with task-specific LoRA adapters (configurable)
-- **Vector Backend**: Turso/libSQL with vector search (local file DB for development, remote for production)
-- **Rerank**: Jina `jina-reranker-v3` enabled by default — same API key
-- **Page Aggregation**: Group results by page with score-weighted chunk decay
-- **Meta Extraction**: Automatically extracts `<meta name="description">` and `<meta name="keywords">` for improved relevance
+- **Unified Search Backend**: Upstash Search handles both semantic and keyword search with intelligent result blending
+- **Dual Search**: Parallel page-level and chunk-level semantic search with configurable score weighting
+- **Reranking**: Upstash Search native reranking for improved relevance
+- **Input Enrichment**: Query understanding via Upstash Search input enrichment
+- **Scroll-to-Text Navigation**: Auto-scroll to matching sections on search result navigation using TreeWalker text mapping and CSS Highlight API
 - **SvelteKit Integrations**:
   - `searchsocketHandle()` for `POST /api/search` endpoint
   - `searchsocketVitePlugin()` for build-triggered indexing
 - **Client Library**: `createSearchClient()` for browser-side search, `buildResultUrl()` for scroll-to-section links
-- **Scroll-to-Text**: `searchsocketScrollToText()` auto-scrolls to matching sections on navigation
 - **MCP Server**: Model Context Protocol tools for search and page retrieval
 
 ## Install
@@ -48,13 +47,14 @@ Minimal config (`searchsocket.config.ts`):
 
 ```ts
 export default {
-  embeddings: { apiKeyEnv: "JINA_API_KEY" }
+  upstash: {
+    urlEnv: "UPSTASH_SEARCH_REST_URL",
+    tokenEnv: "UPSTASH_SEARCH_REST_TOKEN"
+  }
 };
 ```
 
-**That's it!** Turso defaults work out of the box:
-- **Development**: Uses local file DB at `.searchsocket/vectors.db`
-- **Production**: Set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` to use remote Turso
+That's it! Defaults handle the rest.
 
 ### 3. Add SvelteKit API Hook
 
@@ -70,18 +70,10 @@ This exposes `POST /api/search` with automatic scope resolution.
 
 ### 4. Set Environment Variables
 
-The CLI automatically loads `.env` from the working directory on startup, so your existing `.env` file works out of the box — no wrapper scripts or shell exports needed.
-
-Development (`.env`):
 ```bash
-JINA_API_KEY=jina_...
-```
-
-Production (add these for remote Turso):
-```bash
-JINA_API_KEY=jina_...
-TURSO_DATABASE_URL=libsql://your-db.turso.io
-TURSO_AUTH_TOKEN=eyJ...
+# .env (development or CI)
+UPSTASH_SEARCH_REST_URL=https://...
+UPSTASH_SEARCH_REST_TOKEN=...
 ```
 
 ### 5. Index Your Content
@@ -99,10 +91,8 @@ SearchSocket auto-detects the source mode based on your config:
 The indexing pipeline:
 - Extracts content from `<main>` (configurable), including `<meta>` description and keywords
 - Chunks text with semantic heading boundaries
-- Prepends page title to each chunk for embedding context
-- Generates a synthetic summary chunk per page for identity matching
-- Generates embeddings via Jina AI (with task-specific LoRA adapters for indexing vs search)
-- Stores vectors in Turso/libSQL with cosine similarity index
+- Stores chunks in Upstash Search with content (searchable) and metadata (non-searchable)
+- Generates full-page documents for page-level search
 
 ### 6. Query
 
@@ -161,9 +151,7 @@ pnpm searchsocket search --q "getting started" --top-k 5 --path-prefix /docs
     }
   ],
   "meta": {
-    "timingsMs": { "embed": 120, "vector": 15, "rerank": 0, "total": 135 },
-    "usedRerank": false,
-    "modelId": "jina-embeddings-v5-text-small"
+    "timingsMs": { "total": 135 }
   }
 }
 ```
@@ -215,18 +203,6 @@ export default {
 
 Best for: CI/CD pipelines. Enables `vite build && searchsocket index` with zero route configuration.
 
-**How it works**:
-1. Parses `.svelte-kit/output/server/manifest-full.js` to discover all page routes
-2. Expands dynamic routes using `paramValues` (skips dynamic routes without values)
-3. Starts an ephemeral `vite preview` server on a random port
-4. Fetches all routes concurrently for SSR-rendered HTML
-5. Provides exact route-to-file mapping (no heuristic matching needed)
-6. Shuts down the preview server
-
-**Dynamic routes**: Each key in `paramValues` maps to a route ID (e.g., `/blog/[slug]`) or its URL equivalent. Each value in the array replaces all `[param]` segments in the URL. Routes with layout groups like `/(app)/blog/[slug]` also match the URL key `/blog/[slug]`.
-
-**Link discovery**: Enable `discover: true` to automatically find pages by crawling internal links from `seedUrls`. This is useful when dynamic routes have many parameter values that are impractical to enumerate. The crawler respects `maxPages` and `maxDepth` limits and only follows links within the same origin.
-
 ### `crawl`
 
 Fetches pages from a running HTTP server.
@@ -277,8 +253,7 @@ const response = await client.search({
   topK: 8,
   groupBy: "page",
   pathPrefix: "/docs",
-  tags: ["guide"],
-  rerank: true
+  tags: ["guide"]
 });
 
 for (const result of response.results) {
@@ -335,176 +310,51 @@ A SvelteKit `afterNavigate` hook that reads the `_ssk` parameter and scrolls the
 The hook:
 - Matches headings (h1–h6) case-insensitively with whitespace normalization
 - Falls back to a broader text node search if no heading matches
-- Scrolls smoothly to the first match
+- Scrolls smoothly to the first match using TreeWalker-based text mapping
+- Applies CSS custom highlights (or DOM fallback) to matching text
 - Is a silent no-op when `_ssk` is absent or no match is found
 
-## Vector Backend: Turso/libSQL
+## Vector Backend: Upstash Search
 
-SearchSocket uses **Turso** (libSQL) as its single vector backend, providing a unified experience across development and production.
+SearchSocket uses **Upstash Search** as its vector backend, a managed search service with built-in semantic and keyword search.
 
-### Local Development
+### Setup
 
-By default, SearchSocket uses a **local file database**:
-- Path: `.searchsocket/vectors.db` (configurable)
-- No account or API keys needed
-- Full vector search with `libsql_vector_idx` and `vector_top_k`
-- Perfect for local development and CI testing
-
-### Production (Remote Turso)
-
-For production, switch to **Turso's hosted service**:
-
-1. **Sign up for Turso** (free tier available):
+1. **Create an Upstash Search index**:
    ```bash
-   # Install Turso CLI
-   brew install tursodatabase/tap/turso
-
-   # Sign up
-   turso auth signup
-
-   # Create a database
-   turso db create searchsocket-prod
-
-   # Get credentials
-   turso db show searchsocket-prod --url
-   turso db tokens create searchsocket-prod
+   # Via Upstash console or CLI
+   # https://console.upstash.com/search
    ```
 
-2. **Set environment variables**:
-   ```bash
-   TURSO_DATABASE_URL=libsql://searchsocket-prod-xxx.turso.io
-   TURSO_AUTH_TOKEN=eyJhbGc...
+2. **Get credentials**:
+   ```
+   UPSTASH_SEARCH_REST_URL=https://...
+   UPSTASH_SEARCH_REST_TOKEN=...
    ```
 
-3. **Index normally** — SearchSocket auto-detects the remote URL and uses it.
-
-### Direct Credential Passing
-
-Instead of environment variables, you can pass credentials directly in the config. This is useful for serverless deployments or multi-tenant setups:
-
-```ts
-export default {
-  embeddings: {
-    apiKey: "jina_..."  // direct API key (takes precedence over apiKeyEnv)
-  },
-  vector: {
-    turso: {
-      url: "libsql://my-db.turso.io",       // direct URL
-      authToken: "eyJhbGc..."               // direct auth token
-    }
-  }
-};
-```
-
-Direct values take precedence over environment variable lookups (`apiKeyEnv`, `urlEnv`, `authTokenEnv`).
-
-### Dimension Mismatch Auto-Recovery
-
-When switching embedding models (e.g., from a 1536-dim model to Jina's 1024-dim), the vector dimension changes. SearchSocket automatically detects this and recreates the chunks table with the new dimension — no manual intervention needed. A full re-index (`--force`) is still required after switching models.
-
-### Why Turso?
-
-- **Single backend** — one unified Turso/libSQL store for vectors, metadata, and state
-- **Local-first development** — zero external dependencies for local dev
-- **Production-ready** — same codebase scales to remote hosted DB
-- **Cost-effective** — Turso free tier includes 9GB storage, 500M row reads/month
-- **Vector search native** — `F32_BLOB` vectors, cosine similarity index, `vector_top_k` ANN queries
-
-## Serverless Deployment (Vercel, Netlify, etc.)
-
-SearchSocket works on serverless platforms with a few adjustments:
-
-### Requirements
-
-1. **Remote Turso database** — local SQLite is not available in serverless (no persistent filesystem). Set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as platform environment variables.
-
-2. **Inline config via `rawConfig`** — the default config loader uses `jiti` to import `searchsocket.config.ts` from disk, which isn't bundled in serverless. Use `rawConfig` to pass config inline:
-
-```ts
-// hooks.server.ts (Vercel / Netlify)
-import { searchsocketHandle } from "searchsocket/sveltekit";
-
-export const handle = searchsocketHandle({
-  rawConfig: {
-    project: { id: "my-docs-site" },
-    source: { mode: "static-output" },
-    embeddings: { apiKeyEnv: "JINA_API_KEY" },
-  }
-});
-```
-
-3. **Environment variables** — set these on your platform dashboard:
-   - `JINA_API_KEY`
-   - `TURSO_DATABASE_URL`
-   - `TURSO_AUTH_TOKEN`
-
-### Rate Limiting
-
-The built-in `InMemoryRateLimiter` auto-disables on serverless platforms (it resets on every cold start). Use your platform's WAF or edge rate-limiting instead.
-
-### What Only Applies to Indexing
-
-The following features are only used during `searchsocket index` (CLI), not the search handler:
-- `ensureStateDirs` — creates `.searchsocket/` state directories
-- Local SQLite fallback — only needed when `TURSO_DATABASE_URL` is not set
-
-### Adapter Guidance
-
-| Platform | Adapter | Notes |
-|----------|---------|-------|
-| Vercel | `adapter-auto` (default) | Serverless — use `rawConfig` + remote Turso |
-| Netlify | `adapter-netlify` | Serverless — same as Vercel |
-| VPS / Docker | `adapter-node` | Long-lived process — no limitations, local SQLite works |
-
-## Embeddings: Jina AI
-
-SearchSocket uses **Jina AI's embedding models** to convert text into semantic vectors. A single `JINA_API_KEY` powers both embeddings and optional reranking.
-
-### Default Model
-
-- **Model**: `jina-embeddings-v5-text-small`
-- **Dimensions**: 1024 (default)
-- **Cost**: ~$0.00005 per 1K tokens
-- **Task adapters**: Uses `retrieval.passage` for indexing, `retrieval.query` for search queries (LoRA task-specific adapters for better retrieval quality)
+3. **Set environment variables** in your `.env`:
+   ```bash
+   UPSTASH_SEARCH_REST_URL=https://...
+   UPSTASH_SEARCH_REST_TOKEN=...
+   ```
 
 ### How It Works
 
-1. **Chunking**: Text is split into semantic chunks (default 2200 chars, 200 overlap)
-2. **Title Prepend**: Page title is prepended to each chunk for better context (`chunking.prependTitle`, default: true)
-3. **Summary Chunk**: A synthetic identity chunk is generated per page with title, URL, and first paragraph (`chunking.pageSummaryChunk`, default: true)
-4. **Embedding**: Each chunk is sent to Jina's embedding API with the `retrieval.passage` task adapter
-5. **Batching**: Requests batched (64 texts per request) for efficiency
-6. **Storage**: Vectors stored in Turso with metadata (URL, title, tags, depth, etc.)
+- **Content Storage**: Each indexed page is split into chunks; chunks are stored as documents with searchable content and metadata
+- **Page Index**: Full-page summaries stored in a separate index for page-level search
+- **Dual Search**: Parallel queries to both indexes with score blending
+- **Semantic Search**: Upstash Search provides semantic search natively
+- **Keyword Search**: Combined with semantic for hybrid results
+- **Reranking**: Native Upstash Search reranking option
+- **Input Enrichment**: Automatic query understanding
 
-### Cost Estimation
+### Why Upstash Search?
 
-Use `--dry-run` to preview costs:
-```bash
-pnpm searchsocket index --dry-run
-```
-
-Output:
-```
-pages processed: 42
-chunks total: 156
-chunks changed: 156
-embeddings created: 156
-estimated tokens: 32,400
-estimated cost (USD): $0.000648
-```
-
-### Reranking
-
-Since embeddings and reranking share the same Jina API key, enabling reranking is one boolean:
-
-```ts
-export default {
-  embeddings: { apiKeyEnv: "JINA_API_KEY" },
-  rerank: { enabled: true }
-};
-```
-
-**Note**: Changing the model after indexing requires re-indexing with `--force`.
+- **Managed service** — no infrastructure to maintain
+- **Semantic + keyword unified** — single index for both search types
+- **Cost-effective** — pay per query, not per embedding
+- **Native reranking & enrichment** — no additional APIs needed
+- **Scope isolation** — separate indexes per scope (multi-branch support)
 
 ## Search & Ranking
 
@@ -520,21 +370,29 @@ Configure aggregation behavior:
 
 ```ts
 export default {
+  search: {
+    semanticWeight: 0.75,     // balance semantic vs keyword (0-1)
+    inputEnrichment: true,    // enable query understanding
+    reranking: true,          // enable Upstash reranking
+    dualSearch: true,         // parallel page + chunk search
+    pageSearchWeight: 0.3     // weight of page-level results vs chunks (0-1)
+  },
   ranking: {
-    minScore: 0,                // minimum absolute score to include in results (default: 0, disabled)
-    aggregationCap: 5,          // max chunks contributing to page score (default: 5)
-    aggregationDecay: 0.5,      // decay factor for additional chunks (default: 0.5)
-    minChunkScoreRatio: 0.5,    // threshold for sub-chunks in results (default: 0.5)
-    pageWeights: {              // per-URL score multipliers
+    minScore: 0.3,            // minimum absolute score to include (default: 0.3)
+    aggregationCap: 5,        // max chunks contributing to page score (default: 5)
+    aggregationDecay: 0.5,    // decay factor for additional chunks (default: 0.5)
+    minChunkScoreRatio: 0.5,  // threshold for sub-chunks in results (default: 0.5)
+    scoreGapThreshold: 0.4,   // trim low-scoring results (default: 0.4)
+    pageWeights: {            // per-URL score multipliers
       "/": 1.1,
       "/docs": 1.15,
       "/download": 1.2
     },
     weights: {
-      aggregation: 0.1,        // weight of aggregation bonus (default: 0.1)
-      incomingLinks: 0.05,     // incoming link boost weight (default: 0.05)
-      depth: 0.03,             // URL depth boost weight (default: 0.03)
-      rerank: 1.0              // reranker score weight (default: 1.0)
+      incomingLinks: 0.05,    // incoming link boost weight
+      depth: 0.03,            // URL depth boost weight
+      aggregation: 0.1,       // aggregation bonus weight
+      titleMatch: 0.15        // title match boost weight
     }
   }
 };
@@ -542,7 +400,7 @@ export default {
 
 `pageWeights` supports exact URL matches and prefix matching. A weight of `1.15` on `"/docs"` boosts all pages under `/docs/` by 15%. Use gentle values (1.05-1.2x) since they compound with aggregation.
 
-`minScore` filters out low-relevance results before they reach the client. Set to a value like `0.3` to remove noise. In page mode, pages below the threshold are dropped; in chunk mode, individual chunks are filtered. Default is `0` (disabled).
+`minScore` filters out low-relevance results before they reach the client. Set to a value like `0.3` (default) to remove noise. In page mode, pages below the threshold are dropped; in chunk mode, individual chunks are filtered.
 
 ### Chunk Mode
 
@@ -595,7 +453,7 @@ pnpm searchsocket init
 
 ### `searchsocket index`
 
-Index content into vectors.
+Index content into Upstash Search.
 
 ```bash
 # Incremental (only changed chunks)
@@ -603,9 +461,6 @@ pnpm searchsocket index --changed-only
 
 # Full re-index
 pnpm searchsocket index --force
-
-# Preview cost without indexing
-pnpm searchsocket index --dry-run
 
 # Override source mode
 pnpm searchsocket index --source build
@@ -622,7 +477,7 @@ pnpm searchsocket index --verbose
 
 ### `searchsocket status`
 
-Show indexing status, scope, and vector health.
+Show indexing status and index health.
 
 ```bash
 pnpm searchsocket status
@@ -630,13 +485,9 @@ pnpm searchsocket status
 # Output:
 # project: my-site
 # resolved scope: main
-# embedding model: jina-embeddings-v5-text-small
-# vector backend: turso/libsql (local (.searchsocket/vectors.db))
+# vector backend: upstash-search
 # vector health: ok
-# last indexed (main): 2025-02-23T10:30:00Z
-# tracked chunks: 156
-# last estimated tokens: 32,400
-# last estimated cost: $0.000648
+# indexed chunks: 156
 ```
 
 ### `searchsocket dev`
@@ -659,29 +510,14 @@ Watches:
 
 ### `searchsocket clean`
 
-Delete local state and optionally remote vectors.
+Delete all indexed content for a scope.
 
 ```bash
-# Local state only
+# Clean current scope
 pnpm searchsocket clean
 
-# Local + remote vectors
-pnpm searchsocket clean --remote --scope staging
-```
-
-### `searchsocket prune`
-
-Delete stale scopes (e.g., deleted git branches).
-
-```bash
-# Dry run (shows what would be deleted)
-pnpm searchsocket prune --older-than 30d
-
-# Apply deletions
-pnpm searchsocket prune --older-than 30d --apply
-
-# Use custom scope list
-pnpm searchsocket prune --scopes-file active-branches.txt --apply
+# Clean specific scope
+pnpm searchsocket clean --scope staging
 ```
 
 ### `searchsocket doctor`
@@ -693,13 +529,10 @@ pnpm searchsocket doctor
 
 # Output:
 # PASS config parse
-# PASS env JINA_API_KEY
-# PASS turso/libsql (local file: .searchsocket/vectors.db)
-# PASS source: build manifest
-# PASS source: vite binary
-# PASS embedding provider connectivity
-# PASS vector backend connectivity
-# PASS vector backend write permission
+# PASS env UPSTASH_SEARCH_REST_URL
+# PASS env UPSTASH_SEARCH_REST_TOKEN
+# PASS upstash-search connectivity
+# PASS upstash-search write permission
 # PASS state directory writable
 ```
 
@@ -720,7 +553,7 @@ pnpm searchsocket mcp --transport http --port 3338
 CLI search for testing.
 
 ```bash
-pnpm searchsocket search --q "turso vector search" --top-k 5 --rerank
+pnpm searchsocket search --q "upstash search integration" --top-k 5
 ```
 
 ## MCP (Model Context Protocol)
@@ -791,26 +624,20 @@ This starts a stateless server at `http://127.0.0.1:3338/mcp`. Each POST request
 
 ## Environment Variables
 
-The CLI automatically loads `.env` from the working directory on startup. Existing `process.env` values take precedence over `.env` file values. This only applies to CLI commands (`searchsocket index`, `searchsocket mcp`, etc.) — library imports like `searchsocketHandle()` rely on your framework's own `.env` handling (Vite/SvelteKit).
-
 ### Required
 
-**Jina AI:**
-- `JINA_API_KEY` — Jina AI API key for embeddings and reranking
+**Upstash Search:**
+- `UPSTASH_SEARCH_REST_URL` — Upstash Search REST API endpoint
+- `UPSTASH_SEARCH_REST_TOKEN` — Upstash Search REST API token
 
-### Optional (Turso)
-
-**Remote Turso (production):**
-- `TURSO_DATABASE_URL` — Turso database URL (e.g., `libsql://my-db.turso.io`)
-- `TURSO_AUTH_TOKEN` — Turso auth token
-
-If not set, uses local file DB at `.searchsocket/vectors.db`.
-
-### Optional (Scope/Build)
+### Optional
 
 - `SEARCHSOCKET_SCOPE` — Override scope (when `scope.mode: "env"`)
 - `SEARCHSOCKET_AUTO_INDEX` — Enable build-triggered indexing
 - `SEARCHSOCKET_DISABLE_AUTO_INDEX` — Disable build-triggered indexing
+- `SEARCHSOCKET_FORCE_REINDEX` — Force full re-index in CI/CD (`1`, `true`, or `yes`)
+
+The CLI automatically loads `.env` from the working directory on startup.
 
 ## Configuration
 
@@ -871,40 +698,37 @@ export default {
     respectRobotsNoindex: true
   },
 
+  transform: {
+    output: "markdown",
+    preserveCodeBlocks: true,
+    preserveTables: true
+  },
+
   chunking: {
+    strategy: "hybrid",
     maxChars: 2200,
     overlapChars: 200,
     minChars: 250,
     headingPathDepth: 3,
     dontSplitInside: ["code", "table", "blockquote"],
-    prependTitle: true,       // prepend page title to chunk text before embedding
+    prependTitle: true,       // prepend page title to chunk text before indexing
     pageSummaryChunk: true    // generate synthetic identity chunk per page
   },
 
-  embeddings: {
-    provider: "jina",
-    model: "jina-embeddings-v5-text-small",
-    apiKey: "jina_...",          // direct API key (or use apiKeyEnv)
-    apiKeyEnv: "JINA_API_KEY",
-    batchSize: 64,
-    concurrency: 4
+  upstash: {
+    urlEnv: "UPSTASH_SEARCH_REST_URL",
+    tokenEnv: "UPSTASH_SEARCH_REST_TOKEN",
+    // OR use direct credentials:
+    // url: "https://...",
+    // token: "..."
   },
 
-  vector: {
-    dimension: 1024,  // optional, inferred from first embedding
-    turso: {
-      url: "libsql://my-db.turso.io",    // direct URL (or use urlEnv)
-      authToken: "eyJhbGc...",            // direct token (or use authTokenEnv)
-      urlEnv: "TURSO_DATABASE_URL",
-      authTokenEnv: "TURSO_AUTH_TOKEN",
-      localPath: ".searchsocket/vectors.db"
-    }
-  },
-
-  rerank: {
-    enabled: true,
-    topN: 20,
-    model: "jina-reranker-v3"
+  search: {
+    semanticWeight: 0.75,     // semantic search weight (0-1)
+    inputEnrichment: true,    // enable query enrichment
+    reranking: true,          // enable Upstash reranking
+    dualSearch: true,         // parallel page + chunk search
+    pageSearchWeight: 0.3     // page result boost factor (0-1)
   },
 
   ranking: {
@@ -914,15 +738,16 @@ export default {
       "/": 1.1,
       "/docs": 1.15
     },
-    minScore: 0,
+    minScore: 0.3,
     aggregationCap: 5,
     aggregationDecay: 0.5,
     minChunkScoreRatio: 0.5,
+    scoreGapThreshold: 0.4,
     weights: {
       incomingLinks: 0.05,
       depth: 0.03,
-      rerank: 1.0,
-      aggregation: 0.1
+      aggregation: 0.1,
+      titleMatch: 0.15
     }
   },
 
@@ -930,11 +755,20 @@ export default {
     path: "/api/search",
     cors: {
       allowOrigins: ["https://example.com"]
-    },
-    rateLimit: {
-      windowMs: 60_000,
-      max: 60
     }
+  },
+
+  mcp: {
+    enable: true,
+    transport: "stdio",
+    http: {
+      port: 3338,
+      path: "/mcp"
+    }
+  },
+
+  state: {
+    dir: ".searchsocket"
   }
 };
 ```
