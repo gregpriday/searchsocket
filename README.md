@@ -314,6 +314,59 @@ The hook:
 - Applies CSS custom highlights (or DOM fallback) to matching text
 - Is a silent no-op when `_ssk` is absent or no match is found
 
+## Making Images Searchable
+
+By default, SearchSocket converts images to text during extraction so they participate in search. The extractor resolves image text using this priority chain:
+
+1. **`data-search-description` on the `<img>`** — highest priority, your explicit description
+2. **`data-search-description` on the parent `<figure>`** — useful when you can't modify the `<img>` directly
+3. **`alt` text + `<figcaption>`** — combined with a dash separator
+4. **`alt` text alone** — if meaningful (filters out generic words like "image", "icon", "photo")
+5. **`<figcaption>` alone** — if no meaningful alt text exists
+6. **Removed** — images with no useful text are dropped from the index
+
+### Using `data-search-description`
+
+Add a `data-search-description` attribute to your images for the best search results. This gives you full control over how an image appears in search — describe what matters for findability, not just what's visible.
+
+```html
+<img
+  src="/screenshots/settings.png"
+  alt="Settings page"
+  data-search-description="The settings page showing API key configuration, theme selection, and notification preferences"
+/>
+```
+
+On a `<figure>`:
+
+```html
+<figure data-search-description="Architecture diagram showing the indexing pipeline from HTML extraction through chunking to Upstash vector storage">
+  <img src="/diagrams/pipeline.svg" alt="Indexing pipeline" />
+  <figcaption>Figure 1: Indexing pipeline overview</figcaption>
+</figure>
+```
+
+When `data-search-description` is present, the figcaption is not included in the indexed text (the explicit description takes precedence).
+
+### Works with SvelteKit Enhanced Images
+
+SvelteKit's `enhanced:img` passes through all `data-*` attributes to the rendered HTML, so this works out of the box:
+
+```svelte
+<enhanced:img
+  src="./screenshots/dashboard.png"
+  alt="Dashboard"
+  data-search-description="The main dashboard showing active projects, recent search queries, and indexing status indicators"
+/>
+```
+
+### Tips
+
+- **Describe what matters for search**, not visual details. "RBAC permissions configuration panel" is more useful than "a page with a blue sidebar and 14 menu items."
+- **Include key terms** users might search for. If the screenshot shows a "worktree selector", say so.
+- **Skip decorative images.** Images without alt text or descriptions are automatically excluded.
+- The attribute name is configurable via `extract.imageDescAttr` (default: `data-search-description`).
+
 ## Vector Backend: Upstash Search
 
 SearchSocket uses **Upstash Search** as its vector backend, a managed search service with built-in semantic and keyword search.
@@ -371,10 +424,7 @@ Configure aggregation behavior:
 ```ts
 export default {
   search: {
-    semanticWeight: 0.75,     // balance semantic vs keyword (0-1)
-    inputEnrichment: true,    // enable query understanding
-    reranking: true,          // enable Upstash reranking
-    dualSearch: true,         // parallel page + chunk search
+    dualSearch: true,         // parallel page + chunk search (default: true)
     pageSearchWeight: 0.3     // weight of page-level results vs chunks (0-1)
   },
   ranking: {
@@ -695,6 +745,7 @@ export default {
     dropSelectors: [".sidebar", ".toc"],
     ignoreAttr: "data-search-ignore",
     noindexAttr: "data-search-noindex",
+    imageDescAttr: "data-search-description",
     respectRobotsNoindex: true
   },
 
@@ -724,9 +775,6 @@ export default {
   },
 
   search: {
-    semanticWeight: 0.75,     // semantic search weight (0-1)
-    inputEnrichment: true,    // enable query enrichment
-    reranking: true,          // enable Upstash reranking
     dualSearch: true,         // parallel page + chunk search
     pageSearchWeight: 0.3     // page result boost factor (0-1)
   },
