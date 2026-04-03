@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -14,6 +15,8 @@ export interface McpServerOptions {
   transport?: "stdio" | "http";
   httpPort?: number;
   httpPath?: string;
+  access?: "public" | "private";
+  apiKey?: string;
 }
 
 export function createServer(engine: SearchEngine): McpServer {
@@ -157,6 +160,17 @@ export function createServer(engine: SearchEngine): McpServer {
   return server;
 }
 
+export function resolveApiKey(config: ResolvedSearchSocketConfig): string | undefined {
+  return config.mcp.http.apiKey
+    ?? (config.mcp.http.apiKeyEnv ? process.env[config.mcp.http.apiKeyEnv] : undefined);
+}
+
+export function verifyApiKey(provided: string, expected: string): boolean {
+  const a = createHash("sha256").update(provided).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
+}
+
 function redirectConsoleToStderr(): void {
   const originalLog = console.log;
   console.log = (...args: unknown[]) => {
@@ -174,8 +188,26 @@ async function startHttpServer(serverFactory: () => McpServer, config: ResolvedS
   const app = createMcpExpressApp();
   const port = opts.httpPort ?? config.mcp.http.port;
   const endpointPath = opts.httpPath ?? config.mcp.http.path;
+  const isPublic = config.mcp.access === "public";
+  const host = isPublic ? "0.0.0.0" : "127.0.0.1";
+  const apiKey = isPublic ? resolveApiKey(config) : undefined;
 
   app.post(endpointPath, async (req: Request, res: Response) => {
+    if (isPublic && apiKey) {
+      const authHeader = req.headers["authorization"];
+      const provided = (authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined)
+        ?? (req.headers["x-api-key"] as string | undefined)
+        ?? "";
+      if (!provided || !verifyApiKey(provided, apiKey)) {
+        res.status(401).json({
+          jsonrpc: "2.0",
+          error: { code: -32001, message: "Unauthorized" },
+          id: null
+        });
+        return;
+      }
+    }
+
     const server = serverFactory();
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined
@@ -229,8 +261,11 @@ async function startHttpServer(serverFactory: () => McpServer, config: ResolvedS
   });
 
   await new Promise<void>((resolve, reject) => {
-    const instance = app.listen(port, "127.0.0.1", () => {
-      process.stderr.write(`SearchSocket MCP HTTP server listening on http://127.0.0.1:${port}${endpointPath}\n`);
+    const instance = app.listen(port, host, () => {
+      process.stderr.write(`SearchSocket MCP HTTP server listening on http://${host}:${port}${endpointPath}\n`);
+      if (isPublic) {
+        process.stderr.write("WARNING: Server is in public mode. Ensure HTTPS is configured via a reverse proxy for production use.\n");
+      }
       resolve();
     });
     instance.once("error", reject);
@@ -247,6 +282,16 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<void
     cwd: options.cwd,
     configPath: options.configPath
   });
+
+  if (options.access) config.mcp.access = options.access;
+  if (options.apiKey) config.mcp.http.apiKey = options.apiKey;
+
+  if (config.mcp.access === "public" && !resolveApiKey(config)) {
+    throw new Error(
+      'MCP access is "public" but no API key is configured. Pass --api-key or set mcp.http.apiKey / mcp.http.apiKeyEnv in config.'
+    );
+  }
+
   const resolvedTransport = options.transport ?? config.mcp.transport;
 
   // For stdio transport, redirect ALL output to stderr before server initialization

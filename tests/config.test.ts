@@ -251,6 +251,79 @@ describe("mergeConfig", () => {
   });
 });
 
+describe("mergeConfig mcp.access", () => {
+  it("defaults mcp.access to private", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    const merged = mergeConfig(dir, {});
+    expect(merged.mcp.access).toBe("private");
+  });
+
+  it("throws when access is public but no API key is configured", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    expect(() =>
+      mergeConfig(dir, {
+        mcp: { access: "public" }
+      })
+    ).toThrow("mcp.http.apiKey");
+  });
+
+  it("allows public access when apiKey is set", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    const merged = mergeConfig(dir, {
+      mcp: { access: "public", http: { apiKey: "my-secret" } }
+    });
+
+    expect(merged.mcp.access).toBe("public");
+    expect(merged.mcp.http.apiKey).toBe("my-secret");
+  });
+
+  it("allows public access when apiKeyEnv resolves to a value", async () => {
+    const envKey = "TEST_MCP_KEY_" + Date.now();
+    process.env[envKey] = "env-secret";
+    try {
+      const dir = await makeTempDir();
+      await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+      const merged = mergeConfig(dir, {
+        mcp: { access: "public", http: { apiKeyEnv: envKey } }
+      });
+
+      expect(merged.mcp.access).toBe("public");
+      expect(merged.mcp.http.apiKeyEnv).toBe(envKey);
+    } finally {
+      delete process.env[envKey];
+    }
+  });
+
+  it("throws when apiKeyEnv is set but env var is missing", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    expect(() =>
+      mergeConfig(dir, {
+        mcp: { access: "public", http: { apiKeyEnv: "NONEXISTENT_ENV_VAR_12345" } }
+      })
+    ).toThrow("mcp.http.apiKey");
+  });
+
+  it("does not require API key when access is private", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    const merged = mergeConfig(dir, {
+      mcp: { access: "private" }
+    });
+
+    expect(merged.mcp.access).toBe("private");
+  });
+});
+
 describe("mergeConfigServerless", () => {
   it("throws when project.id is missing", () => {
     expect(() =>

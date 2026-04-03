@@ -135,11 +135,14 @@ export const searchSocketConfigSchema = z.object({
   mcp: z
     .object({
       enable: z.boolean().optional(),
+      access: z.enum(["public", "private"]).optional(),
       transport: z.enum(["stdio", "http"]).optional(),
       http: z
         .object({
           port: z.number().int().positive().optional(),
-          path: z.string().optional()
+          path: z.string().optional(),
+          apiKey: z.string().min(1).optional(),
+          apiKeyEnv: z.string().min(1).optional()
         })
         .optional(),
       handle: z
