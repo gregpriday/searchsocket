@@ -29,6 +29,7 @@ const requestSchema = z.object({
   pathPrefix: z.string().optional(),
   tags: z.array(z.string()).optional(),
   groupBy: z.enum(["page", "chunk"]).optional(),
+  maxSubResults: z.number().int().positive().max(20).optional(),
   debug: z.boolean().optional()
 });
 
@@ -164,6 +165,7 @@ export class SearchEngine {
     const resolvedScope = resolveScope(this.config, input.scope);
 
     const topK = input.topK ?? 10;
+    const maxSubResults = input.maxSubResults ?? 5;
     const groupByPage = (input.groupBy ?? "page") === "page";
     // Fetch more candidates for page aggregation
     const candidateK = groupByPage
@@ -250,7 +252,7 @@ export class SearchEngine {
     }
     const searchMs = hrTimeMs(searchStart);
 
-    const results = this.buildResults(ranked, topK, groupByPage, input.q, input.debug);
+    const results = this.buildResults(ranked, topK, groupByPage, maxSubResults, input.q, input.debug);
 
     return {
       q: input.q,
@@ -274,7 +276,7 @@ export class SearchEngine {
     return snippet || "";
   }
 
-  private buildResults(ordered: RankedHit[], topK: number, groupByPage: boolean, query?: string, debug?: boolean): SearchResult[] {
+  private buildResults(ordered: RankedHit[], topK: number, groupByPage: boolean, maxSubResults: number, query?: string, debug?: boolean): SearchResult[] {
     if (groupByPage) {
       let pages = aggregateByPage(ordered, this.config);
       pages = trimByScoreGap(pages, this.config);
@@ -284,7 +286,7 @@ export class SearchEngine {
         const minChunkScore = Number.isFinite(bestScore) ? bestScore * minRatio : Number.NEGATIVE_INFINITY;
         const meaningful = page.matchingChunks
           .filter((c) => c.finalScore >= minChunkScore)
-          .slice(0, 5);
+          .slice(0, maxSubResults);
         const result: SearchResult = {
           url: page.url,
           title: page.title,
@@ -293,7 +295,7 @@ export class SearchEngine {
           chunkText: page.bestChunk.hit.metadata.chunkText || undefined,
           score: Number(page.pageScore.toFixed(6)),
           routeFile: page.routeFile,
-          chunks: meaningful.length > 1
+          chunks: meaningful.length >= 1
             ? meaningful.map((c) => ({
                 sectionTitle: c.hit.metadata.sectionTitle || undefined,
                 snippet: this.ensureSnippet(c, query),

@@ -340,6 +340,15 @@ async function handleGetSearch(
     searchRequest.groupBy = groupBy;
   }
 
+  const maxSubResults = params.get("maxSubResults");
+  if (maxSubResults !== null) {
+    const parsed = Number.parseInt(maxSubResults, 10);
+    if (Number.isNaN(parsed) || parsed < 1 || parsed > 20) {
+      throw new SearchSocketError("INVALID_REQUEST", "maxSubResults must be a positive integer between 1 and 20", 400);
+    }
+    searchRequest.maxSubResults = parsed;
+  }
+
   const tags = params.getAll("tags");
   if (tags.length > 0) searchRequest.tags = tags;
 
