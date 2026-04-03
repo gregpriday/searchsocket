@@ -4,6 +4,18 @@ Semantic site search and MCP retrieval for SvelteKit content projects. Index you
 
 **Requirements**: Node.js >= 20 | **Backend**: [Upstash Vector](https://upstash.com/docs/vector/overall/getstarted) | **License**: MIT
 
+## How it works
+
+```
+SvelteKit Pages → Extractor (Cheerio + Turndown) → Chunker → Upstash Vector
+                                                                    ↓
+                    Search UI ← SvelteKit API Hook ← Search Engine + Ranking
+                                       ↓
+                              MCP Endpoint → Claude Code / Claude Desktop
+```
+
+SearchSocket extracts content from your SvelteKit site, converts it to markdown, splits it into chunks, and stores them in Upstash Vector. At runtime, the SvelteKit hook serves both a search API for your frontend and an MCP endpoint for AI tools.
+
 ## Features
 
 - **Semantic + keyword search** — Upstash Vector handles hybrid search with built-in reranking and input enrichment
@@ -22,7 +34,11 @@ Semantic site search and MCP retrieval for SvelteKit content projects. Index you
 pnpm add -D searchsocket
 ```
 
-SearchSocket is typically a dev dependency for CLI indexing. If you use `searchsocketHandle()` at runtime (e.g., in a Node server adapter), add it as a regular dependency instead.
+SearchSocket is typically a dev dependency since indexing runs at build time. If you use `searchsocketHandle()` at runtime (e.g., in a Node server adapter or serving the MCP endpoint from a production deployment), add it as a regular dependency:
+
+```bash
+pnpm add searchsocket
+```
 
 ## Quickstart
 
@@ -67,66 +83,92 @@ export const handle = searchsocketHandle();
 
 This exposes `POST /api/search`, `GET /api/search/health`, the MCP endpoint at `/api/mcp`, and page retrieval routes.
 
-### 5. Deploy
+If you run into SSR bundling issues, mark SearchSocket as external in your Vite config:
 
-SearchSocket is designed to index automatically on deploy. Add the Vite plugin and set environment variables on your hosting platform (Vercel, Cloudflare, etc.):
-
-```bash
-# Set in your hosting platform's environment variables:
-UPSTASH_VECTOR_REST_URL=https://...
-UPSTASH_VECTOR_REST_TOKEN=...
-SEARCHSOCKET_AUTO_INDEX=1
+```ts
+// vite.config.ts
+export default defineConfig({
+  plugins: [sveltekit()],
+  ssr: {
+    external: ["searchsocket", "searchsocket/sveltekit", "searchsocket/client"]
+  }
+});
 ```
 
-The Vite plugin runs `searchsocket index` after each build. See [Build-Triggered Indexing](#build-triggered-indexing) for details.
+### 5. Add search to your frontend
 
-For local testing, you can also index manually:
+Copy the search dialog template into your project:
+
+```bash
+pnpm searchsocket add search-dialog
+```
+
+This copies a Svelte 5 component to `src/lib/components/search/SearchDialog.svelte` with Cmd+K built in. Import it in your layout and add the scroll-to-text handler:
+
+```svelte
+<!-- src/routes/+layout.svelte -->
+<script>
+  import { afterNavigate } from "$app/navigation";
+  import { searchsocketScrollToText } from "searchsocket/sveltekit";
+  import SearchDialog from "$lib/components/search/SearchDialog.svelte";
+
+  afterNavigate(searchsocketScrollToText);
+</script>
+
+<SearchDialog />
+
+<slot />
+```
+
+Users can now press Cmd+K to search. See [Building a Search UI](docs/search-ui.md) for scoped search, custom styling, and more patterns.
+
+### 6. Deploy
+
+SearchSocket is designed to index automatically on deploy. The `init` command already added the Vite plugin to your config. Set these environment variables on your hosting platform (Vercel, Cloudflare, etc.):
+
+| Variable | Value |
+|----------|-------|
+| `UPSTASH_VECTOR_REST_URL` | Your Upstash Vector REST URL |
+| `UPSTASH_VECTOR_REST_TOKEN` | Your Upstash Vector REST token |
+| `SEARCHSOCKET_AUTO_INDEX` | `1` |
+
+Every deploy will build your site, index the content, and serve the search API — fully automated.
+
+For local testing, you can also build and index manually:
 
 ```bash
 pnpm build
 pnpm searchsocket index
 ```
 
-### 6. Search
+### 7. Connect Claude Code (optional)
 
-**Browser client:**
-```ts
-import { createSearchClient } from "searchsocket/client";
+Point Claude Code at your deployed site's MCP endpoint:
 
-const client = createSearchClient();
-const { results } = await client.search({
-  q: "getting started",
-  topK: 5,
-  groupBy: "page"
-});
+```json
+{
+  "mcpServers": {
+    "searchsocket": {
+      "type": "http",
+      "url": "https://your-site.com/api/mcp"
+    }
+  }
+}
 ```
 
-**Svelte 5 reactive store:**
-```svelte
-<script>
-  import { createSearch } from "searchsocket/svelte";
-  import { buildResultUrl } from "searchsocket/client";
+See [MCP Server](#mcp-server) for authentication and other options.
 
-  const search = createSearch({ debounce: 300 });
-</script>
+### Querying the API directly
 
-<input bind:value={search.query} placeholder="Search..." />
+The search API is also available via HTTP and CLI:
 
-{#each search.results as result}
-  <a href={buildResultUrl(result)}>{result.title}</a>
-  <p>{result.snippet}</p>
-{/each}
-```
-
-**cURL:**
 ```bash
+# cURL
 curl -X POST http://localhost:5173/api/search \
   -H "content-type: application/json" \
   -d '{"q":"getting started","topK":5,"groupBy":"page"}'
-```
 
-**CLI:**
-```bash
+# CLI
 pnpm searchsocket search --q "getting started" --top-k 5
 ```
 
@@ -997,7 +1039,7 @@ export default defineConfig({
 
 | Variable | Description |
 |----------|-------------|
-| `GEMINI_API_KEY` | Google Gemini API key (only needed for image embedding) |
+| `GEMINI_API_KEY` | Google Gemini API key — only for experimental image embedding (`embedding.images.enable: true`). Not needed for standard text search. |
 | `SEARCHSOCKET_SCOPE` | Override scope (when `scope.mode: "env"`) |
 | `SEARCHSOCKET_AUTO_INDEX` | Enable build-triggered indexing (`1`, `true`, or `yes`) |
 | `SEARCHSOCKET_DISABLE_AUTO_INDEX` | Disable build-triggered indexing |
@@ -1108,10 +1150,12 @@ See [docs/ci.md](docs/ci.md) for ready-to-use GitHub Actions workflows covering:
 
 ## Further Reading
 
-- [Building a Search UI](docs/search-ui.md) — complete guide to building search components, from Cmd+K modals to scoped search, with patterns, API reference, and styling
-- [Configuration Reference](docs/config.md) — all config options with defaults
+- [Building a Search UI](docs/search-ui.md) — Cmd+K modals, scoped search, styling, and API reference
+- [Tuning Search Relevance](docs/tuning.md) — visual playground, ranking parameters, and search quality testing
+- [Configuration Reference](docs/config.md) — all config options, indexing hooks, and custom records
 - [CI/CD Workflows](docs/ci.md) — GitHub Actions and Vercel integration
 - [MCP over HTTP Guide](docs/mcp-claude-code.md) — detailed HTTP MCP setup for Claude Code
+- [Troubleshooting](docs/troubleshooting.md) — common issues, diagnostics, and FAQ
 
 ## License
 

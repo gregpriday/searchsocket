@@ -89,13 +89,28 @@ SearchSocket reads `UPSTASH_VECTOR_REST_URL` and `UPSTASH_VECTOR_REST_TOKEN` fro
 
 ## Embedding
 
-Upstash handles embedding server-side via the `data` field. These settings configure the built-in embedding model used by Upstash.
+Upstash handles embedding server-side via the `data` field. These settings must match the embedding model configured on your Upstash Vector index.
 
 - `embedding.model` (default `bge-large-en-v1.5`) — embedding model name
 - `embedding.dimensions` (default `1024`) — vector dimensions
 - `embedding.taskType` (default `RETRIEVAL_DOCUMENT`) — embedding task type
 - `embedding.batchSize` (default `100`) — vectors per upsert batch
-- `embedding.images.enable` (default `false`) — reserved for future image embedding support
+- `embedding.images.enable` (default `false`) — experimental image embedding via Google Gemini (requires `GEMINI_API_KEY`)
+
+### Non-English / multilingual sites
+
+The default `bge-large-en-v1.5` model is English-specific. For multilingual content, create your Upstash Vector index with a multilingual model and update your config to match:
+
+```ts
+export default {
+  embedding: {
+    model: "bge-m3",          // multilingual model
+    dimensions: 1024
+  }
+};
+```
+
+The model and dimensions must match what you selected when creating the Upstash Vector index. See [Upstash's embedding model list](https://upstash.com/docs/vector/features/embeddingmodels) for available options.
 
 ## Search
 
@@ -163,6 +178,99 @@ Upstash handles embedding server-side via the `data` field. These settings confi
 - `exclude` (default `[]`) — glob patterns for URLs to exclude from indexing
 - `respectRobotsTxt` (default `true`) — honor robots.txt rules
 
+## Indexing Hooks
+
+Hooks let you transform pages and chunks during indexing. They're passed programmatically to the Vite plugin or the `IndexPipeline` — not via `searchsocket.config.ts`.
+
+### Via the Vite plugin
+
+```ts
+// vite.config.ts
+import { searchsocketVitePlugin } from "searchsocket/sveltekit";
+
+export default {
+  plugins: [
+    sveltekit(),
+    searchsocketVitePlugin({
+      hooks: {
+        // Modify or skip pages before chunking
+        transformPage: async (page) => {
+          // Skip draft pages
+          if (page.frontmatter?.draft) return null;
+
+          // Inject custom tags from frontmatter
+          if (page.frontmatter?.tags) {
+            page.tags = [...(page.tags ?? []), ...page.frontmatter.tags];
+          }
+
+          return page;
+        },
+
+        // Modify or skip individual chunks
+        transformChunk: async (chunk) => {
+          // Skip very short chunks
+          if (chunk.chunkText.length < 100) return null;
+          return chunk;
+        },
+
+        // Transform the full chunk array before indexing
+        beforeIndex: async (chunks) => {
+          console.log(`Indexing ${chunks.length} chunks`);
+          return chunks;
+        },
+
+        // Run after indexing completes
+        afterIndex: async (stats) => {
+          console.log(`Indexed ${stats.chunks.total} chunks across ${stats.pages.total} pages`);
+        }
+      }
+    })
+  ]
+};
+```
+
+### Hook reference
+
+| Hook | Signature | Description |
+|------|-----------|-------------|
+| `transformPage` | `(page: ExtractedPage) => ExtractedPage \| null` | Modify or skip a page before chunking. Return `null` to exclude. |
+| `transformChunk` | `(chunk: Chunk) => Chunk \| null` | Modify or skip a chunk. Return `null` to exclude. |
+| `beforeIndex` | `(chunks: Chunk[]) => Chunk[]` | Transform the full chunk array before upserting to Upstash. |
+| `afterIndex` | `(stats: IndexStats) => void` | Run after indexing completes. Receives indexing statistics. |
+
+All hooks are async-compatible.
+
+## Custom Records
+
+Inject data from external sources (databases, APIs, CMS) into the search index alongside your site content. Custom records bypass HTML extraction and are processed directly as pages.
+
+```ts
+import { IndexPipeline } from "searchsocket";
+
+const pipeline = await IndexPipeline.create({ cwd: process.cwd() });
+
+await pipeline.run({
+  customRecords: [
+    {
+      url: "/products/widget-pro",
+      title: "Widget Pro",
+      content: "The Widget Pro is our flagship product with 50GB storage and real-time sync.",
+      tags: ["product", "featured"],
+      metadata: { category: "widgets", price: "49.99" },
+      weight: 1.2
+    },
+    {
+      url: "/products/widget-lite",
+      title: "Widget Lite",
+      content: "Widget Lite is the free tier with 5GB storage.",
+      tags: ["product", "free-tier"]
+    }
+  ]
+});
+```
+
+Custom records receive the same `transformPage` hook treatment as regular pages, and are tagged with their URL path segments automatically.
+
 ## Environment Variables
 
 Required:
@@ -172,6 +280,7 @@ Required:
 
 Optional:
 
+- `GEMINI_API_KEY` — Google Gemini API key. Only required for experimental image embedding (`embedding.images.enable: true`). Not needed for standard text search.
 - `SEARCHSOCKET_SCOPE` — override scope (when `scope.mode: "env"`)
 - `SEARCHSOCKET_AUTO_INDEX` — enable build-triggered indexing (`1`, `true`, or `yes`)
 - `SEARCHSOCKET_DISABLE_AUTO_INDEX` — disable build-triggered indexing
