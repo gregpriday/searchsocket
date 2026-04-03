@@ -3,12 +3,17 @@ import { UpstashSearchStore } from "../src/vector/upstash";
 import type { Index } from "@upstash/vector";
 import type { Scope } from "../src/types";
 
+interface FakeVector {
+  id: string;
+  metadata: Record<string, unknown>;
+}
+
 function createFakeNamespace() {
   return {
     upsert: vi.fn(async () => undefined),
     query: vi.fn(async () => []),
     fetch: vi.fn(async () => []),
-    range: vi.fn(async () => ({ vectors: [], nextCursor: "0" })),
+    range: vi.fn(async () => ({ vectors: [] as FakeVector[], nextCursor: "0" })),
     delete: vi.fn(async () => undefined)
   };
 }
@@ -46,8 +51,8 @@ describe("UpstashSearchStore namespace routing", () => {
     expect(chunksNs.upsert).toHaveBeenCalledTimes(1);
     expect(pagesNs.upsert).not.toHaveBeenCalled();
     // Verify type metadata is preserved for debugging
-    const upsertedData = chunksNs.upsert.mock.calls[0][0] as Array<{ metadata: Record<string, unknown> }>;
-    expect(upsertedData[0].metadata.type).toBe("chunk");
+    const call = chunksNs.upsert.mock.lastCall as unknown as [Array<{ metadata: Record<string, unknown> }>];
+    expect(call[0][0]!.metadata.type).toBe("chunk");
   });
 
   it("routes upsertPages to pages namespace", async () => {
@@ -61,8 +66,8 @@ describe("UpstashSearchStore namespace routing", () => {
 
     expect(pagesNs.upsert).toHaveBeenCalledTimes(1);
     expect(chunksNs.upsert).not.toHaveBeenCalled();
-    const upsertedData = pagesNs.upsert.mock.calls[0][0] as Array<{ metadata: Record<string, unknown> }>;
-    expect(upsertedData[0].metadata.type).toBe("page");
+    const call = pagesNs.upsert.mock.lastCall as unknown as [Array<{ metadata: Record<string, unknown> }>];
+    expect(call[0][0]!.metadata.type).toBe("page");
   });
 
   it("routes search to chunks namespace without type filter", async () => {
@@ -72,7 +77,7 @@ describe("UpstashSearchStore namespace routing", () => {
     await store.search([0.1], { limit: 10 }, scope);
 
     expect(chunksNs.query).toHaveBeenCalledTimes(1);
-    const queryArgs = chunksNs.query.mock.calls[0][0] as { filter: string };
+    const queryArgs = (chunksNs.query.mock.lastCall as unknown as [{ filter: string }])[0];
     expect(queryArgs.filter).not.toContain("type");
     expect(queryArgs.filter).toContain("projectId = 'test-project'");
     expect(queryArgs.filter).toContain("scopeName = 'main'");
@@ -85,7 +90,7 @@ describe("UpstashSearchStore namespace routing", () => {
     await store.searchPages([0.1], { limit: 10 }, scope);
 
     expect(pagesNs.query).toHaveBeenCalledTimes(1);
-    const queryArgs = pagesNs.query.mock.calls[0][0] as { filter: string };
+    const queryArgs = (pagesNs.query.mock.lastCall as unknown as [{ filter: string }])[0];
     expect(queryArgs.filter).not.toContain("type");
   });
 
@@ -96,7 +101,7 @@ describe("UpstashSearchStore namespace routing", () => {
     await store.searchChunksByUrl([0.1], "/test", { limit: 10 }, scope);
 
     expect(chunksNs.query).toHaveBeenCalledTimes(1);
-    const queryArgs = chunksNs.query.mock.calls[0][0] as { filter: string };
+    const queryArgs = (chunksNs.query.mock.lastCall as unknown as [{ filter: string }])[0];
     expect(queryArgs.filter).not.toContain("type");
     expect(queryArgs.filter).toContain("url = '/test'");
   });
@@ -166,11 +171,11 @@ describe("UpstashSearchStore namespace routing", () => {
   it("deleteScope scans both namespaces", async () => {
     const { index, chunksNs, pagesNs } = createFakeIndex();
     chunksNs.range.mockResolvedValueOnce({
-      vectors: [{ id: "c1", metadata: { projectId: "test-project", scopeName: "main" } }],
+      vectors: [{ id: "c1", metadata: { projectId: "test-project", scopeName: "main" } }] as FakeVector[],
       nextCursor: "0"
     });
     pagesNs.range.mockResolvedValueOnce({
-      vectors: [{ id: "p1", metadata: { projectId: "test-project", scopeName: "main" } }],
+      vectors: [{ id: "p1", metadata: { projectId: "test-project", scopeName: "main" } }] as FakeVector[],
       nextCursor: "0"
     });
 
@@ -189,13 +194,13 @@ describe("UpstashSearchStore namespace routing", () => {
       vectors: [
         { id: "c1", metadata: { projectId: "test-project", scopeName: "main" } },
         { id: "c2", metadata: { projectId: "test-project", scopeName: "main" } }
-      ],
+      ] as FakeVector[],
       nextCursor: "0"
     });
     pagesNs.range.mockResolvedValueOnce({
       vectors: [
         { id: "p1", metadata: { projectId: "test-project", scopeName: "main" } }
-      ],
+      ] as FakeVector[],
       nextCursor: "0"
     });
 
@@ -203,8 +208,8 @@ describe("UpstashSearchStore namespace routing", () => {
     const scopes = await store.listScopes("test-project");
 
     expect(scopes).toHaveLength(1);
-    expect(scopes[0].scopeName).toBe("main");
-    expect(scopes[0].documentCount).toBe(3);
+    expect(scopes[0]!.scopeName).toBe("main");
+    expect(scopes[0]!.documentCount).toBe(3);
   });
 
   it("dropAllIndexes scans both namespaces filtered by projectId", async () => {
@@ -213,13 +218,13 @@ describe("UpstashSearchStore namespace routing", () => {
       vectors: [
         { id: "c1", metadata: { projectId: "test-project" } },
         { id: "c2", metadata: { projectId: "other-project" } }
-      ],
+      ] as FakeVector[],
       nextCursor: "0"
     });
     pagesNs.range.mockResolvedValueOnce({
       vectors: [
         { id: "p1", metadata: { projectId: "test-project" } }
-      ],
+      ] as FakeVector[],
       nextCursor: "0"
     });
 
