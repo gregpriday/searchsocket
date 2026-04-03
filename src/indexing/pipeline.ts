@@ -658,9 +658,16 @@ export class IndexPipeline {
     if (!options.dryRun && changedChunks.length > 0) {
       this.logger.info(`Upserting ${changedChunks.length} chunk${changedChunks.length === 1 ? "" : "s"} to Upstash Vector...`);
 
-      const docs = changedChunks.map((chunk) => ({
+      const docs = changedChunks.map((chunk) => {
+        const embeddingText = buildEmbeddingText(chunk, this.config.chunking.prependTitle);
+        if (embeddingText.length > 2000) {
+          this.logger.warn(
+            `Chunk ${chunk.chunkKey} text is ${embeddingText.length} chars (~${Math.round(embeddingText.length / 4)} tokens), which may exceed the 512-token model limit and be silently truncated.`
+          );
+        }
+        return {
         id: chunk.chunkKey,
-        data: buildEmbeddingText(chunk, this.config.chunking.prependTitle),
+        data: embeddingText,
         metadata: {
           url: chunk.url,
           path: chunk.path,
@@ -668,7 +675,7 @@ export class IndexPipeline {
           sectionTitle: chunk.sectionTitle ?? "",
           headingPath: chunk.headingPath.join(" > "),
           snippet: chunk.snippet,
-          chunkText: buildEmbeddingText(chunk, this.config.chunking.prependTitle),
+          chunkText: embeddingText,
           tags: chunk.tags,
           ordinal: chunk.ordinal,
           contentHash: chunk.contentHash,
@@ -681,7 +688,8 @@ export class IndexPipeline {
           incomingAnchorText: chunk.incomingAnchorText ?? "",
           ...(chunk.meta && Object.keys(chunk.meta).length > 0 ? { meta: chunk.meta } : {})
         }
-      }));
+      };
+      });
 
       await this.store.upsertChunks(docs, scope);
       documentsUpserted = docs.length;

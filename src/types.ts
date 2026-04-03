@@ -93,6 +93,7 @@ export interface SearchSocketConfig {
   search?: {
     dualSearch?: boolean;
     pageSearchWeight?: number;
+    hybridChunks?: boolean;
   };
   ranking?: {
     enableIncomingLinkBoost?: boolean;
@@ -239,6 +240,7 @@ export interface ResolvedSearchSocketConfig {
   search: {
     dualSearch: boolean;
     pageSearchWeight: number;
+    hybridChunks: boolean;
   };
   ranking: {
     enableIncomingLinkBoost: boolean;

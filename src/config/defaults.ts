@@ -43,7 +43,7 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
     },
     chunking: {
       strategy: "hybrid",
-      maxChars: 2200,
+      maxChars: 1500,
       overlapChars: 200,
       minChars: 250,
       headingPathDepth: 3,
@@ -72,7 +72,8 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
     },
     search: {
       dualSearch: true,
-      pageSearchWeight: 0.3
+      pageSearchWeight: 0.3,
+      hybridChunks: true
     },
     ranking: {
       enableIncomingLinkBoost: true,

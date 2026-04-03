@@ -111,7 +111,8 @@ export const searchSocketConfigSchema = z.object({
   search: z
     .object({
       dualSearch: z.boolean().optional(),
-      pageSearchWeight: z.number().min(0).max(1).optional()
+      pageSearchWeight: z.number().min(0).max(1).optional(),
+      hybridChunks: z.boolean().optional()
     })
     .optional(),
   ranking: z

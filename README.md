@@ -757,7 +757,7 @@ export default {
 
   chunking: {
     strategy: "hybrid",
-    maxChars: 2200,
+    maxChars: 1500,
     overlapChars: 200,
     minChars: 250,
     headingPathDepth: 3,
