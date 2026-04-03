@@ -28,7 +28,6 @@ import {
   injectViteConfig,
   writeEnvFile,
   HOOKS_SNIPPET,
-  HOOKS_SEQUENCE_SNIPPET,
   VITE_PLUGIN_SNIPPET,
 } from "./init-helpers";
 import { readAnalyticsLog, computeReport } from "./analytics/report";
@@ -285,7 +284,7 @@ async function runInteractiveInit(cwd: string): Promise<void> {
         : await clack.text({
             message: "Upstash Search REST URL:",
             placeholder: "https://your-index.upstash.io",
-            validate: (v) => (v.length === 0 ? "URL is required" : undefined),
+            validate: (v) => (!v ? "URL is required" : undefined),
           });
 
       if (clack.isCancel(url)) {
@@ -298,7 +297,7 @@ async function runInteractiveInit(cwd: string): Promise<void> {
         : await clack.text({
             message: "Upstash Search REST Token:",
             placeholder: "AX...",
-            validate: (v) => (v.length === 0 ? "Token is required" : undefined),
+            validate: (v) => (!v ? "Token is required" : undefined),
           });
 
       if (clack.isCancel(token)) {

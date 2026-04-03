@@ -63,12 +63,14 @@ export const VITE_PLUGIN_SNIPPET = `import { searchsocketVitePlugin } from "sear
  */
 export function injectHooksServerTs(cwd: string): HookInjectionResult {
   const hooksDir = path.join(cwd, "src");
-  const hooksPath = path.join(hooksDir, "hooks.server.ts");
+  const tsPath = path.join(hooksDir, "hooks.server.ts");
+  const jsPath = path.join(hooksDir, "hooks.server.js");
+  const hooksPath = fs.existsSync(tsPath) ? tsPath : fs.existsSync(jsPath) ? jsPath : null;
 
-  // If file doesn't exist, create it from scratch
-  if (!fs.existsSync(hooksPath)) {
+  // If no hooks file exists, create hooks.server.ts from scratch
+  if (!hooksPath) {
     fs.mkdirSync(hooksDir, { recursive: true });
-    fs.writeFileSync(hooksPath, HOOKS_SNIPPET + "\n", "utf8");
+    fs.writeFileSync(tsPath, HOOKS_SNIPPET + "\n", "utf8");
     return "created";
   }
 
