@@ -40,8 +40,20 @@ export function extractPublishedAtFromHtml($: CheerioAPI): number | undefined {
       const raw = $(jsonLdScripts[i]).html();
       if (!raw) continue;
       const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const val = normalizeDateToMs(parsed.datePublished);
-      if (val !== undefined) return val;
+      // Handle top-level object, arrays, and @graph patterns
+      const candidates: Record<string, unknown>[] = [];
+      if (Array.isArray(parsed)) {
+        candidates.push(...(parsed as Record<string, unknown>[]));
+      } else if (parsed && typeof parsed === "object") {
+        candidates.push(parsed);
+        if (Array.isArray((parsed as Record<string, unknown>)["@graph"])) {
+          candidates.push(...((parsed as Record<string, unknown>)["@graph"] as Record<string, unknown>[]));
+        }
+      }
+      for (const candidate of candidates) {
+        const val = normalizeDateToMs(candidate.datePublished);
+        if (val !== undefined) return val;
+      }
     } catch {
       // malformed JSON-LD — fall through
     }

@@ -81,7 +81,8 @@ export function buildPageContentHash(page: IndexedPage): string {
     (page.keywords ?? []).slice().sort().join(","),
     page.tags.slice().sort().join(","),
     page.markdown,
-    String(page.outgoingLinks)
+    String(page.outgoingLinks),
+    String(page.publishedAt ?? "")
   ];
   return sha256(parts.join("|"));
 }

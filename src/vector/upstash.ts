@@ -433,7 +433,8 @@ export class UpstashSearchStore {
         indexedAt: doc.metadata.indexedAt,
         summary: doc.metadata.summary || undefined,
         description: doc.metadata.description || undefined,
-        keywords: doc.metadata.keywords?.length ? doc.metadata.keywords : undefined
+        keywords: doc.metadata.keywords?.length ? doc.metadata.keywords : undefined,
+        publishedAt: typeof doc.metadata.publishedAt === "number" ? doc.metadata.publishedAt : undefined
       };
     } catch {
       return null;

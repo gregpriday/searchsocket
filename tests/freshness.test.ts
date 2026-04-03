@@ -204,6 +204,36 @@ describe("extractFromHtml freshness", () => {
     expect(result!.publishedAt).toBe(new Date("2024-02-01T00:00:00Z").getTime());
   });
 
+  it("extracts publishedAt from JSON-LD @graph array", () => {
+    const html = `
+      <html>
+        <head>
+          <script type="application/ld+json">
+            {"@graph": [{"@type": "WebPage"}, {"@type": "Article", "datePublished": "2024-07-01T00:00:00Z"}]}
+          </script>
+        </head>
+        <body><main><p>Content</p></main></body>
+      </html>`;
+    const result = extractFromHtml("/graph-article", html, config);
+    expect(result).not.toBeNull();
+    expect(result!.publishedAt).toBe(new Date("2024-07-01T00:00:00Z").getTime());
+  });
+
+  it("extracts publishedAt from JSON-LD array", () => {
+    const html = `
+      <html>
+        <head>
+          <script type="application/ld+json">
+            [{"@type": "Article", "datePublished": "2024-08-15T00:00:00Z"}]
+          </script>
+        </head>
+        <body><main><p>Content</p></main></body>
+      </html>`;
+    const result = extractFromHtml("/array-article", html, config);
+    expect(result).not.toBeNull();
+    expect(result!.publishedAt).toBe(new Date("2024-08-15T00:00:00Z").getTime());
+  });
+
   it("returns undefined publishedAt when no date signals in HTML", () => {
     const html = `
       <html>
