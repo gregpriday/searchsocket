@@ -107,7 +107,8 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
     llmsTxt: {
       enable: false,
       outputPath: "static/llms.txt",
-      generateFull: false
+      generateFull: true,
+      serveMarkdownVariants: false
     },
     state: {
       dir: ".searchsocket"

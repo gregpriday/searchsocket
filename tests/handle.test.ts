@@ -1056,6 +1056,192 @@ describe("searchsocketHandle llms.txt serving", () => {
   });
 });
 
+describe("searchsocketHandle markdown variant serving", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("serves GET /docs/install.md as text/markdown when serveMarkdownVariants is enabled", async () => {
+    const config = makeConfig({
+      llmsTxt: {
+        enable: true,
+        outputPath: "static/llms.txt",
+        generateFull: true,
+        serveMarkdownVariants: true
+      }
+    } as Partial<ResolvedSearchSocketConfig>);
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      getPage: vi.fn().mockResolvedValue({
+        url: "/docs/install",
+        frontmatter: { title: "Install" },
+        markdown: "# Installation\n\nRun `npm install`."
+      })
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("fallback"));
+    const event = makeEvent({ pathname: "/docs/install.md", method: "GET" });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+    expect(await response.text()).toBe("# Installation\n\nRun `npm install`.");
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("forwards ?scope= query param to engine.getPage", async () => {
+    const mockGetPage = vi.fn().mockResolvedValue({
+      url: "/docs/api",
+      frontmatter: {},
+      markdown: "# API"
+    });
+
+    const config = makeConfig({
+      llmsTxt: {
+        enable: true,
+        outputPath: "static/llms.txt",
+        generateFull: true,
+        serveMarkdownVariants: true
+      }
+    } as Partial<ResolvedSearchSocketConfig>);
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      getPage: mockGetPage
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("fallback"));
+    const event = makeEvent({ pathname: "/docs/api.md", method: "GET", searchParams: { scope: "v2" } });
+
+    await handle({ event, resolve });
+    expect(mockGetPage).toHaveBeenCalledWith("/docs/api", "v2");
+  });
+
+  it("falls through when serveMarkdownVariants is false", async () => {
+    const config = makeConfig({
+      llmsTxt: {
+        enable: true,
+        outputPath: "static/llms.txt",
+        generateFull: true,
+        serveMarkdownVariants: false
+      }
+    } as Partial<ResolvedSearchSocketConfig>);
+
+    const handle = searchsocketHandle({ config });
+    const resolveResult = new Response("fallback");
+    const resolve = vi.fn().mockResolvedValue(resolveResult);
+    const event = makeEvent({ pathname: "/docs/install.md", method: "GET" });
+
+    const response = await handle({ event, resolve });
+    expect(resolve).toHaveBeenCalled();
+    expect(await response.text()).toBe("fallback");
+  });
+
+  it("falls through when engine.getPage throws 404", async () => {
+    const config = makeConfig({
+      llmsTxt: {
+        enable: true,
+        outputPath: "static/llms.txt",
+        generateFull: true,
+        serveMarkdownVariants: true
+      }
+    } as Partial<ResolvedSearchSocketConfig>);
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      getPage: vi.fn().mockRejectedValue(new SearchSocketError("INVALID_REQUEST", "Page not found", 404))
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolveResult = new Response("fallback");
+    const resolve = vi.fn().mockResolvedValue(resolveResult);
+    const event = makeEvent({ pathname: "/docs/missing.md", method: "GET" });
+
+    const response = await handle({ event, resolve });
+    expect(resolve).toHaveBeenCalled();
+    expect(await response.text()).toBe("fallback");
+  });
+
+  it("propagates non-404 errors from engine.getPage", async () => {
+    const config = makeConfig({
+      llmsTxt: {
+        enable: true,
+        outputPath: "static/llms.txt",
+        generateFull: true,
+        serveMarkdownVariants: true
+      }
+    } as Partial<ResolvedSearchSocketConfig>);
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      getPage: vi.fn().mockRejectedValue(new SearchSocketError("INTERNAL_ERROR", "Database error", 500))
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("fallback"));
+    const event = makeEvent({ pathname: "/docs/api.md", method: "GET" });
+
+    await expect(handle({ event, resolve })).rejects.toThrow("Database error");
+  });
+
+  it("does not intercept POST requests to .md paths", async () => {
+    const config = makeConfig({
+      llmsTxt: {
+        enable: true,
+        outputPath: "static/llms.txt",
+        generateFull: true,
+        serveMarkdownVariants: true
+      }
+    } as Partial<ResolvedSearchSocketConfig>);
+
+    const handle = searchsocketHandle({ config });
+    const resolveResult = new Response("fallback");
+    const resolve = vi.fn().mockResolvedValue(resolveResult);
+    const event = makeEvent({ pathname: "/docs/install.md", method: "POST", body: {} });
+
+    const response = await handle({ event, resolve });
+    expect(resolve).toHaveBeenCalled();
+  });
+
+  it("serves markdown variants after API requests have been made", async () => {
+    const config = makeConfig({
+      llmsTxt: {
+        enable: true,
+        outputPath: "static/llms.txt",
+        generateFull: true,
+        serveMarkdownVariants: true
+      }
+    } as Partial<ResolvedSearchSocketConfig>);
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn().mockResolvedValue({
+        q: "ok",
+        scope: "main",
+        results: [],
+        meta: { timingsMs: { search: 0, total: 0 } }
+      }),
+      getPage: vi.fn().mockResolvedValue({
+        url: "/docs/install",
+        frontmatter: {},
+        markdown: "# Install"
+      })
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("fallback"));
+
+    // First: a POST to /api/search
+    const searchEvent = makeEvent({ pathname: "/api/search", method: "POST", body: { q: "test" } });
+    await handle({ event: searchEvent, resolve });
+
+    // Then: a GET to /docs/install.md
+    const mdEvent = makeEvent({ pathname: "/docs/install.md", method: "GET" });
+    const response = await handle({ event: mdEvent, resolve });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+    expect(await response.text()).toBe("# Install");
+  });
+});
+
 describe("MCP endpoint", () => {
   it("routes MCP requests to the MCP handler", async () => {
     const config = makeConfig();
