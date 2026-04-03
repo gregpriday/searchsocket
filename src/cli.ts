@@ -23,6 +23,7 @@ import type { IndexStats, ResolvedSearchSocketConfig, Scope, ScopeInfo, SearchRe
 import type { UpstashSearchStore } from "./vector/upstash";
 import { ensureMcpJson } from "./init-helpers";
 import { readAnalyticsLog, computeReport } from "./analytics/report";
+import { copyComponent, isValidComponent, listAvailableComponents } from "./add-helpers";
 
 interface RootCommandOptions {
   cwd?: string;
@@ -1013,6 +1014,40 @@ program
 
     if (failed > 0) {
       process.exitCode = 1;
+    }
+  });
+
+program
+  .command("add <component>")
+  .description("Copy a Svelte 5 search component template into your project")
+  .option("--dir <path>", "output directory", "src/lib/components/search")
+  .option("--overwrite", "overwrite existing files", false)
+  .action(async (component: string, opts: { dir: string; overwrite: boolean }, command) => {
+    const root = getRootOptions(command).cwd ?? process.cwd();
+    const cwd = path.resolve(root);
+
+    if (!isValidComponent(component)) {
+      const available = listAvailableComponents();
+      process.stderr.write(`unknown component: ${component}\n`);
+      process.stderr.write(`available components: ${available.join(", ")}\n`);
+      process.exit(1);
+    }
+
+    const targetDir = path.resolve(cwd, opts.dir);
+    const result = await copyComponent(component, targetDir, { overwrite: opts.overwrite });
+
+    for (const filePath of result.written) {
+      process.stdout.write(`created: ${path.relative(cwd, filePath)}\n`);
+    }
+    for (const filePath of result.skipped) {
+      process.stdout.write(`skipped (exists): ${path.relative(cwd, filePath)}\n`);
+    }
+
+    const firstWritten = result.written[0];
+    if (firstWritten) {
+      process.stdout.write(`\nUsage:\n`);
+      const fileName = path.basename(firstWritten, ".svelte");
+      process.stdout.write(`  import ${fileName} from "${path.relative(cwd, firstWritten).replace(/\\/g, "/")}";\n`);
     }
   });
 
