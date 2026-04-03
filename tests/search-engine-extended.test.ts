@@ -909,6 +909,177 @@ describe("SearchEngine - maxSubResults", () => {
   });
 });
 
+describe("SearchEngine - ranking overrides", () => {
+  it("applies ranking overrides when debug is true", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    // Default minScore is 0.3 — hits at 0.25 would normally be filtered out
+    config.ranking.minScore = 0.3;
+    config.ranking.scoreGapThreshold = 0;
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/page"), score: 0.25 }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
+    });
+
+    // Without overrides: filtered out by minScore
+    const resultDefault = await engine.search({ q: "test", topK: 10, groupBy: "chunk" });
+    expect(resultDefault.results.length).toBe(0);
+
+    // With overrides: minScore=0 lets it through
+    const resultOverridden = await engine.search({
+      q: "test",
+      topK: 10,
+      groupBy: "chunk",
+      debug: true,
+      rankingOverrides: { ranking: { minScore: 0 } }
+    });
+    expect(resultOverridden.results.length).toBe(1);
+  });
+
+  it("ignores ranking overrides when debug is false", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minScore = 0.3;
+    config.ranking.scoreGapThreshold = 0;
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/page"), score: 0.25 }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
+    });
+
+    // debug: false — overrides should be ignored, so minScore 0.3 still applies
+    const result = await engine.search({
+      q: "test",
+      topK: 10,
+      groupBy: "chunk",
+      debug: false,
+      rankingOverrides: { ranking: { minScore: 0 } }
+    });
+    expect(result.results.length).toBe(0);
+  });
+
+  it("does not mutate base config across sequential calls", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minScore = 0.3;
+    config.ranking.scoreGapThreshold = 0;
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/page"), score: 0.25 }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
+    });
+
+    // First call with override
+    await engine.search({
+      q: "test",
+      topK: 10,
+      groupBy: "chunk",
+      debug: true,
+      rankingOverrides: { ranking: { minScore: 0 } }
+    });
+
+    // Second call without overrides — should use original config
+    const result = await engine.search({ q: "test", topK: 10, groupBy: "chunk" });
+    expect(result.results.length).toBe(0); // still filtered by original minScore 0.3
+  });
+
+  it("applies partial overrides — only specified fields change", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minScore = 0;
+    config.ranking.scoreGapThreshold = 0;
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/a"), score: 0.9 },
+      { ...makeHit("chunk-2", "/b"), score: 0.85 }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
+    });
+
+    // Override only titleMatch weight — other weights should remain at defaults
+    const result = await engine.search({
+      q: "test",
+      topK: 10,
+      groupBy: "chunk",
+      debug: true,
+      rankingOverrides: { ranking: { weights: { titleMatch: 0.5 } } }
+    });
+
+    // Should still return results (search works with partial overrides)
+    expect(result.results.length).toBe(2);
+  });
+
+  it("overrides pageSearchWeight via search namespace", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minScore = 0;
+    config.ranking.scoreGapThreshold = 0;
+
+    const chunkHits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/docs"), score: 0.5 }
+    ];
+    const pageHits: PageHit[] = [
+      {
+        id: "/docs",
+        score: 1.0,
+        title: "Docs",
+        url: "/docs",
+        description: "Documentation",
+        tags: [],
+        depth: 1,
+        incomingLinks: 0,
+        routeFile: "src/routes/docs/+page.svelte"
+      }
+    ];
+
+    const store = createMockStore(chunkHits, pageHits);
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
+
+    // With default pageSearchWeight (0.3)
+    const resultDefault = await engine.search({ q: "docs", topK: 10, debug: true });
+
+    // With higher pageSearchWeight (0.8) — page score should have more influence
+    const resultOverridden = await engine.search({
+      q: "docs",
+      topK: 10,
+      debug: true,
+      rankingOverrides: { search: { pageSearchWeight: 0.8 } }
+    });
+
+    // Both should return results — the scores should differ due to different page weights
+    expect(resultDefault.results.length).toBeGreaterThan(0);
+    expect(resultOverridden.results.length).toBeGreaterThan(0);
+
+    // With higher pageSearchWeight, the blended score should be higher
+    // (chunk score 0.5 blended with page score 1.0 at weight 0.8 > weight 0.3)
+    expect(resultOverridden.results[0]!.score).toBeGreaterThan(resultDefault.results[0]!.score);
+  });
+});
+
 describe("SearchEngine - listPages", () => {
   it("returns empty pages when store has no pages", async () => {
     const cwd = await makeTempCwd();

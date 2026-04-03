@@ -10,6 +10,7 @@ import { GeminiEmbedder } from "../vector/gemini";
 import { rankHits, aggregateByPage, trimByScoreGap, mergePageAndChunkResults } from "./ranking";
 import type {
   PageHit,
+  RankingOverrides,
   RelatedPage,
   RelatedPagesResult,
   ResolvedSearchSocketConfig,
@@ -25,6 +26,27 @@ import type { RankedHit, PageResult } from "./ranking";
 import { diceScore, compositeScore, dominantRelationshipType } from "./related-pages";
 import { toSnippet, queryAwareExcerpt } from "../utils/text";
 
+const rankingOverridesSchema = z.object({
+  ranking: z.object({
+    enableIncomingLinkBoost: z.boolean().optional(),
+    enableDepthBoost: z.boolean().optional(),
+    aggregationCap: z.number().int().positive().optional(),
+    aggregationDecay: z.number().min(0).max(1).optional(),
+    minChunkScoreRatio: z.number().min(0).max(1).optional(),
+    minScore: z.number().min(0).max(1).optional(),
+    scoreGapThreshold: z.number().min(0).max(1).optional(),
+    weights: z.object({
+      incomingLinks: z.number().optional(),
+      depth: z.number().optional(),
+      aggregation: z.number().optional(),
+      titleMatch: z.number().optional(),
+    }).optional(),
+  }).optional(),
+  search: z.object({
+    pageSearchWeight: z.number().min(0).max(1).optional(),
+  }).optional(),
+}).optional();
+
 const requestSchema = z.object({
   q: z.string().trim().min(1),
   topK: z.number().int().positive().max(100).optional(),
@@ -33,7 +55,8 @@ const requestSchema = z.object({
   tags: z.array(z.string()).optional(),
   groupBy: z.enum(["page", "chunk"]).optional(),
   maxSubResults: z.number().int().positive().max(20).optional(),
-  debug: z.boolean().optional()
+  debug: z.boolean().optional(),
+  rankingOverrides: rankingOverridesSchema,
 });
 
 const MAX_SITE_STRUCTURE_PAGES = 2000;
@@ -111,6 +134,27 @@ export function buildTree(
   return root;
 }
 
+function mergeRankingOverrides(
+  base: ResolvedSearchSocketConfig,
+  overrides: RankingOverrides
+): ResolvedSearchSocketConfig {
+  return {
+    ...base,
+    search: {
+      ...base.search,
+      ...overrides.search,
+    },
+    ranking: {
+      ...base.ranking,
+      ...overrides.ranking,
+      weights: {
+        ...base.ranking.weights,
+        ...overrides.ranking?.weights,
+      },
+    },
+  };
+}
+
 export interface SearchEngineOptions {
   cwd?: string;
   configPath?: string;
@@ -165,6 +209,11 @@ export class SearchEngine {
     const input = parsed.data;
     const totalStart = process.hrtime.bigint();
 
+    // Apply ranking overrides only when debug mode is enabled
+    const effectiveConfig = (input.debug && input.rankingOverrides)
+      ? mergeRankingOverrides(this.config, input.rankingOverrides)
+      : this.config;
+
     const resolvedScope = resolveScope(this.config, input.scope);
 
     const topK = input.topK ?? 10;
@@ -175,7 +224,7 @@ export class SearchEngine {
       ? Math.max(topK * 10, 50)
       : Math.max(50, topK);
 
-    const useDualSearch = this.config.search.dualSearch && groupByPage;
+    const useDualSearch = effectiveConfig.search.dualSearch && groupByPage;
 
     // Embed the query text via Gemini
     const queryVector = await this.embedder.embedQuery(input.q);
@@ -239,8 +288,8 @@ export class SearchEngine {
       const filteredChunks = applyPostFilters(chunkHits);
       const filteredPages = applyPagePostFilters(pageHits);
 
-      const rankedChunks = rankHits(filteredChunks, this.config, input.q, input.debug);
-      ranked = mergePageAndChunkResults(filteredPages, rankedChunks, this.config);
+      const rankedChunks = rankHits(filteredChunks, effectiveConfig, input.q, input.debug);
+      ranked = mergePageAndChunkResults(filteredPages, rankedChunks, effectiveConfig);
     } else {
       // Single search
       const fetchMultiplier = (pathPrefix || filterTags) ? 2 : 1;
@@ -251,11 +300,11 @@ export class SearchEngine {
         resolvedScope
       );
       const filtered = applyPostFilters(hits);
-      ranked = rankHits(filtered, this.config, input.q, input.debug);
+      ranked = rankHits(filtered, effectiveConfig, input.q, input.debug);
     }
     const searchMs = hrTimeMs(searchStart);
 
-    const results = this.buildResults(ranked, topK, groupByPage, maxSubResults, input.q, input.debug);
+    const results = this.buildResults(ranked, topK, groupByPage, maxSubResults, input.q, input.debug, effectiveConfig);
 
     return {
       q: input.q,
@@ -279,11 +328,12 @@ export class SearchEngine {
     return snippet || "";
   }
 
-  private buildResults(ordered: RankedHit[], topK: number, groupByPage: boolean, maxSubResults: number, query?: string, debug?: boolean): SearchResult[] {
+  private buildResults(ordered: RankedHit[], topK: number, groupByPage: boolean, maxSubResults: number, query?: string, debug?: boolean, config?: ResolvedSearchSocketConfig): SearchResult[] {
+    const cfg = config ?? this.config;
     if (groupByPage) {
-      let pages = aggregateByPage(ordered, this.config);
-      pages = trimByScoreGap(pages, this.config);
-      const minRatio = this.config.ranking.minChunkScoreRatio;
+      let pages = aggregateByPage(ordered, cfg);
+      pages = trimByScoreGap(pages, cfg);
+      const minRatio = cfg.ranking.minChunkScoreRatio;
       return pages.slice(0, topK).map((page) => {
         const bestScore = page.bestChunk.finalScore;
         const minChunkScore = Number.isFinite(bestScore) ? bestScore * minRatio : Number.NEGATIVE_INFINITY;
@@ -315,7 +365,7 @@ export class SearchEngine {
       });
     } else {
       let filtered = ordered;
-      const minScore = this.config.ranking.minScore;
+      const minScore = cfg.ranking.minScore;
       if (minScore > 0) {
         filtered = ordered.filter((entry) => entry.finalScore >= minScore);
       }

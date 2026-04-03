@@ -41,6 +41,24 @@ export async function runPlaygroundServer(
     res.type("html").send(playgroundHtml);
   });
 
+  app.get("/_searchsocket/config", (_req: Request, res: Response) => {
+    res.json({
+      ranking: {
+        enableIncomingLinkBoost: config.ranking.enableIncomingLinkBoost,
+        enableDepthBoost: config.ranking.enableDepthBoost,
+        aggregationCap: config.ranking.aggregationCap,
+        aggregationDecay: config.ranking.aggregationDecay,
+        minChunkScoreRatio: config.ranking.minChunkScoreRatio,
+        minScore: config.ranking.minScore,
+        scoreGapThreshold: config.ranking.scoreGapThreshold,
+        weights: { ...config.ranking.weights },
+      },
+      search: {
+        pageSearchWeight: config.search.pageSearchWeight,
+      },
+    });
+  });
+
   app.post("/_searchsocket/search", async (req: Request, res: Response) => {
     try {
       const searchEngine = await getEngine();
@@ -58,7 +76,10 @@ export async function runPlaygroundServer(
         pathPrefix: typeof body.pathPrefix === "string" ? body.pathPrefix : undefined,
         tags: Array.isArray(body.tags) ? body.tags : undefined,
         groupBy: body.groupBy === "page" || body.groupBy === "chunk" ? body.groupBy : undefined,
-        debug: body.debug === true
+        debug: body.debug === true,
+        rankingOverrides: body.rankingOverrides && typeof body.rankingOverrides === "object"
+          ? body.rankingOverrides as Record<string, unknown>
+          : undefined,
       });
 
       res.json(result);

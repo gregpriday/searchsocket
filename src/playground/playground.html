@@ -38,6 +38,35 @@
   .empty { text-align: center; padding: 3rem; color: #999; }
   .loading { text-align: center; padding: 2rem; color: #999; }
   .hidden { display: none; }
+
+  /* Ranking Tuner */
+  .tuner { margin-bottom: 1.5rem; border: 1px solid #e0e0e0; border-radius: 8px; background: #fff; }
+  .tuner > summary { padding: 0.75rem 1rem; font-weight: 600; font-size: 0.95rem; cursor: pointer; color: #16213e; user-select: none; }
+  .tuner > summary:hover { color: #4361ee; }
+  .tuner-body { padding: 0.5rem 1rem 1rem; }
+  .tuner-actions { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+  .tuner-actions button { padding: 0.35rem 0.75rem; font-size: 0.8rem; border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; color: #555; }
+  .tuner-actions button:hover { border-color: #4361ee; color: #4361ee; }
+  .tuner-group { margin-bottom: 0.5rem; border: 1px solid #eee; border-radius: 6px; }
+  .tuner-group > summary { padding: 0.5rem 0.75rem; font-size: 0.85rem; font-weight: 600; cursor: pointer; color: #444; user-select: none; }
+  .tuner-group[open] { margin-bottom: 0.75rem; }
+  .tuner-group-body { padding: 0.25rem 0.75rem 0.5rem; }
+  .tuner-row { display: grid; grid-template-columns: 140px 1fr 70px 24px; gap: 8px; align-items: center; margin-bottom: 0.35rem; }
+  .tuner-row label { font-size: 0.8rem; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tuner-row label.modified { color: #4361ee; font-weight: 600; }
+  .tuner-row input[type="range"] { width: 100%; height: 6px; cursor: pointer; }
+  .tuner-row input[type="number"] { width: 70px; padding: 0.2rem 0.35rem; font-size: 0.8rem; border: 1px solid #ccc; border-radius: 4px; text-align: right; }
+  .tuner-row input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+  .tuner-row .reset-btn { width: 20px; height: 20px; border: none; background: none; cursor: pointer; color: #999; font-size: 1rem; padding: 0; line-height: 1; visibility: hidden; }
+  .tuner-row .reset-btn.visible { visibility: visible; }
+  .tuner-row .reset-btn:hover { color: #4361ee; }
+  .tuner-bool-row { display: grid; grid-template-columns: 140px 1fr 24px; gap: 8px; align-items: center; margin-bottom: 0.35rem; }
+  .tuner-bool-row label { font-size: 0.8rem; color: #555; }
+  .tuner-bool-row label.modified { color: #4361ee; font-weight: 600; }
+  .tuner-bool-row .reset-btn { width: 20px; height: 20px; border: none; background: none; cursor: pointer; color: #999; font-size: 1rem; padding: 0; line-height: 1; visibility: hidden; }
+  .tuner-bool-row .reset-btn.visible { visibility: visible; }
+  .tuner-export { margin-top: 0.75rem; }
+  .tuner-export textarea { width: 100%; height: 120px; font-family: monospace; font-size: 0.8rem; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px; background: #f8f9fa; resize: vertical; }
 </style>
 </head>
 <body>
@@ -63,36 +92,274 @@
     </select>
   </label>
 </div>
+
+<details class="tuner" id="tunerPanel">
+  <summary>Ranking Tuner</summary>
+  <div class="tuner-body">
+    <div class="tuner-actions">
+      <button id="resetAll" type="button">Reset All</button>
+      <button id="exportConfig" type="button">Export Config</button>
+    </div>
+    <div id="tunerGroups"></div>
+    <div class="tuner-export hidden" id="exportArea">
+      <textarea id="exportText" readonly></textarea>
+    </div>
+  </div>
+</details>
+
 <div id="meta" class="meta"></div>
 <div id="results"></div>
 
 <script>
 (function() {
-  const qInput = document.getElementById('q');
-  const groupBySelect = document.getElementById('groupBy');
-  const topKSelect = document.getElementById('topK');
-  const resultsDiv = document.getElementById('results');
-  const metaDiv = document.getElementById('meta');
+  var qInput = document.getElementById('q');
+  var groupBySelect = document.getElementById('groupBy');
+  var topKSelect = document.getElementById('topK');
+  var resultsDiv = document.getElementById('results');
+  var metaDiv = document.getElementById('meta');
+  var tunerGroupsDiv = document.getElementById('tunerGroups');
+  var exportArea = document.getElementById('exportArea');
+  var exportText = document.getElementById('exportText');
 
-  let debounceTimer = null;
+  var debounceTimer = null;
+  var requestId = 0;
+  var baselineConfig = null;
+  var tunerParams = [];
+
+  var PARAM_DEFS = [
+    { group: 'Thresholds', key: 'ranking.minScore', label: 'minScore', min: 0, max: 1, step: 0.01 },
+    { group: 'Thresholds', key: 'ranking.scoreGapThreshold', label: 'scoreGapThreshold', min: 0, max: 1, step: 0.01 },
+    { group: 'Thresholds', key: 'ranking.minChunkScoreRatio', label: 'minChunkScoreRatio', min: 0, max: 1, step: 0.01 },
+    { group: 'Boosts', key: 'ranking.enableIncomingLinkBoost', label: 'incomingLinkBoost', type: 'bool' },
+    { group: 'Boosts', key: 'ranking.enableDepthBoost', label: 'depthBoost', type: 'bool' },
+    { group: 'Weights', key: 'ranking.weights.incomingLinks', label: 'incomingLinks', min: 0, max: 1, step: 0.01 },
+    { group: 'Weights', key: 'ranking.weights.depth', label: 'depth', min: 0, max: 1, step: 0.01 },
+    { group: 'Weights', key: 'ranking.weights.aggregation', label: 'aggregation', min: 0, max: 1, step: 0.01 },
+    { group: 'Weights', key: 'ranking.weights.titleMatch', label: 'titleMatch', min: 0, max: 1, step: 0.01 },
+    { group: 'Aggregation', key: 'ranking.aggregationCap', label: 'aggregationCap', min: 1, max: 20, step: 1 },
+    { group: 'Aggregation', key: 'ranking.aggregationDecay', label: 'aggregationDecay', min: 0, max: 1, step: 0.01 },
+    { group: 'Search', key: 'search.pageSearchWeight', label: 'pageSearchWeight', min: 0, max: 1, step: 0.01 }
+  ];
+
+  function getNestedValue(obj, path) {
+    var parts = path.split('.');
+    var v = obj;
+    for (var i = 0; i < parts.length; i++) {
+      if (v == null) return undefined;
+      v = v[parts[i]];
+    }
+    return v;
+  }
+
+  function setNestedValue(obj, path, value) {
+    var parts = path.split('.');
+    var cur = obj;
+    for (var i = 0; i < parts.length - 1; i++) {
+      if (!cur[parts[i]]) cur[parts[i]] = {};
+      cur = cur[parts[i]];
+    }
+    cur[parts[parts.length - 1]] = value;
+  }
+
+  function initTuner(config) {
+    baselineConfig = config;
+    var groups = {};
+    PARAM_DEFS.forEach(function(def) {
+      if (!groups[def.group]) groups[def.group] = [];
+      groups[def.group].push(def);
+    });
+
+    var html = '';
+    Object.keys(groups).forEach(function(groupName) {
+      html += '<details class="tuner-group" open>';
+      html += '<summary>' + groupName + '</summary>';
+      html += '<div class="tuner-group-body">';
+      groups[groupName].forEach(function(def) {
+        var val = getNestedValue(config, def.key);
+        if (def.type === 'bool') {
+          html += '<div class="tuner-bool-row" data-key="' + def.key + '">';
+          html += '<label>' + def.label + '</label>';
+          html += '<input type="checkbox"' + (val ? ' checked' : '') + ' data-param="' + def.key + '">';
+          html += '<button class="reset-btn" title="Reset" data-reset="' + def.key + '">\u21BA</button>';
+          html += '</div>';
+        } else {
+          html += '<div class="tuner-row" data-key="' + def.key + '">';
+          html += '<label>' + def.label + '</label>';
+          html += '<input type="range" min="' + def.min + '" max="' + def.max + '" step="' + def.step + '" value="' + val + '" data-param="' + def.key + '">';
+          html += '<input type="number" min="' + def.min + '" max="' + def.max + '" step="' + def.step + '" value="' + val + '" data-num="' + def.key + '">';
+          html += '<button class="reset-btn" title="Reset" data-reset="' + def.key + '">\u21BA</button>';
+          html += '</div>';
+        }
+      });
+      html += '</div></details>';
+    });
+    tunerGroupsDiv.innerHTML = html;
+
+    // Wire events
+    tunerGroupsDiv.addEventListener('input', function(e) {
+      var param = e.target.getAttribute('data-param');
+      var num = e.target.getAttribute('data-num');
+      if (param) {
+        // Slider or checkbox changed — sync number input
+        var row = e.target.closest('[data-key]');
+        if (row && e.target.type === 'range') {
+          var numInput = row.querySelector('[data-num]');
+          if (numInput) numInput.value = e.target.value;
+        }
+        updateModifiedState(param);
+        scheduleSearch();
+      } else if (num) {
+        // Number input changed — sync slider
+        var row = e.target.closest('[data-key]');
+        if (row) {
+          var rangeInput = row.querySelector('[data-param]');
+          if (rangeInput) rangeInput.value = e.target.value;
+        }
+        updateModifiedState(num);
+        scheduleSearch();
+      }
+    });
+
+    tunerGroupsDiv.addEventListener('change', function(e) {
+      var param = e.target.getAttribute('data-param');
+      if (param && e.target.type === 'checkbox') {
+        updateModifiedState(param);
+        scheduleSearch();
+      }
+    });
+
+    tunerGroupsDiv.addEventListener('click', function(e) {
+      var resetKey = e.target.getAttribute('data-reset');
+      if (resetKey) {
+        resetParam(resetKey);
+        scheduleSearch();
+      }
+    });
+  }
+
+  function updateModifiedState(key) {
+    var baseline = getNestedValue(baselineConfig, key);
+    var row = tunerGroupsDiv.querySelector('[data-key="' + key + '"]');
+    if (!row) return;
+    var input = row.querySelector('[data-param="' + key + '"]');
+    if (!input) return;
+    var current = input.type === 'checkbox' ? input.checked : parseFloat(input.value);
+    var isModified = current !== baseline;
+    var label = row.querySelector('label');
+    var resetBtn = row.querySelector('.reset-btn');
+    if (label) label.classList.toggle('modified', isModified);
+    if (resetBtn) resetBtn.classList.toggle('visible', isModified);
+  }
+
+  function resetParam(key) {
+    var baseline = getNestedValue(baselineConfig, key);
+    var row = tunerGroupsDiv.querySelector('[data-key="' + key + '"]');
+    if (!row) return;
+    var input = row.querySelector('[data-param="' + key + '"]');
+    if (!input) return;
+    if (input.type === 'checkbox') {
+      input.checked = baseline;
+    } else {
+      input.value = baseline;
+      var numInput = row.querySelector('[data-num]');
+      if (numInput) numInput.value = baseline;
+    }
+    updateModifiedState(key);
+  }
+
+  function resetAll() {
+    PARAM_DEFS.forEach(function(def) {
+      resetParam(def.key);
+    });
+    exportArea.classList.add('hidden');
+    scheduleSearch();
+  }
+
+  function collectOverrides() {
+    var overrides = {};
+    PARAM_DEFS.forEach(function(def) {
+      var row = tunerGroupsDiv.querySelector('[data-key="' + def.key + '"]');
+      if (!row) return;
+      var input = row.querySelector('[data-param="' + def.key + '"]');
+      if (!input) return;
+      var val = def.type === 'bool' ? input.checked : parseFloat(input.value);
+      setNestedValue(overrides, def.key, val);
+    });
+    return overrides;
+  }
+
+  function collectChangedOverrides() {
+    var overrides = {};
+    var hasChanges = false;
+    PARAM_DEFS.forEach(function(def) {
+      var row = tunerGroupsDiv.querySelector('[data-key="' + def.key + '"]');
+      if (!row) return;
+      var input = row.querySelector('[data-param="' + def.key + '"]');
+      if (!input) return;
+      var current = def.type === 'bool' ? input.checked : parseFloat(input.value);
+      var baseline = getNestedValue(baselineConfig, def.key);
+      if (current !== baseline) {
+        setNestedValue(overrides, def.key, current);
+        hasChanges = true;
+      }
+    });
+    return hasChanges ? overrides : null;
+  }
+
+  function exportConfig() {
+    var changed = collectChangedOverrides();
+    if (!changed) {
+      exportArea.classList.remove('hidden');
+      exportText.value = '// No parameters have been changed from defaults.';
+      return;
+    }
+
+    var lines = [];
+    if (changed.ranking) {
+      lines.push('ranking: {');
+      var r = changed.ranking;
+      var simpleKeys = ['enableIncomingLinkBoost', 'enableDepthBoost', 'aggregationCap', 'aggregationDecay', 'minChunkScoreRatio', 'minScore', 'scoreGapThreshold'];
+      simpleKeys.forEach(function(k) {
+        if (r[k] !== undefined) lines.push('  ' + k + ': ' + JSON.stringify(r[k]) + ',');
+      });
+      if (r.weights) {
+        lines.push('  weights: {');
+        Object.keys(r.weights).forEach(function(wk) {
+          lines.push('    ' + wk + ': ' + r.weights[wk] + ',');
+        });
+        lines.push('  },');
+      }
+      lines.push('},');
+    }
+    if (changed.search) {
+      lines.push('search: {');
+      Object.keys(changed.search).forEach(function(sk) {
+        lines.push('  ' + sk + ': ' + changed.search[sk] + ',');
+      });
+      lines.push('},');
+    }
+
+    exportArea.classList.remove('hidden');
+    exportText.value = lines.join('\n');
+  }
 
   // Read initial state from URL
-  const params = new URLSearchParams(window.location.search);
+  var params = new URLSearchParams(window.location.search);
   if (params.get('q')) qInput.value = params.get('q');
   if (params.get('groupBy')) groupBySelect.value = params.get('groupBy');
   if (params.get('topK')) topKSelect.value = params.get('topK');
 
   function updateUrl() {
-    const p = new URLSearchParams();
+    var p = new URLSearchParams();
     if (qInput.value) p.set('q', qInput.value);
     if (groupBySelect.value !== 'page') p.set('groupBy', groupBySelect.value);
     if (topKSelect.value !== '10') p.set('topK', topKSelect.value);
-    const qs = p.toString();
+    var qs = p.toString();
     history.replaceState(null, '', qs ? '?' + qs : window.location.pathname);
   }
 
-  async function doSearch() {
-    const query = qInput.value.trim();
+  function doSearch() {
+    var query = qInput.value.trim();
     updateUrl();
     if (!query) {
       resultsDiv.innerHTML = '<div class="empty">Enter a query to search</div>';
@@ -102,35 +369,41 @@
 
     resultsDiv.innerHTML = '<div class="loading">Searching...</div>';
 
-    try {
-      const body = {
-        q: query,
-        topK: parseInt(topKSelect.value, 10),
-        groupBy: groupBySelect.value,
-        debug: true
-      };
+    var thisRequestId = ++requestId;
+    var body = {
+      q: query,
+      topK: parseInt(topKSelect.value, 10),
+      groupBy: groupBySelect.value,
+      debug: true
+    };
 
-      const res = await fetch('/_searchsocket/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-
-      if (!res.ok) {
-        const err = await res.text();
-        resultsDiv.innerHTML = '<div class="empty">Error: ' + escapeHtml(err) + '</div>';
-        return;
-      }
-
-      const data = await res.json();
-      renderResults(data);
-    } catch (err) {
-      resultsDiv.innerHTML = '<div class="empty">Network error: ' + escapeHtml(err.message) + '</div>';
+    if (baselineConfig) {
+      body.rankingOverrides = collectOverrides();
     }
+
+    fetch('/_searchsocket/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function(res) {
+      if (thisRequestId !== requestId) return;
+      if (!res.ok) {
+        return res.text().then(function(err) {
+          resultsDiv.innerHTML = '<div class="empty">Error: ' + escapeHtml(err) + '</div>';
+        });
+      }
+      return res.json().then(function(data) {
+        if (thisRequestId !== requestId) return;
+        renderResults(data);
+      });
+    }).catch(function(err) {
+      if (thisRequestId !== requestId) return;
+      resultsDiv.innerHTML = '<div class="empty">Network error: ' + escapeHtml(err.message) + '</div>';
+    });
   }
 
   function escapeHtml(str) {
-    const d = document.createElement('div');
+    var d = document.createElement('div');
     d.textContent = str;
     return d.innerHTML;
   }
@@ -144,7 +417,7 @@
     }
 
     resultsDiv.innerHTML = data.results.map(function(r, i) {
-      let html = '<div class="result">';
+      var html = '<div class="result">';
       html += '<div class="result-header">';
       html += '<div><div class="result-title">' + escapeHtml(r.title) + '</div>';
       html += '<div class="result-url">' + escapeHtml(r.url) + '</div></div>';
@@ -214,6 +487,19 @@
   qInput.addEventListener('input', scheduleSearch);
   groupBySelect.addEventListener('change', scheduleSearch);
   topKSelect.addEventListener('change', scheduleSearch);
+
+  document.getElementById('resetAll').addEventListener('click', resetAll);
+  document.getElementById('exportConfig').addEventListener('click', exportConfig);
+
+  // Fetch config and initialize tuner
+  fetch('/_searchsocket/config').then(function(res) {
+    if (res.ok) return res.json();
+    return null;
+  }).then(function(config) {
+    if (config) initTuner(config);
+  }).catch(function() {
+    // Config endpoint not available — tuner stays empty
+  });
 
   // Trigger initial search if query is present
   if (qInput.value.trim()) doSearch();
