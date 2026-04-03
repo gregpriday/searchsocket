@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-04-03
+
+### Added
+
+- **Hybrid search (dense + BM25)** — enables combined dense vector and BM25 keyword search with 512-token limit enforcement
+- **Page-first search pipeline** — per-page chunk retrieval for better result grouping
+- **Namespace support** — Upstash Vector namespace isolation for multi-tenant indexing
+- **Structured metadata filtering** — filter search results by indexed metadata fields
+- **Freshness scoring** — time-based ranking signal to boost recently updated content
+- **Internal link anchor text ranking** — use anchor text from internal links as an additional relevance signal
+- **Content-level heading weight** — heading context influences chunk embeddings for better semantic matching
+- **Query-aware excerpts** — generate contextual excerpts highlighting query-relevant passages
+- **Sub-results in MCP** — expose chunk-level sub-results with configurable `maxSubResults`
+- **Custom record indexing API** — index non-HTML content (JSON, CSV, API data) programmatically
+- **Interactive ranking tuner** — dev playground tool for tuning ranking parameters in real time
+- **`get_related_pages` MCP tool** — find related pages using multi-signal scoring
+- **`get_site_structure` MCP tool** — hierarchical page tree for site navigation
+- **`list_pages` MCP tool** — enumerate indexed pages with path prefix filtering
+- **`find_source_file` MCP tool** — locate source files for content editing workflows
+- **MCP public/private access modes** — API key authentication for public MCP endpoints
+- **MCP endpoint via `searchsocketHandle`** — serverless MCP access through SvelteKit hooks
+- **Component indexing** — index Svelte component files alongside pages
+- **`llms.txt` generation** — default `generateFull: true` and serve markdown variants
+- **`.mcp.json` generation** — auto-generate MCP config during `searchsocket init`
+- **Interactive CLI setup** — `searchsocket init` with auto-config injection
+- **Copy-paste component recipes** — `searchsocket add` command for UI components
+- **Search playground UI** — interactive search testing during dev mode
+- **Search quality CLI** — `searchsocket test` command for MRR-based quality assertions
+- **GET API endpoints** — REST endpoints for search, health, and page retrieval
+- **Opt-in search analytics** — analytics tracking with CLI report command
+- **Lifecycle hooks** — `transformPage`, `transformChunk`, `beforeIndex`, `afterIndex` pipeline hooks
+- **Incremental page records** — content hashing for efficient re-indexing
+- **Reactive Svelte 5 search primitives** — `createSearch` and `SearchSocket.svelte` for frontend
+
+### Changed
+
+- **Switched to Upstash built-in embedding** — use Upstash's native embedding via `data` field, removing external embedding dependency
+- **Removed Gemini embedder** — dropped `@google/generative-ai` dependency and related config
+- **Replaced absolute `minScore` with relative `minScoreRatio`** — score threshold is now relative to the top result for more consistent filtering
+- **Migrated search UI to Tailwind 4** — updated template components to Tailwind 4 utility classes
+
+### Fixed
+
+- Prevent incoming link count inflation from anchor text deduplication
+- Map `OutgoingLink[]` to `string[]` for `outgoingLinkUrls` compatibility
+- Propagate score breakdown through `dualSearch` merge
+- Handle missing Upstash credentials gracefully
+- Prevent `apiPath` guard from bypassing `llms.txt` intercept
+
 ## [0.5.0] - 2026-03-02
 
 ### Added
@@ -119,6 +168,7 @@ Initial public release.
 - **Request validation** with Zod schemas
 - **Rate limiting** and CORS configuration for the search API
 
+[0.6.0]: https://github.com/gregpriday/searchsocket/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gregpriday/searchsocket/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/gregpriday/searchsocket/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/gregpriday/searchsocket/compare/v0.3.2...v0.3.3
