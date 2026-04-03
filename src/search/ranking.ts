@@ -226,7 +226,8 @@ export function mergePageAndChunkResults(
       const blended = (1 - w) * ranked.finalScore + w * pageHit.score;
       return {
         hit: ranked.hit,
-        finalScore: Number.isFinite(blended) ? blended : ranked.finalScore
+        finalScore: Number.isFinite(blended) ? blended : ranked.finalScore,
+        breakdown: ranked.breakdown
       };
     }
     return ranked;
