@@ -21,17 +21,17 @@ export async function runPlaygroundServer(
     configPath: options.configPath
   });
 
-  let engine: SearchEngine | null = null;
+  let enginePromise: Promise<SearchEngine> | null = null;
 
-  async function getEngine(): Promise<SearchEngine> {
-    if (!engine) {
-      engine = await SearchEngine.create({
+  function getEngine(): Promise<SearchEngine> {
+    if (!enginePromise) {
+      enginePromise = SearchEngine.create({
         cwd: options.cwd,
         configPath: options.configPath,
         config
       });
     }
-    return engine;
+    return enginePromise;
   }
 
   const app = express();

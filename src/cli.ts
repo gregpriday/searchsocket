@@ -471,6 +471,8 @@ program
       });
     }
 
+    let closePlayground: (() => Promise<void>) | undefined;
+
     if (opts.playground) {
       if (backendMissing) {
         process.stdout.write("playground disabled: search backend not configured\n");
@@ -480,7 +482,8 @@ program
           configPath: rootOpts?.config,
           config,
           port: parsePositiveInt(opts.playgroundPort, "--playground-port")
-        }).then(({ port }) => {
+        }).then(({ port, close }) => {
+          closePlayground = close;
           process.stdout.write(`playground available at http://127.0.0.1:${port}/_searchsocket\n`);
         }).catch((err) => {
           process.stderr.write(`playground error: ${err instanceof Error ? err.message : String(err)}\n`);
@@ -490,7 +493,9 @@ program
 
     await new Promise<void>((resolve) => {
       process.on("SIGINT", () => {
-        void watcher.close().then(() => resolve());
+        const cleanups = [watcher.close()];
+        if (closePlayground) cleanups.push(closePlayground());
+        void Promise.all(cleanups).then(() => resolve());
       });
     });
   });

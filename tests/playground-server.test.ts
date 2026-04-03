@@ -18,8 +18,9 @@ const mocks = vi.hoisted(() => {
     })
   };
 
-  const expressFn = vi.fn(() => app);
-  expressFn.json = vi.fn(() => vi.fn());
+  const expressFn = Object.assign(vi.fn(() => app), {
+    json: vi.fn(() => vi.fn())
+  });
 
   const searchFn = vi.fn().mockResolvedValue({
     q: "test",
@@ -40,11 +41,9 @@ const mocks = vi.hoisted(() => {
   return { app, expressFn, serverInstance, searchFn, createEngine, loadConfig };
 });
 
-vi.mock("express", () => {
-  const fn = mocks.expressFn as unknown as (() => typeof mocks.app) & { json: typeof mocks.expressFn.json };
-  fn.json = mocks.expressFn.json;
-  return { default: fn };
-});
+vi.mock("express", () => ({
+  default: mocks.expressFn
+}));
 
 vi.mock("../src/search/engine", () => ({
   SearchEngine: { create: mocks.createEngine }
