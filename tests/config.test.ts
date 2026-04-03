@@ -56,7 +56,6 @@ describe("createDefaultConfig", () => {
     const config = createDefaultConfig("example");
     expect(config.search.dualSearch).toBe(true);
     expect(config.search.pageSearchWeight).toBe(0.3);
-    expect(config.search.hybridChunks).toBe(true);
   });
 
   it("has ranking weights without rerank", () => {

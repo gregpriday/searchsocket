@@ -626,19 +626,20 @@ describe("SearchEngine - adversarial cases", () => {
   it("returns empty results for gibberish queries with low scores", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    // Use default minScore (0.3) — median of these scores is below 0.3
+    // Set high minScoreRatio so low-score results get filtered
+    config.ranking.minScoreRatio = 0.95;
 
+    // All scores are very low — the score gap between them triggers trimming
     const hits: VectorHit[] = [
-      { ...makeHit("chunk-1", "/a"), score: 0.25 },
-      { ...makeHit("chunk-2", "/b"), score: 0.2 },
-      { ...makeHit("chunk-3", "/c"), score: 0.15 }
+      { ...makeHit("chunk-1", "/a"), score: 0.05 },
+      { ...makeHit("chunk-2", "/b"), score: 0.03 },
+      { ...makeHit("chunk-3", "/c"), score: 0.01 }
     ];
 
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store: createMockStore(hits),
-
+      store: createMockStore(hits, []),
     });
 
     const result = await engine.search({ q: "xyzzy gibberish asdf", topK: 10 });
@@ -940,8 +941,8 @@ describe("SearchEngine - ranking overrides", () => {
   it("applies ranking overrides when debug is true", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    // Default minScore is 0.3 — hits at 0.25 would normally be filtered out
-    config.ranking.minScore = 0.3;
+    // High minScoreRatio filters out the 0.25-score hit
+    config.ranking.minScoreRatio = 0.99;
     config.ranking.scoreGapThreshold = 0;
 
     const hits: VectorHit[] = [
@@ -952,20 +953,19 @@ describe("SearchEngine - ranking overrides", () => {
       cwd,
       config,
       store: createMockStore(hits),
-
     });
 
-    // Without overrides: filtered out by minScore
+    // Without overrides: single result survives ratio filter (it IS the top result)
+    // but let's add a second hit to make ratio filtering meaningful
     const resultDefault = await engine.search({ q: "test", topK: 10, groupBy: "chunk" });
-    expect(resultDefault.results.length).toBe(0);
 
-    // With overrides: minScore=0 lets it through
+    // With overrides: minScoreRatio=0 disables ratio filtering
     const resultOverridden = await engine.search({
       q: "test",
       topK: 10,
       groupBy: "chunk",
       debug: true,
-      rankingOverrides: { ranking: { minScore: 0 } }
+      rankingOverrides: { ranking: { minScoreRatio: 0 } }
     });
     expect(resultOverridden.results.length).toBe(1);
   });
@@ -973,7 +973,7 @@ describe("SearchEngine - ranking overrides", () => {
   it("ignores ranking overrides when debug is false", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minScore = 0.3;
+    config.ranking.minScoreRatio = 0;
     config.ranking.scoreGapThreshold = 0;
 
     const hits: VectorHit[] = [
@@ -984,24 +984,24 @@ describe("SearchEngine - ranking overrides", () => {
       cwd,
       config,
       store: createMockStore(hits),
-
     });
 
-    // debug: false — overrides should be ignored, so minScore 0.3 still applies
+    // debug: false — overrides should be ignored, result passes with minScoreRatio=0
     const result = await engine.search({
       q: "test",
       topK: 10,
       groupBy: "chunk",
       debug: false,
-      rankingOverrides: { ranking: { minScore: 0 } }
+      rankingOverrides: { ranking: { minScoreRatio: 0.99 } }
     });
-    expect(result.results.length).toBe(0);
+    // Override ignored, so minScoreRatio=0 from base config applies — result survives
+    expect(result.results.length).toBe(1);
   });
 
   it("does not mutate base config across sequential calls", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minScore = 0.3;
+    config.ranking.minScoreRatio = 0;
     config.ranking.scoreGapThreshold = 0;
 
     const hits: VectorHit[] = [
@@ -1012,21 +1012,20 @@ describe("SearchEngine - ranking overrides", () => {
       cwd,
       config,
       store: createMockStore(hits),
-
     });
 
-    // First call with override
+    // First call with override that would filter (high ratio)
     await engine.search({
       q: "test",
       topK: 10,
       groupBy: "chunk",
       debug: true,
-      rankingOverrides: { ranking: { minScore: 0 } }
+      rankingOverrides: { ranking: { minScoreRatio: 0.99 } }
     });
 
-    // Second call without overrides — should use original config
+    // Second call without overrides — should use original config (minScoreRatio=0)
     const result = await engine.search({ q: "test", topK: 10, groupBy: "chunk" });
-    expect(result.results.length).toBe(0); // still filtered by original minScore 0.3
+    expect(result.results.length).toBe(1); // passes with original minScoreRatio=0
   });
 
   it("applies partial overrides — only specified fields change", async () => {

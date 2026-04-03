@@ -522,15 +522,17 @@ describe("trimByScoreGap", () => {
     expect(trimmed.length).toBe(4);
   });
 
-  it("returns empty when median score is below minScore", () => {
+  it("filters results below minScoreRatio of top result", () => {
     const pages: PageResult[] = [
       makePageResult("/a", 0.4),
-      makePageResult("/b", 0.2),
-      makePageResult("/c", 0.1)
+      makePageResult("/b", 0.2),   // 0.2 < 0.4 * 0.70 = 0.28
+      makePageResult("/c", 0.1)    // 0.1 < 0.28
     ];
 
     const trimmed = trimByScoreGap(pages, config);
-    expect(trimmed.length).toBe(0);
+    // Only /a survives: 0.4 >= 0.28 threshold, others are below
+    expect(trimmed.length).toBe(1);
+    expect(trimmed[0]!.url).toBe("/a");
   });
 
   it("returns results when median is above minScore", () => {
@@ -549,17 +551,17 @@ describe("trimByScoreGap", () => {
     expect(trimmed.length).toBe(0);
   });
 
-  it("does not trim when scoreGapThreshold is 0", () => {
+  it("does not trim by gap when scoreGapThreshold is 0", () => {
     const noGapConfig = createDefaultConfig("test");
     noGapConfig.ranking.scoreGapThreshold = 0;
+    noGapConfig.ranking.minScoreRatio = 0;  // also disable ratio filtering
 
     const pages: PageResult[] = [
       makePageResult("/a", 0.9),
-      makePageResult("/b", 0.1)  // huge gap but trimming disabled
+      makePageResult("/b", 0.1)  // huge gap but all trimming disabled
     ];
 
     const trimmed = trimByScoreGap(pages, noGapConfig);
-    // Median is 0.5 which is above minScore 0.3, and gap trimming disabled
     expect(trimmed.length).toBe(2);
   });
 
