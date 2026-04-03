@@ -46,6 +46,37 @@ describe("extractFromHtml — structured metadata", () => {
     expect(result!.weight).toBe(1.5);
   });
 
+  it("returns null when searchsocket:noindex meta tag is present", () => {
+    const html = wrap(
+      `<meta name="searchsocket:noindex" content="true">`,
+      `<h1>Page</h1><p>Content</p>`
+    );
+    const result = extractFromHtml("/test", html, config);
+    expect(result).toBeNull();
+  });
+
+  it("merges searchsocket:tags meta tag into page tags", () => {
+    const html = wrap(
+      `<meta name="searchsocket:tags" content="guide,tutorial" data-type="string[]">`,
+      `<h1>Page</h1><p>Content</p>`
+    );
+    const result = extractFromHtml("/docs/test", html, config);
+    expect(result!.tags).toContain("guide");
+    expect(result!.tags).toContain("tutorial");
+    expect(result!.tags).toContain("docs"); // auto-derived from URL
+  });
+
+  it("does not include reserved keys (noindex, tags) in meta", () => {
+    const html = wrap(
+      `<meta name="searchsocket:tags" content="guide" data-type="string[]">
+       <meta name="searchsocket:version" content="2" data-type="number">`,
+      `<h1>Page</h1><p>Content</p>`
+    );
+    const result = extractFromHtml("/test", html, config);
+    expect(result!.meta).toEqual({ version: 2 });
+    expect(result!.meta).not.toHaveProperty("tags");
+  });
+
   it("coexists with weight meta tag", () => {
     const html = wrap(
       `<meta name="searchsocket-weight" content="2.0">

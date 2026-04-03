@@ -357,7 +357,8 @@ export function chunkPage(
     };
 
     const embeddingText = buildEmbeddingText(summaryChunk, config.chunking.prependTitle);
-    summaryChunk.contentHash = sha256(normalizeText(embeddingText));
+    const metaSuffix = page.meta ? JSON.stringify(page.meta, Object.keys(page.meta).sort()) : "";
+    summaryChunk.contentHash = sha256(normalizeText(embeddingText) + metaSuffix);
     chunks.push(summaryChunk);
   }
 
@@ -395,10 +396,11 @@ export function chunkPage(
 
     const embeddingText = buildEmbeddingText(chunk, config.chunking.prependTitle);
     const embeddingTitle = config.chunking.weightHeadings ? buildEmbeddingTitle(chunk) : undefined;
+    const chunkMetaSuffix = page.meta ? JSON.stringify(page.meta, Object.keys(page.meta).sort()) : "";
     const hashInput = embeddingTitle
       ? `${normalizeText(embeddingText)}|title:${embeddingTitle}`
       : normalizeText(embeddingText);
-    chunk.contentHash = sha256(hashInput);
+    chunk.contentHash = sha256(hashInput + chunkMetaSuffix);
     chunks.push(chunk);
   }
 

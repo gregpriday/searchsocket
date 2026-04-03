@@ -241,9 +241,10 @@ export class SearchEngine {
     const filterTags = input.tags && input.tags.length > 0 ? input.tags : undefined;
 
     // Build server-side Upstash filter for structured metadata
-    const metaFilter = input.filters && Object.keys(input.filters).length > 0
+    const metaFilterStr = input.filters && Object.keys(input.filters).length > 0
       ? buildMetaFilterString(input.filters)
-      : undefined;
+      : "";
+    const metaFilter = metaFilterStr || undefined;
 
     const applyPostFilters = (hits: VectorHit[]): VectorHit[] => {
       let filtered = hits;

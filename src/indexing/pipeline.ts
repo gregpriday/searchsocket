@@ -582,7 +582,8 @@ export class IndexPipeline {
               depth: r.depth,
               indexedAt: r.indexedAt,
               contentHash: r.contentHash ?? "",
-              publishedAt: r.publishedAt ?? null
+              publishedAt: r.publishedAt ?? null,
+              ...(r.meta && Object.keys(r.meta).length > 0 ? { meta: r.meta } : {})
             }
           }));
           await this.store.upsertPages(pageDocs, scope);

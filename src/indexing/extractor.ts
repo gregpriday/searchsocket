@@ -252,16 +252,27 @@ export function extractFromHtml(
     return null;
   }
 
+  // Check for searchsocket:noindex meta tag (emitted by <SearchSocket noindex />)
+  if ($('meta[name="searchsocket:noindex"]').attr("content") === "true") {
+    return null;
+  }
+
+  // Reserved searchsocket: meta names that are not user metadata
+  const RESERVED_META_KEYS = new Set(["noindex", "tags"]);
+
   // Read structured metadata from <meta name="searchsocket:KEY" content="VALUE" data-type="TYPE">
   const meta: StoredPageMeta = {};
   $('meta[name^="searchsocket:"]').each((_i, el) => {
     const name = $(el).attr("name") ?? "";
     const key = name.slice("searchsocket:".length);
-    if (!key || !validateMetaKey(key)) return;
+    if (!key || RESERVED_META_KEYS.has(key) || !validateMetaKey(key)) return;
     const content = $(el).attr("content") ?? "";
     const dataType = $(el).attr("data-type") ?? "string";
     meta[key] = parseMetaValue(content, dataType);
   });
+
+  // Read tags from searchsocket:tags meta tag (emitted by <SearchSocket tags={[...]} />)
+  const componentTags = $('meta[name="searchsocket:tags"]').attr("content")?.trim();
 
   const description =
     $("meta[name='description']").attr("content")?.trim() ||
@@ -355,6 +366,14 @@ export function extractFromHtml(
     .slice(0, 1);
 
   const publishedAt = extractPublishedAtFromHtml($);
+
+  // Merge tags from searchsocket:tags meta tag
+  if (componentTags) {
+    const extraTags = componentTags.split(",").map((t) => t.trim()).filter(Boolean);
+    for (const t of extraTags) {
+      if (!tags.includes(t)) tags.push(t);
+    }
+  }
 
   return {
     url: normalizeUrlPath(url),
