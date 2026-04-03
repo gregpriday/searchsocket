@@ -364,12 +364,86 @@ export class UpstashSearchStore {
   }
 
   async getContentHashes(scope: Scope): Promise<Map<string, string>> {
+    return this.scanHashes(this.chunksNs, scope);
+  }
+
+  /**
+   * Fetch content hashes for a specific set of chunk keys using direct fetch()
+   * instead of range(). This avoids potential issues with range() returning
+   * vectors from the wrong namespace on hybrid indexes.
+   */
+  async fetchContentHashesForKeys(keys: string[], scope: Scope): Promise<Map<string, string>> {
     const map = new Map<string, string>();
+    if (keys.length === 0) return map;
+
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < keys.length; i += BATCH_SIZE) {
+      const batch = keys.slice(i, i + BATCH_SIZE);
+      try {
+        const results = await this.chunksNs.fetch<ChunkVectorMetadata>(batch, {
+          includeMetadata: true
+        });
+        for (const doc of results) {
+          if (
+            doc &&
+            doc.metadata?.projectId === scope.projectId &&
+            doc.metadata?.scopeName === scope.scopeName &&
+            doc.metadata?.contentHash
+          ) {
+            map.set(String(doc.id), doc.metadata.contentHash);
+          }
+        }
+      } catch {
+        // Namespace may not exist yet
+      }
+    }
+
+    return map;
+  }
+
+  /**
+   * Scan all IDs in the chunks namespace for this scope.
+   * Used for deletion detection (finding stale chunk keys).
+   */
+  async scanChunkIds(scope: Scope): Promise<Set<string>> {
+    const ids = new Set<string>();
     let cursor = "0";
 
     try {
       for (;;) {
         const result = await this.chunksNs.range<ChunkVectorMetadata>({
+          cursor,
+          limit: 100,
+          includeMetadata: true
+        });
+        for (const doc of result.vectors) {
+          if (
+            doc.metadata?.projectId === scope.projectId &&
+            doc.metadata?.scopeName === scope.scopeName
+          ) {
+            ids.add(String(doc.id));
+          }
+        }
+        if (!result.nextCursor || result.nextCursor === "0") break;
+        cursor = result.nextCursor;
+      }
+    } catch {
+      // Namespace may not exist yet
+    }
+
+    return ids;
+  }
+
+  private async scanHashes(
+    ns: ReturnType<Index["namespace"]>,
+    scope: Scope
+  ): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    let cursor = "0";
+
+    try {
+      for (;;) {
+        const result = await ns.range<ChunkVectorMetadata>({
           cursor,
           limit: 100,
           includeMetadata: true
@@ -472,7 +546,7 @@ export class UpstashSearchStore {
   async deletePagesByIds(ids: string[], _scope: Scope): Promise<void> {
     if (ids.length === 0) return;
 
-    const BATCH_SIZE = 50;
+    const BATCH_SIZE = 100;
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const batch = ids.slice(i, i + BATCH_SIZE);
       await this.pagesNs.delete(batch);
@@ -489,7 +563,7 @@ export class UpstashSearchStore {
   ): Promise<void> {
     if (pages.length === 0) return;
 
-    const BATCH_SIZE = 50;
+    const BATCH_SIZE = 100;
     for (let i = 0; i < pages.length; i += BATCH_SIZE) {
       const batch = pages.slice(i, i + BATCH_SIZE);
       await this.pagesNs.upsert(

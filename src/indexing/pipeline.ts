@@ -166,10 +166,9 @@ export class IndexPipeline {
     }
 
     const manifestStart = stageStart();
-    const existingHashes = options.force ? new Map<string, string>() : await this.store.getContentHashes(scope);
     const existingPageHashes = options.force ? new Map<string, string>() : await this.store.getPageHashes(scope);
     stageEnd("manifest", manifestStart);
-    this.logger.debug(`Manifest: ${existingHashes.size} existing chunk hashes, ${existingPageHashes.size} existing page hashes loaded`);
+    this.logger.debug(`Manifest: ${existingPageHashes.size} existing page hashes loaded`);
 
     const sourceStart = stageStart();
     this.logger.info(`Loading pages (source: ${sourceMode})...`);
@@ -626,6 +625,17 @@ export class IndexPipeline {
       currentChunkMap.set(chunk.chunkKey, chunk);
     }
 
+    // Fetch existing hashes for the specific chunk keys we have now.
+    // Uses direct fetch() by ID instead of range() scan to avoid potential
+    // issues with range() returning vectors from wrong namespaces on hybrid indexes.
+    const chunkHashStart = stageStart();
+    const currentChunkKeys = chunks.map((c) => c.chunkKey);
+    const existingHashes = options.force
+      ? new Map<string, string>()
+      : await this.store.fetchContentHashesForKeys(currentChunkKeys, scope);
+    stageEnd("chunk_hashes", chunkHashStart);
+    this.logger.debug(`Fetched ${existingHashes.size} existing chunk hashes for ${currentChunkKeys.length} current keys`);
+
     let changedChunks = chunks.filter((chunk) => {
       if (options.force) {
         return true;
@@ -643,7 +653,13 @@ export class IndexPipeline {
       return existingHash !== chunk.contentHash;
     });
 
-    const deletes = [...existingHashes.keys()].filter((chunkKey) => !currentChunkMap.has(chunkKey));
+    // Scan for stale chunk IDs that no longer exist in the current set.
+    // Uses range() scan which may include extra IDs, but deletion of
+    // non-existent IDs is safe and idempotent.
+    const existingChunkIds = options.force
+      ? new Set<string>()
+      : await this.store.scanChunkIds(scope);
+    const deletes = [...existingChunkIds].filter((chunkKey) => !currentChunkMap.has(chunkKey));
 
     if (this.hooks.beforeIndex) {
       changedChunks = await this.hooks.beforeIndex(changedChunks);
