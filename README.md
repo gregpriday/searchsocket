@@ -1,30 +1,25 @@
 # SearchSocket
 
-Semantic site search and MCP retrieval for SvelteKit content projects.
+Semantic site search and MCP retrieval for SvelteKit content projects. Index your site, search it from the browser or AI tools, and scroll users to the exact content they're looking for.
 
-**Requirements**: Node.js >= 20
+**Requirements**: Node.js >= 20 | **Backend**: [Upstash Vector](https://upstash.com/docs/vector/overall/getstarted) | **License**: MIT
 
 ## Features
 
-- **Unified Search Backend**: Upstash Search handles both semantic and keyword search with intelligent result blending
-- **Dual Search**: Parallel page-level and chunk-level semantic search with configurable score weighting
-- **Reranking**: Upstash Search native reranking for improved relevance
-- **Input Enrichment**: Query understanding via Upstash Search input enrichment
-- **Scroll-to-Text Navigation**: Auto-scroll to matching sections on search result navigation using TreeWalker text mapping and CSS Highlight API
-- **SvelteKit Integrations**:
-  - `searchsocketHandle()` for `POST /api/search` endpoint
-  - `searchsocketVitePlugin()` for build-triggered indexing
-- **Client Library**: `createSearchClient()` for browser-side search, `buildResultUrl()` for scroll-to-section links
-- **MCP Server**: Model Context Protocol tools for search and page retrieval
+- **Semantic + keyword search** — Upstash Vector handles hybrid search with built-in reranking and input enrichment
+- **Dual search** — parallel page-level and chunk-level queries with configurable score blending
+- **Scroll-to-text** — auto-scroll to the matching section when a user clicks a search result, with CSS Highlight API and Text Fragment support
+- **SvelteKit integration** — server hook for the search API, Vite plugin for build-triggered indexing
+- **Svelte 5 components** — reactive `createSearch` store and `<SearchSocket>` metadata component
+- **MCP server** — six tools for Claude Code, Claude Desktop, and other MCP clients (stdio + HTTP)
+- **llms.txt generation** — auto-generate LLM-friendly site indexes during indexing
+- **Four source modes** — index from static output, build manifest, a running server, or raw markdown files
+- **CLI** — init, index, search, dev, status, doctor, clean, prune, test, mcp, add
 
 ## Install
 
 ```bash
-# pnpm
 pnpm add -D searchsocket
-
-# npm
-npm install -D searchsocket
 ```
 
 SearchSocket is typically a dev dependency for CLI indexing. If you use `searchsocketHandle()` at runtime (e.g., in a Node server adapter), add it as a regular dependency instead.
@@ -37,91 +32,108 @@ SearchSocket is typically a dev dependency for CLI indexing. If you use `searchs
 pnpm searchsocket init
 ```
 
-This creates:
-- `searchsocket.config.ts` — minimal config file
-- `.searchsocket/` — state directory (added to `.gitignore`)
+Creates `searchsocket.config.ts`, the `.searchsocket/` state directory, wires up your SvelteKit hooks and Vite config, and generates `.mcp.json` for Claude Code.
 
 ### 2. Configure
 
 Minimal config (`searchsocket.config.ts`):
 
 ```ts
-export default {
-  upstash: {
-    urlEnv: "UPSTASH_SEARCH_REST_URL",
-    tokenEnv: "UPSTASH_SEARCH_REST_TOKEN"
-  }
-};
+export default {};
 ```
 
-That's it! Defaults handle the rest.
+That's it — defaults handle the rest. SearchSocket reads `UPSTASH_VECTOR_REST_URL` and `UPSTASH_VECTOR_REST_TOKEN` from your environment automatically.
 
-### 3. Add SvelteKit API Hook
+### 3. Set environment variables
 
-Create or update `src/hooks.server.ts`:
+```bash
+# .env
+UPSTASH_VECTOR_REST_URL=https://...
+UPSTASH_VECTOR_REST_TOKEN=...
+```
+
+Create an [Upstash Vector index](https://console.upstash.com/vector) with the `bge-large-en-v1.5` embedding model (1024 dimensions). Copy the REST URL and token.
+
+### 4. Add the SvelteKit hook
+
+The `init` command does this for you, but if you need to do it manually:
 
 ```ts
+// src/hooks.server.ts
 import { searchsocketHandle } from "searchsocket/sveltekit";
 
 export const handle = searchsocketHandle();
 ```
 
-This exposes `POST /api/search` with automatic scope resolution.
+This exposes `POST /api/search`, `GET /api/search/health`, the MCP endpoint at `/api/mcp`, and page retrieval routes.
 
-### 4. Set Environment Variables
+### 5. Deploy
 
-```bash
-# .env (development or CI)
-UPSTASH_SEARCH_REST_URL=https://...
-UPSTASH_SEARCH_REST_TOKEN=...
-```
-
-### 5. Index Your Content
+SearchSocket is designed to index automatically on deploy. Add the Vite plugin and set environment variables on your hosting platform (Vercel, Cloudflare, etc.):
 
 ```bash
-pnpm searchsocket index --changed-only
+# Set in your hosting platform's environment variables:
+UPSTASH_VECTOR_REST_URL=https://...
+UPSTASH_VECTOR_REST_TOKEN=...
+SEARCHSOCKET_AUTO_INDEX=1
 ```
 
-SearchSocket auto-detects the source mode based on your config:
-- **`static-output`** (default): Reads prerendered HTML from `build/`
-- **`build`**: Discovers routes from SvelteKit build manifest and renders via preview server
-- **`crawl`**: Fetches pages from a running HTTP server
-- **`content-files`**: Reads markdown/svelte source files directly
+The Vite plugin runs `searchsocket index` after each build. See [Build-Triggered Indexing](#build-triggered-indexing) for details.
 
-The indexing pipeline:
-- Extracts content from `<main>` (configurable), including `<meta>` description and keywords
-- Chunks text with semantic heading boundaries
-- Stores chunks in Upstash Search with content (searchable) and metadata (non-searchable)
-- Generates full-page documents for page-level search
+For local testing, you can also index manually:
 
-### 6. Query
+```bash
+pnpm build
+pnpm searchsocket index
+```
 
-**Via API:**
+### 6. Search
+
+**Browser client:**
+```ts
+import { createSearchClient } from "searchsocket/client";
+
+const client = createSearchClient();
+const { results } = await client.search({
+  q: "getting started",
+  topK: 5,
+  groupBy: "page"
+});
+```
+
+**Svelte 5 reactive store:**
+```svelte
+<script>
+  import { createSearch } from "searchsocket/svelte";
+  import { buildResultUrl } from "searchsocket/client";
+
+  const search = createSearch({ debounce: 300 });
+</script>
+
+<input bind:value={search.query} placeholder="Search..." />
+
+{#each search.results as result}
+  <a href={buildResultUrl(result)}>{result.title}</a>
+  <p>{result.snippet}</p>
+{/each}
+```
+
+**cURL:**
 ```bash
 curl -X POST http://localhost:5173/api/search \
   -H "content-type: application/json" \
   -d '{"q":"getting started","topK":5,"groupBy":"page"}'
 ```
 
-**Via client library:**
-```ts
-import { createSearchClient } from "searchsocket/client";
-
-const client = createSearchClient(); // defaults to /api/search
-const response = await client.search({
-  q: "getting started",
-  topK: 5,
-  groupBy: "page",
-  pathPrefix: "/docs"
-});
-```
-
-**Via CLI:**
+**CLI:**
 ```bash
-pnpm searchsocket search --q "getting started" --top-k 5 --path-prefix /docs
+pnpm searchsocket search --q "getting started" --top-k 5
 ```
 
-**Response** (with `groupBy: "page"`, the default):
+### Response format
+
+With `groupBy: "page"` (the default):
+
 ```json
 {
   "q": "getting started",
@@ -156,11 +168,11 @@ pnpm searchsocket search --q "getting started" --top-k 5 --path-prefix /docs
 }
 ```
 
-The `chunks` array appears when a page has multiple matching chunks above the `minChunkScoreRatio` threshold. Use `groupBy: "chunk"` for flat per-chunk results without page aggregation.
+The `chunks` array contains matching sections within each page. Use `groupBy: "chunk"` for flat per-chunk results without page aggregation.
 
 ## Source Modes
 
-SearchSocket supports four source modes for loading pages to index.
+SearchSocket supports four ways to load your site content for indexing.
 
 ### `static-output` (default)
 
@@ -170,38 +182,37 @@ Reads prerendered HTML files from SvelteKit's build output directory.
 export default {
   source: {
     mode: "static-output",
-    staticOutputDir: "build"
+    staticOutputDir: "build"   // default
   }
 };
 ```
 
-Best for: Sites with fully prerendered pages. Run `vite build` first, then index.
+Best for fully prerendered sites. Run `vite build` first, then `searchsocket index`.
 
 ### `build`
 
-Discovers routes automatically from SvelteKit's build manifest and renders them via an ephemeral `vite preview` server. No manual route configuration needed.
+Discovers routes from SvelteKit's build manifest and renders via an ephemeral `vite preview` server. No manual route lists needed.
 
 ```ts
 export default {
   source: {
+    mode: "build",
     build: {
-      outputDir: ".svelte-kit/output",   // default
-      previewTimeout: 30000,             // ms to wait for server (default)
-      exclude: ["/api/*", "/admin/*"],   // glob patterns to skip
-      paramValues: {                     // values for dynamic routes
+      exclude: ["/api/*", "/admin/*"],
+      paramValues: {
         "/blog/[slug]": ["hello-world", "getting-started"],
         "/docs/[category]/[page]": ["guides/quickstart", "api/search"]
       },
-      discover: true,                    // crawl internal links to find pages (default: false)
-      seedUrls: ["/"],                   // starting URLs for discovery
-      maxPages: 200,                     // max pages to discover (default: 200)
-      maxDepth: 5                        // max link depth from seed URLs (default: 5)
+      discover: true,        // crawl internal links to find more pages
+      seedUrls: ["/"],
+      maxPages: 200,
+      maxDepth: 5
     }
   }
 };
 ```
 
-Best for: CI/CD pipelines. Enables `vite build && searchsocket index` with zero route configuration.
+Best for CI/CD pipelines: `vite build && searchsocket index` with zero route configuration.
 
 ### `crawl`
 
@@ -210,24 +221,24 @@ Fetches pages from a running HTTP server.
 ```ts
 export default {
   source: {
+    mode: "crawl",
     crawl: {
       baseUrl: "http://localhost:4173",
-      routes: ["/", "/docs", "/blog"],  // explicit routes
-      sitemapUrl: "https://example.com/sitemap.xml"  // or discover via sitemap
+      routes: ["/", "/docs", "/blog"],
+      sitemapUrl: "https://example.com/sitemap.xml"
     }
   }
 };
 ```
 
-If `routes` is omitted and no `sitemapUrl` is set, defaults to crawling `["/"]` only.
-
 ### `content-files`
 
-Reads markdown and svelte source files directly, without building or serving.
+Reads markdown and Svelte source files directly, without building or serving.
 
 ```ts
 export default {
   source: {
+    mode: "content-files",
     contentFiles: {
       globs: ["src/routes/**/*.md", "content/**/*.md"],
       baseDir: "."
@@ -238,64 +249,132 @@ export default {
 
 ## Client Library
 
-SearchSocket exports a lightweight client for browser-side search:
+### `createSearchClient(options?)`
+
+Lightweight browser-side search client.
 
 ```ts
 import { createSearchClient } from "searchsocket/client";
 
 const client = createSearchClient({
-  endpoint: "/api/search",  // default
-  fetchImpl: fetch           // default; override for SSR or testing
+  endpoint: "/api/search",   // default
+  fetchImpl: fetch            // override for SSR or testing
 });
 
-const response = await client.search({
+const { results } = await client.search({
   q: "deployment guide",
   topK: 8,
   groupBy: "page",
   pathPrefix: "/docs",
-  tags: ["guide"]
+  tags: ["guide"],
+  filters: { version: 2 },
+  maxSubResults: 3
 });
-
-for (const result of response.results) {
-  console.log(result.url, result.title, result.score);
-  if (result.chunks) {
-    for (const chunk of result.chunks) {
-      console.log("  ", chunk.sectionTitle, chunk.score);
-    }
-  }
-}
 ```
-
-## Scroll-to-Text Navigation
-
-When a visitor clicks a search result, SearchSocket can automatically scroll them to the relevant section on the destination page. This uses two utilities:
 
 ### `buildResultUrl(result)`
 
-Builds a URL from a search result that includes:
-- A `_ssk` query parameter for SvelteKit client-side navigation (read by `searchsocketScrollToText`)
-- A [Text Fragment](https://developer.mozilla.org/en-US/docs/Web/URI/Fragment/Text_fragments) (`#:~:text=`) for native browser scroll-to-text on full page loads (Chrome 80+, Safari 16.1+, Firefox 131+)
+Builds a URL from a search result that includes scroll-to-text metadata:
 
-Import from `searchsocket/client`:
+- `_ssk` query parameter — section title for SvelteKit client-side navigation
+- `_sskt` query parameter — text target snippet for precise scroll
+- `#:~:text=` — [Text Fragment](https://developer.mozilla.org/en-US/docs/Web/URI/Fragment/Text_fragments) for native browser scroll on full page loads
 
 ```ts
-import { createSearchClient, buildResultUrl } from "searchsocket/client";
+import { buildResultUrl } from "searchsocket/client";
 
-const client = createSearchClient();
-const { results } = await client.search({ q: "installation" });
-
-// Use in your search UI
-for (const result of results) {
-  const href = buildResultUrl(result);
-  // "/docs/getting-started?_ssk=Installation#:~:text=Installation"
-}
+const href = buildResultUrl(result);
+// "/docs/getting-started?_ssk=Installation&_sskt=Install+with+pnpm#:~:text=Install%20with%20pnpm"
 ```
 
-If the result has no `sectionTitle`, the original URL is returned unchanged.
+## Svelte 5 Integration
 
-### `searchsocketScrollToText`
+### `createSearch(options?)`
 
-A SvelteKit `afterNavigate` hook that reads the `_ssk` parameter and scrolls the matching heading into view. Add it to your root layout:
+A reactive search store built on Svelte 5 runes with debouncing and LRU caching.
+
+```svelte
+<script>
+  import { createSearch } from "searchsocket/svelte";
+  import { buildResultUrl } from "searchsocket/client";
+
+  const search = createSearch({
+    endpoint: "/api/search",
+    debounce: 250,            // ms (default)
+    cache: true,              // LRU result caching (default)
+    cacheSize: 50,            // max cached queries (default)
+    topK: 10,
+    groupBy: "page",
+    pathPrefix: "/docs"       // scope search to a section
+  });
+</script>
+
+<input bind:value={search.query} placeholder="Search docs..." />
+
+{#if search.loading}
+  <p>Searching...</p>
+{/if}
+
+{#if search.error}
+  <p class="error">{search.error.message}</p>
+{/if}
+
+{#each search.results as result}
+  <a href={buildResultUrl(result)}>
+    <strong>{result.title}</strong>
+    {#if result.sectionTitle}
+      <span>— {result.sectionTitle}</span>
+    {/if}
+  </a>
+  <p>{result.snippet}</p>
+{/each}
+```
+
+Call `search.destroy()` to clean up when no longer needed (automatic in component context).
+
+### `<SearchSocket>` component
+
+Declarative meta tag component for controlling per-page search behavior:
+
+```svelte
+<script>
+  import { SearchSocket } from "searchsocket/svelte";
+</script>
+
+<!-- Boost this page's search ranking -->
+<SearchSocket weight={1.2} />
+
+<!-- Exclude from search -->
+<SearchSocket noindex />
+
+<!-- Add filterable tags -->
+<SearchSocket tags={["guide", "advanced"]} />
+
+<!-- Add structured metadata (filterable via search API) -->
+<SearchSocket meta={{ version: 2, category: "api" }} />
+```
+
+The component renders `<meta>` tags in `<svelte:head>` that SearchSocket reads during indexing.
+
+### Template components
+
+Copy ready-made search UI components into your project:
+
+```bash
+pnpm searchsocket add search-dialog
+pnpm searchsocket add search-input
+pnpm searchsocket add search-results
+```
+
+These are Svelte 5 components copied to `src/lib/components/search/` (configurable via `--dir`). They're starting points to customize, not dependencies.
+
+## Scroll-to-Text Navigation
+
+When a user clicks a search result, SearchSocket scrolls them to the matching section on the destination page.
+
+### Setup
+
+Add the scroll handler to your root layout:
 
 ```svelte
 <!-- src/routes/+layout.svelte -->
@@ -307,27 +386,137 @@ A SvelteKit `afterNavigate` hook that reads the `_ssk` parameter and scrolls the
 </script>
 ```
 
-The hook:
-- Matches headings (h1–h6) case-insensitively with whitespace normalization
-- Falls back to a broader text node search if no heading matches
-- Scrolls smoothly to the first match using TreeWalker-based text mapping
-- Applies CSS custom highlights (or DOM fallback) to matching text
-- Is a silent no-op when `_ssk` is absent or no match is found
+### How it works
+
+1. `buildResultUrl()` encodes the section title and text snippet into the URL
+2. On SvelteKit client-side navigation, the `afterNavigate` hook reads `_ssk`/`_sskt` params
+3. A TreeWalker-based text mapper finds the exact position in the DOM
+4. The page scrolls smoothly to the match
+5. The matching text is highlighted using the [CSS Custom Highlight API](https://developer.mozilla.org/en-US/docs/Web/API/CSS_Custom_Highlight_API) (with a DOM fallback for older browsers)
+6. On full page loads, browsers that support Text Fragments (`#:~:text=`) handle scrolling natively
+
+The highlight fades after 2 seconds. Customize with CSS:
+
+```css
+::highlight(ssk-highlight) {
+  background-color: rgba(250, 204, 21, 0.4);
+}
+```
+
+## Search & Ranking
+
+### Dual search
+
+By default, SearchSocket runs two parallel queries — one against page-level summaries and one against individual chunks — then blends the scores:
+
+```ts
+export default {
+  search: {
+    dualSearch: true,          // default
+    pageSearchWeight: 0.3      // weight of page results vs chunks (0-1)
+  }
+};
+```
+
+### Page aggregation
+
+With `groupBy: "page"` (default), chunk results are grouped by page URL:
+
+1. The top chunk score becomes the base page score
+2. Additional matching chunks add a decaying bonus: `chunk_score * decay^i`
+3. Per-URL page weights are applied multiplicatively
+
+### Ranking configuration
+
+```ts
+export default {
+  ranking: {
+    enableIncomingLinkBoost: true,    // boost pages with more internal links pointing to them
+    enableDepthBoost: true,           // boost shallower pages (/ > /docs > /docs/api)
+    enableFreshnessBoost: false,      // boost recently published content
+    enableAnchorTextBoost: false,     // boost pages whose link text matches the query
+
+    pageWeights: {                    // per-URL score multipliers (prefix matching)
+      "/": 0.95,
+      "/docs": 1.15,
+      "/download": 1.05
+    },
+
+    aggregationCap: 5,               // max chunks contributing to page score
+    aggregationDecay: 0.5,           // decay for additional chunks
+    minScoreRatio: 0.70,             // drop results below 70% of best score
+    scoreGapThreshold: 0.4,          // trim results >40% below best
+    minChunkScoreRatio: 0.5,         // threshold for sub-chunks
+
+    weights: {
+      incomingLinks: 0.05,
+      depth: 0.03,
+      aggregation: 0.1,
+      titleMatch: 0.15,
+      freshness: 0.1,
+      anchorText: 0.10
+    }
+  }
+};
+```
+
+Use gentle `pageWeights` values (0.9–1.2) since they compound with other boosts.
+
+## Build-Triggered Indexing
+
+The recommended workflow is to index automatically on every deploy. Add the Vite plugin to your config:
+
+```ts
+// vite.config.ts
+import { sveltekit } from "@sveltejs/kit/vite";
+import { searchsocketVitePlugin } from "searchsocket/sveltekit";
+
+export default {
+  plugins: [
+    sveltekit(),
+    searchsocketVitePlugin({
+      changedOnly: true,    // incremental indexing (default)
+      verbose: true
+    })
+  ]
+};
+```
+
+### Vercel / Cloudflare / Netlify
+
+Set these environment variables in your hosting platform:
+
+| Variable | Value |
+|----------|-------|
+| `UPSTASH_VECTOR_REST_URL` | Your Upstash Vector REST URL |
+| `UPSTASH_VECTOR_REST_TOKEN` | Your Upstash Vector REST token |
+| `SEARCHSOCKET_AUTO_INDEX` | `1` |
+
+Every deploy will build your site, index the content into Upstash, and serve the search API and MCP endpoint — fully automated.
+
+### Environment variable control
+
+```bash
+# Enable indexing on build
+SEARCHSOCKET_AUTO_INDEX=1 pnpm build
+
+# Disable temporarily
+SEARCHSOCKET_DISABLE_AUTO_INDEX=1 pnpm build
+
+# Force full rebuild (ignore incremental cache)
+SEARCHSOCKET_FORCE_REINDEX=1 pnpm build
+```
 
 ## Making Images Searchable
 
-By default, SearchSocket converts images to text during extraction so they participate in search. The extractor resolves image text using this priority chain:
+SearchSocket converts images to text during extraction using this priority chain:
 
-1. **`data-search-description` on the `<img>`** — highest priority, your explicit description
-2. **`data-search-description` on the parent `<figure>`** — useful when you can't modify the `<img>` directly
-3. **`alt` text + `<figcaption>`** — combined with a dash separator
-4. **`alt` text alone** — if meaningful (filters out generic words like "image", "icon", "photo")
-5. **`<figcaption>` alone** — if no meaningful alt text exists
-6. **Removed** — images with no useful text are dropped from the index
-
-### Using `data-search-description`
-
-Add a `data-search-description` attribute to your images for the best search results. This gives you full control over how an image appears in search — describe what matters for findability, not just what's visible.
+1. `data-search-description` on the `<img>` — your explicit description
+2. `data-search-description` on the parent `<figure>`
+3. `alt` text + `<figcaption>` combined
+4. `alt` text alone (filters generic words like "image", "icon")
+5. `<figcaption>` alone
+6. Removed — images with no useful text are dropped
 
 ```html
 <img
@@ -337,316 +526,113 @@ Add a `data-search-description` attribute to your images for the best search res
 />
 ```
 
-On a `<figure>`:
-
-```html
-<figure data-search-description="Architecture diagram showing the indexing pipeline from HTML extraction through chunking to Upstash vector storage">
-  <img src="/diagrams/pipeline.svg" alt="Indexing pipeline" />
-  <figcaption>Figure 1: Indexing pipeline overview</figcaption>
-</figure>
-```
-
-When `data-search-description` is present, the figcaption is not included in the indexed text (the explicit description takes precedence).
-
-### Works with SvelteKit Enhanced Images
-
-SvelteKit's `enhanced:img` passes through all `data-*` attributes to the rendered HTML, so this works out of the box:
+Works with SvelteKit's `enhanced:img`:
 
 ```svelte
 <enhanced:img
   src="./screenshots/dashboard.png"
   alt="Dashboard"
-  data-search-description="The main dashboard showing active projects, recent search queries, and indexing status indicators"
+  data-search-description="Main dashboard showing active projects and indexing status"
 />
 ```
 
-### Tips
+## MCP Server
 
-- **Describe what matters for search**, not visual details. "RBAC permissions configuration panel" is more useful than "a page with a blue sidebar and 14 menu items."
-- **Include key terms** users might search for. If the screenshot shows a "worktree selector", say so.
-- **Skip decorative images.** Images without alt text or descriptions are automatically excluded.
-- The attribute name is configurable via `extract.imageDescAttr` (default: `data-search-description`).
+SearchSocket includes an MCP server that gives Claude Code, Claude Desktop, and other MCP clients direct access to your site's search index. The MCP endpoint is built into `searchsocketHandle()` — once your site is deployed, any MCP client can connect to it over HTTP.
 
-## Vector Backend: Upstash Search
+### Available tools
 
-SearchSocket uses **Upstash Search** as its vector backend, a managed search service with built-in semantic and keyword search.
+| Tool | Description |
+|------|-------------|
+| `search` | Semantic search with filtering, grouping, and reranking |
+| `get_page` | Retrieve full page markdown with frontmatter |
+| `list_pages` | Cursor-paginated page listing |
+| `get_site_structure` | Hierarchical page tree |
+| `find_source_file` | Locate the SvelteKit source file for content |
+| `get_related_pages` | Find related pages by links, semantics, and structure |
 
-### Setup
+### Connecting to your deployed site
 
-1. **Create an Upstash Search index**:
-   ```bash
-   # Via Upstash console or CLI
-   # https://console.upstash.com/search
-   ```
+The recommended setup is to connect Claude Code to your deployed site's MCP endpoint. This way the index stays up to date automatically as you deploy, and there's no local process to manage.
 
-2. **Get credentials**:
-   ```
-   UPSTASH_SEARCH_REST_URL=https://...
-   UPSTASH_SEARCH_REST_TOKEN=...
-   ```
-
-3. **Set environment variables** in your `.env`:
-   ```bash
-   UPSTASH_SEARCH_REST_URL=https://...
-   UPSTASH_SEARCH_REST_TOKEN=...
-   ```
-
-### How It Works
-
-- **Content Storage**: Each indexed page is split into chunks; chunks are stored as documents with searchable content and metadata
-- **Page Index**: Full-page summaries stored in a separate index for page-level search
-- **Dual Search**: Parallel queries to both indexes with score blending
-- **Semantic Search**: Upstash Search provides semantic search natively
-- **Keyword Search**: Combined with semantic for hybrid results
-- **Reranking**: Native Upstash Search reranking option
-- **Input Enrichment**: Automatic query understanding
-
-### Why Upstash Search?
-
-- **Managed service** — no infrastructure to maintain
-- **Semantic + keyword unified** — single index for both search types
-- **Cost-effective** — pay per query, not per embedding
-- **Native reranking & enrichment** — no additional APIs needed
-- **Scope isolation** — separate indexes per scope (multi-branch support)
-
-## Search & Ranking
-
-### Page Aggregation
-
-By default (`groupBy: "page"`), SearchSocket groups chunk results by page URL and computes a page-level score:
-
-1. The top chunk score becomes the base page score
-2. Additional matching chunks contribute a decaying bonus: `chunk_score * decay^i`
-3. Optional per-URL page weights are applied multiplicatively
-
-Configure aggregation behavior:
-
-```ts
-export default {
-  search: {
-    dualSearch: true,         // parallel page + chunk search (default: true)
-    pageSearchWeight: 0.3     // weight of page-level results vs chunks (0-1)
-  },
-  ranking: {
-    minScore: 0.3,            // minimum absolute score to include (default: 0.3)
-    aggregationCap: 5,        // max chunks contributing to page score (default: 5)
-    aggregationDecay: 0.5,    // decay factor for additional chunks (default: 0.5)
-    minChunkScoreRatio: 0.5,  // threshold for sub-chunks in results (default: 0.5)
-    scoreGapThreshold: 0.4,   // trim low-scoring results (default: 0.4)
-    pageWeights: {            // per-URL score multipliers
-      "/": 1.1,
-      "/docs": 1.15,
-      "/download": 1.2
-    },
-    weights: {
-      incomingLinks: 0.05,    // incoming link boost weight
-      depth: 0.03,            // URL depth boost weight
-      aggregation: 0.1,       // aggregation bonus weight
-      titleMatch: 0.15        // title match boost weight
-    }
-  }
-};
-```
-
-`pageWeights` supports exact URL matches and prefix matching. A weight of `1.15` on `"/docs"` boosts all pages under `/docs/` by 15%. Use gentle values (1.05-1.2x) since they compound with aggregation.
-
-`minScore` filters out low-relevance results before they reach the client. Set to a value like `0.3` (default) to remove noise. In page mode, pages below the threshold are dropped; in chunk mode, individual chunks are filtered.
-
-### Chunk Mode
-
-Use `groupBy: "chunk"` for flat per-chunk results without page aggregation:
-
-```bash
-curl -X POST http://localhost:5173/api/search \
-  -H "content-type: application/json" \
-  -d '{"q":"vector search","topK":10,"groupBy":"chunk"}'
-```
-
-## Build-Triggered Indexing
-
-Automatically index after each SvelteKit build.
-
-**`vite.config.ts` or `svelte.config.js`:**
-```ts
-import { searchsocketVitePlugin } from "searchsocket/sveltekit";
-
-export default {
-  plugins: [
-    svelteKitPlugin(),
-    searchsocketVitePlugin({
-      enabled: true,        // or check process.env.SEARCHSOCKET_AUTO_INDEX
-      changedOnly: true,    // incremental indexing (faster)
-      verbose: false
-    })
-  ]
-};
-```
-
-**Environment control:**
-```bash
-# Enable via env var
-SEARCHSOCKET_AUTO_INDEX=1 pnpm build
-
-# Disable via env var
-SEARCHSOCKET_DISABLE_AUTO_INDEX=1 pnpm build
-```
-
-## Commands
-
-### `searchsocket init`
-
-Initialize config and state directory.
-
-```bash
-pnpm searchsocket init
-```
-
-### `searchsocket index`
-
-Index content into Upstash Search.
-
-```bash
-# Incremental (only changed chunks)
-pnpm searchsocket index --changed-only
-
-# Full re-index
-pnpm searchsocket index --force
-
-# Override source mode
-pnpm searchsocket index --source build
-
-# Limit for testing
-pnpm searchsocket index --max-pages 10 --max-chunks 50
-
-# Override scope
-pnpm searchsocket index --scope staging
-
-# Verbose output
-pnpm searchsocket index --verbose
-```
-
-### `searchsocket status`
-
-Show indexing status and index health.
-
-```bash
-pnpm searchsocket status
-
-# Output:
-# project: my-site
-# resolved scope: main
-# vector backend: upstash-search
-# vector health: ok
-# indexed chunks: 156
-```
-
-### `searchsocket dev`
-
-Watch for file changes and auto-reindex.
-
-```bash
-pnpm searchsocket dev
-
-# With MCP server
-pnpm searchsocket dev --mcp --mcp-port 3338
-```
-
-Watches:
-- `src/routes/**` (route files)
-- `build/` (if static-output mode)
-- Build output dir (if build mode)
-- Content files (if content-files mode)
-- `searchsocket.config.ts` (if crawl or build mode)
-
-### `searchsocket clean`
-
-Delete all indexed content for a scope.
-
-```bash
-# Clean current scope
-pnpm searchsocket clean
-
-# Clean specific scope
-pnpm searchsocket clean --scope staging
-```
-
-### `searchsocket doctor`
-
-Validate config, env vars, and connectivity.
-
-```bash
-pnpm searchsocket doctor
-
-# Output:
-# PASS config parse
-# PASS env UPSTASH_SEARCH_REST_URL
-# PASS env UPSTASH_SEARCH_REST_TOKEN
-# PASS upstash-search connectivity
-# PASS upstash-search write permission
-# PASS state directory writable
-```
-
-### `searchsocket mcp`
-
-Run MCP server for Claude Desktop / other MCP clients.
-
-```bash
-# stdio transport (default)
-pnpm searchsocket mcp
-
-# HTTP transport
-pnpm searchsocket mcp --transport http --port 3338
-```
-
-### `searchsocket search`
-
-CLI search for testing.
-
-```bash
-pnpm searchsocket search --q "upstash search integration" --top-k 5
-```
-
-## MCP (Model Context Protocol)
-
-SearchSocket provides an **MCP server** for integration with Claude Code, Claude Desktop, and other MCP-compatible AI tools. This gives AI assistants direct access to your indexed site content for semantic search and page retrieval.
-
-> **Claude Code over HTTP**: For the recommended setup using SearchSocket's built-in HTTP MCP endpoint (no local process, works with deployed sites), see [docs/mcp-claude-code.md](docs/mcp-claude-code.md).
-
-### Tools
-
-**`search(query, opts?)`**
-- Semantic search across indexed content
-- Returns ranked results with URL, title, snippet, score, and routeFile
-- Options: `scope`, `topK` (1-100), `pathPrefix`, `tags`, `groupBy` (`"page"` | `"chunk"`)
-
-**`get_page(pathOrUrl, opts?)`**
-- Retrieve full indexed page content as markdown with frontmatter
-- Options: `scope`
-
-### Setup (Claude Code)
-
-Add a `.mcp.json` file to your project root (safe to commit — no secrets needed since the CLI auto-loads `.env`):
+Add `.mcp.json` to your project root:
 
 ```json
 {
   "mcpServers": {
     "searchsocket": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["searchsocket", "mcp"],
-      "env": {}
+      "type": "http",
+      "url": "https://your-site.com/api/mcp"
     }
   }
 }
 ```
 
-Restart Claude Code. The `search` and `get_page` tools will be available automatically. Verify with:
+That's it. Restart Claude Code and the six search tools are available. You can search your docs, retrieve page content, and find source files directly from the AI assistant.
 
-```bash
-claude mcp list
+To protect the endpoint, add API key authentication:
+
+```ts
+// src/hooks.server.ts
+export const handle = searchsocketHandle({
+  rawConfig: {
+    mcp: {
+      handle: {
+        apiKey: process.env.SEARCHSOCKET_MCP_API_KEY
+      }
+    }
+  }
+});
 ```
 
-### Setup (Claude Desktop)
+Then pass the key in `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "searchsocket": {
+      "type": "http",
+      "url": "https://your-site.com/api/mcp",
+      "headers": {
+        "Authorization": "Bearer ${SEARCHSOCKET_MCP_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+The `${SEARCHSOCKET_MCP_API_KEY}` syntax references an environment variable so you don't hardcode secrets in `.mcp.json`.
+
+### Auto-approving in Claude Code
+
+Skip the approval prompt each time a tool is called:
+
+```json
+{
+  "allowedMcpServers": [
+    { "serverName": "searchsocket" }
+  ]
+}
+```
+
+Add this to `.claude/settings.json` in your project.
+
+### Local development
+
+During local development, you can point to your dev server instead:
+
+```json
+{
+  "mcpServers": {
+    "searchsocket": {
+      "type": "http",
+      "url": "http://localhost:5173/api/mcp"
+    }
+  }
+}
+```
+
+### Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -662,38 +648,366 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-Restart Claude Desktop. The tools appear in the MCP menu.
+### Standalone HTTP server
 
-### HTTP Transport
-
-For non-stdio clients, run the MCP server over HTTP:
+Run the MCP server as a standalone process (outside SvelteKit):
 
 ```bash
-npx searchsocket mcp --transport http --port 3338
+pnpm searchsocket mcp --transport http --port 3338
 ```
 
-This starts a stateless server at `http://127.0.0.1:3338/mcp`. Each POST request creates a fresh server instance with no session persistence.
+## llms.txt Generation
+
+Generate [llms.txt](https://llmstxt.org/) files during indexing — a standardized way to make your site content available to LLMs.
+
+```ts
+export default {
+  project: {
+    baseUrl: "https://example.com"
+  },
+  llmsTxt: {
+    enable: true,
+    title: "My Project",
+    description: "Documentation for My Project",
+    outputPath: "static/llms.txt",    // default
+    generateFull: true,                // also generate llms-full.txt
+    serveMarkdownVariants: false       // serve /page.md variants via the hook
+  }
+};
+```
+
+After indexing, `llms.txt` (page index with links) and `llms-full.txt` (full content) are written to your static directory and served by `searchsocketHandle()`.
+
+## CLI Commands
+
+### `searchsocket init`
+
+Initialize config and state directory. Creates `searchsocket.config.ts`, `.searchsocket/`, `.mcp.json`, and wires up your hooks and Vite config.
+
+```bash
+pnpm searchsocket init
+pnpm searchsocket init --non-interactive
+```
+
+### `searchsocket index`
+
+Index content into Upstash Vector.
+
+```bash
+pnpm searchsocket index                    # incremental (default: --changed-only)
+pnpm searchsocket index --force            # full re-index
+pnpm searchsocket index --source build     # override source mode
+pnpm searchsocket index --scope staging    # override scope
+pnpm searchsocket index --dry-run          # preview without writing
+pnpm searchsocket index --max-pages 10     # limit for testing
+pnpm searchsocket index --verbose          # detailed output
+pnpm searchsocket index --json             # machine-readable output
+```
+
+### `searchsocket search`
+
+CLI search for testing.
+
+```bash
+pnpm searchsocket search --q "getting started" --top-k 5
+pnpm searchsocket search --q "api" --path-prefix /docs
+```
+
+### `searchsocket dev`
+
+Watch for file changes and auto-reindex, with optional playground UI.
+
+```bash
+pnpm searchsocket dev                                # watch + playground at :3337
+pnpm searchsocket dev --mcp --mcp-port 3338          # also start MCP HTTP server
+pnpm searchsocket dev --no-playground                 # watch only
+```
+
+### `searchsocket status`
+
+Show indexing status and backend health.
+
+```bash
+pnpm searchsocket status
+```
+
+### `searchsocket doctor`
+
+Validate config, env vars, provider connectivity, and write access.
+
+```bash
+pnpm searchsocket doctor
+```
+
+### `searchsocket test`
+
+Run search quality assertions against the live index.
+
+```bash
+pnpm searchsocket test                              # uses searchsocket.test.json
+pnpm searchsocket test --file custom-tests.json     # custom test file
+```
+
+Test file format:
+
+```json
+[
+  {
+    "query": "installation guide",
+    "expect": {
+      "topResult": "/docs/getting-started",
+      "inTop5": ["/docs/getting-started", "/docs/quickstart"]
+    }
+  }
+]
+```
+
+Reports pass/fail per assertion and Mean Reciprocal Rank (MRR) across all queries.
+
+### `searchsocket clean`
+
+Delete local state and optionally remote indexes.
+
+```bash
+pnpm searchsocket clean                    # local state only
+pnpm searchsocket clean --remote           # also delete remote scope
+pnpm searchsocket clean --scope staging    # specific scope
+```
+
+### `searchsocket prune`
+
+List and delete stale scopes. Compares against git branches to find orphaned scopes.
+
+```bash
+pnpm searchsocket prune                       # dry-run (default)
+pnpm searchsocket prune --apply               # actually delete
+pnpm searchsocket prune --older-than 30d      # only scopes older than 30 days
+```
+
+### `searchsocket mcp`
+
+Run the MCP server standalone.
+
+```bash
+pnpm searchsocket mcp                                   # stdio (default)
+pnpm searchsocket mcp --transport http --port 3338       # HTTP
+pnpm searchsocket mcp --access public --api-key SECRET   # public with auth
+```
+
+### `searchsocket add`
+
+Copy Svelte 5 search UI template components into your project.
+
+```bash
+pnpm searchsocket add search-dialog
+pnpm searchsocket add search-input
+pnpm searchsocket add search-results
+pnpm searchsocket add search-dialog --dir src/lib/components/ui  # custom dir
+```
+
+## Real-World Example
+
+Here's how [Canopy](https://canopy.dev) integrates SearchSocket into a production SvelteKit site.
+
+### Configuration
+
+```ts
+// searchsocket.config.ts
+export default {
+  project: {
+    id: "canopy-website",
+    baseUrl: "https://canopy.dev"
+  },
+  source: {
+    mode: "build"
+  },
+  extract: {
+    dropSelectors: [".nav-blur", ".mobile-overlay", ".docs-sidebar"]
+  },
+  ranking: {
+    minScoreRatio: 0.70,
+    pageWeights: {
+      "/": 0.95,
+      "/download": 1.05,
+      "/docs/**": 1.05
+    },
+    aggregationCap: 3,
+    aggregationDecay: 0.3
+  }
+};
+```
+
+### Server hook
+
+```ts
+// src/hooks.server.ts
+import { searchsocketHandle } from "searchsocket/sveltekit";
+import { env } from "$env/dynamic/private";
+
+export const handle = searchsocketHandle({
+  rawConfig: {
+    project: { id: "canopy-website", baseUrl: "https://canopy.dev" },
+    source: { mode: "build" },
+    upstash: {
+      url: env.UPSTASH_VECTOR_REST_URL,
+      token: env.UPSTASH_VECTOR_REST_TOKEN
+    },
+    extract: {
+      dropSelectors: [".nav-blur", ".mobile-overlay", ".docs-sidebar"]
+    },
+    ranking: {
+      minScoreRatio: 0.70,
+      pageWeights: { "/": 0.95, "/download": 1.05, "/docs/**": 1.05 },
+      aggregationCap: 3,
+      aggregationDecay: 0.3
+    }
+  }
+});
+```
+
+### Search modal with scoped search
+
+```svelte
+<!-- SearchModal.svelte -->
+<script>
+  import { createSearchClient, buildResultUrl } from "searchsocket/client";
+
+  let { open = $bindable(false), pathPrefix = "", placeholder = "Search..." } = $props();
+
+  const client = createSearchClient();
+  let query = $state("");
+  let results = $state([]);
+
+  async function doSearch() {
+    if (!query.trim()) { results = []; return; }
+    const res = await client.search({
+      q: query,
+      topK: 8,
+      groupBy: "page",
+      pathPrefix: pathPrefix || undefined
+    });
+    results = res.results;
+  }
+</script>
+
+{#if open}
+  <dialog open>
+    <input bind:value={query} oninput={doSearch} {placeholder} />
+    {#each results as result}
+      <a href={buildResultUrl(result)} onclick={() => open = false}>
+        <strong>{result.title}</strong>
+        {#if result.sectionTitle}<span>— {result.sectionTitle}</span>{/if}
+        <p>{result.snippet}</p>
+      </a>
+    {/each}
+  </dialog>
+{/if}
+```
+
+### Scroll-to-text in layout
+
+```svelte
+<!-- src/routes/+layout.svelte -->
+<script>
+  import { afterNavigate } from "$app/navigation";
+  import { searchsocketScrollToText } from "searchsocket/sveltekit";
+
+  afterNavigate(searchsocketScrollToText);
+</script>
+```
+
+### Deploy and index
+
+Indexing runs automatically on every Vercel deploy. Set these env vars in the Vercel dashboard:
+
+- `UPSTASH_VECTOR_REST_URL`
+- `UPSTASH_VECTOR_REST_TOKEN`
+- `SEARCHSOCKET_AUTO_INDEX=1`
+
+The Vite plugin handles the rest. Alternatively, use a postbuild script:
+
+```json
+{
+  "scripts": {
+    "build": "vite build",
+    "postbuild": "searchsocket index"
+  }
+}
+```
+
+### Connect Claude Code to the deployed site
+
+```json
+{
+  "mcpServers": {
+    "searchsocket": {
+      "type": "http",
+      "url": "https://canopy.dev/api/mcp"
+    }
+  }
+}
+```
+
+Now Claude Code can search the live docs, retrieve page content, and find source files — all backed by the production index that stays current with every deploy.
+
+### Excluding pages from search
+
+```svelte
+<!-- src/routes/blog/+page.svelte (archive page) -->
+<svelte:head>
+  <meta name="searchsocket-weight" content="0" />
+</svelte:head>
+```
+
+Or with the component:
+
+```svelte
+<script>
+  import { SearchSocket } from "searchsocket/svelte";
+</script>
+
+<SearchSocket weight={0} />
+```
+
+### Vite SSR config
+
+```ts
+// vite.config.ts
+import { sveltekit } from "@sveltejs/kit/vite";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  plugins: [sveltekit()],
+  ssr: {
+    external: ["searchsocket", "searchsocket/sveltekit", "searchsocket/client"]
+  }
+});
+```
 
 ## Environment Variables
 
 ### Required
 
-**Upstash Search:**
-- `UPSTASH_SEARCH_REST_URL` — Upstash Search REST API endpoint
-- `UPSTASH_SEARCH_REST_TOKEN` — Upstash Search REST API token
+| Variable | Description |
+|----------|-------------|
+| `UPSTASH_VECTOR_REST_URL` | Upstash Vector REST API endpoint |
+| `UPSTASH_VECTOR_REST_TOKEN` | Upstash Vector REST API token |
 
 ### Optional
 
-- `SEARCHSOCKET_SCOPE` — Override scope (when `scope.mode: "env"`)
-- `SEARCHSOCKET_AUTO_INDEX` — Enable build-triggered indexing
-- `SEARCHSOCKET_DISABLE_AUTO_INDEX` — Disable build-triggered indexing
-- `SEARCHSOCKET_FORCE_REINDEX` — Force full re-index in CI/CD (`1`, `true`, or `yes`)
+| Variable | Description |
+|----------|-------------|
+| `GEMINI_API_KEY` | Google Gemini API key (only needed for image embedding) |
+| `SEARCHSOCKET_SCOPE` | Override scope (when `scope.mode: "env"`) |
+| `SEARCHSOCKET_AUTO_INDEX` | Enable build-triggered indexing (`1`, `true`, or `yes`) |
+| `SEARCHSOCKET_DISABLE_AUTO_INDEX` | Disable build-triggered indexing |
+| `SEARCHSOCKET_FORCE_REINDEX` | Force full re-index in CI/CD |
 
 The CLI automatically loads `.env` from the working directory on startup.
 
-## Configuration
+## Configuration Reference
 
-### Full Example
+See [docs/config.md](docs/config.md) for the full configuration reference. Here's the full example:
 
 ```ts
 export default {
@@ -703,41 +1017,24 @@ export default {
   },
 
   scope: {
-    mode: "git",           // "fixed" | "git" | "env"
+    mode: "git",                 // "fixed" | "git" | "env"
     fixed: "main",
     sanitize: true
   },
 
-  source: {
-    mode: "build",         // "static-output" | "crawl" | "content-files" | "build"
-    staticOutputDir: "build",
-    strictRouteMapping: false,
+  exclude: ["/admin/*", "/api/*"],
+  respectRobotsTxt: true,
 
-    // Build mode (recommended for CI/CD)
+  source: {
+    mode: "build",
+    staticOutputDir: "build",
     build: {
-      outputDir: ".svelte-kit/output",
-      previewTimeout: 30000,
       exclude: ["/api/*"],
       paramValues: {
         "/blog/[slug]": ["hello-world", "getting-started"]
       },
-      discover: false,
-      seedUrls: ["/"],
-      maxPages: 200,
-      maxDepth: 5
-    },
-
-    // Crawl mode (alternative)
-    crawl: {
-      baseUrl: "http://localhost:4173",
-      routes: ["/", "/docs", "/blog"],
-      sitemapUrl: "https://example.com/sitemap.xml"
-    },
-
-    // Content files mode (alternative)
-    contentFiles: {
-      globs: ["src/routes/**/*.md"],
-      baseDir: "."
+      discover: true,
+      maxPages: 200
     }
   },
 
@@ -747,74 +1044,50 @@ export default {
     dropSelectors: [".sidebar", ".toc"],
     ignoreAttr: "data-search-ignore",
     noindexAttr: "data-search-noindex",
-    imageDescAttr: "data-search-description",
-    respectRobotsNoindex: true
-  },
-
-  transform: {
-    output: "markdown",
-    preserveCodeBlocks: true,
-    preserveTables: true
+    imageDescAttr: "data-search-description"
   },
 
   chunking: {
-    strategy: "hybrid",
     maxChars: 1500,
     overlapChars: 200,
     minChars: 250,
-    headingPathDepth: 3,
-    dontSplitInside: ["code", "table", "blockquote"],
-    prependTitle: true,       // prepend page title to chunk text before indexing
-    pageSummaryChunk: true    // generate synthetic identity chunk per page
+    prependTitle: true,
+    pageSummaryChunk: true
   },
 
   upstash: {
-    urlEnv: "UPSTASH_SEARCH_REST_URL",
-    tokenEnv: "UPSTASH_SEARCH_REST_TOKEN",
-    // OR use direct credentials:
-    // url: "https://...",
-    // token: "..."
+    urlEnv: "UPSTASH_VECTOR_REST_URL",
+    tokenEnv: "UPSTASH_VECTOR_REST_TOKEN"
   },
 
   search: {
-    dualSearch: true,         // parallel page + chunk search
-    pageSearchWeight: 0.3     // page result boost factor (0-1)
+    dualSearch: true,
+    pageSearchWeight: 0.3
   },
 
   ranking: {
     enableIncomingLinkBoost: true,
     enableDepthBoost: true,
-    pageWeights: {
-      "/": 1.1,
-      "/docs": 1.15
-    },
-    minScore: 0.3,
+    pageWeights: { "/docs": 1.15 },
+    minScoreRatio: 0.70,
     aggregationCap: 5,
-    aggregationDecay: 0.5,
-    minChunkScoreRatio: 0.5,
-    scoreGapThreshold: 0.4,
-    weights: {
-      incomingLinks: 0.05,
-      depth: 0.03,
-      aggregation: 0.1,
-      titleMatch: 0.15
-    }
+    aggregationDecay: 0.5
   },
 
   api: {
     path: "/api/search",
-    cors: {
-      allowOrigins: ["https://example.com"]
-    }
+    cors: { allowOrigins: ["https://example.com"] }
   },
 
   mcp: {
     enable: true,
-    transport: "stdio",
-    http: {
-      port: 3338,
-      path: "/mcp"
-    }
+    handle: { path: "/api/mcp" }
+  },
+
+  llmsTxt: {
+    enable: true,
+    title: "My Project",
+    description: "Documentation for My Project"
   },
 
   state: {
@@ -822,6 +1095,23 @@ export default {
   }
 };
 ```
+
+## CI/CD
+
+See [docs/ci.md](docs/ci.md) for ready-to-use GitHub Actions workflows covering:
+
+- Main branch indexing on push
+- PR dry-run validation
+- Preview branch scope isolation
+- Scheduled scope pruning
+- Vercel build-triggered indexing
+
+## Further Reading
+
+- [Building a Search UI](docs/search-ui.md) — complete guide to building search components, from Cmd+K modals to scoped search, with patterns, API reference, and styling
+- [Configuration Reference](docs/config.md) — all config options with defaults
+- [CI/CD Workflows](docs/ci.md) — GitHub Actions and Vercel integration
+- [MCP over HTTP Guide](docs/mcp-claude-code.md) — detailed HTTP MCP setup for Claude Code
 
 ## License
 

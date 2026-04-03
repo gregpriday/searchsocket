@@ -5,13 +5,10 @@ Configuration file: `searchsocket.config.ts`
 Minimal config:
 
 ```ts
-export default {
-  upstash: {
-    urlEnv: "UPSTASH_SEARCH_REST_URL",
-    tokenEnv: "UPSTASH_SEARCH_REST_TOKEN"
-  }
-};
+export default {};
 ```
+
+SearchSocket reads `UPSTASH_VECTOR_REST_URL` and `UPSTASH_VECTOR_REST_TOKEN` from your environment by default.
 
 ## Project
 
@@ -83,8 +80,8 @@ export default {
 
 ## Upstash
 
-- `upstash.urlEnv` (default `UPSTASH_SEARCH_REST_URL`) — env var for Upstash REST URL
-- `upstash.tokenEnv` (default `UPSTASH_SEARCH_REST_TOKEN`) — env var for Upstash REST token
+- `upstash.urlEnv` (default `UPSTASH_VECTOR_REST_URL`) — env var for Upstash REST URL
+- `upstash.tokenEnv` (default `UPSTASH_VECTOR_REST_TOKEN`) — env var for Upstash REST token
 - `upstash.url` — direct Upstash REST URL (alternative to env var)
 - `upstash.token` — direct Upstash REST token (alternative to env var)
 - `upstash.namespaces.pages` (default `pages`) — namespace for page vectors
@@ -170,8 +167,8 @@ Upstash handles embedding server-side via the `data` field. These settings confi
 
 Required:
 
-- `UPSTASH_SEARCH_REST_URL` — Upstash Search REST API endpoint
-- `UPSTASH_SEARCH_REST_TOKEN` — Upstash Search REST API token
+- `UPSTASH_VECTOR_REST_URL` — Upstash Vector REST API endpoint
+- `UPSTASH_VECTOR_REST_TOKEN` — Upstash Vector REST API token
 
 Optional:
 

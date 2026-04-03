@@ -178,7 +178,7 @@ describe("add-helpers", () => {
       const result = await copyComponent("search-dialog", tmpDir);
       const content = await fsp.readFile(result.written[0]!, "utf8");
 
-      expect(content).toContain("<mark>");
+      expect(content).toContain("<mark");
       expect(content).toContain("highlightParts");
       expect(content).not.toMatch(/{@html\s/);
     });

@@ -1,6 +1,6 @@
 <!--
   SearchDialog — Cmd+K search dialog for SearchSocket
-  Copy-paste component: edit freely to match your project.
+  Minimal Tailwind 4 starting point. Customize freely.
   For non-SvelteKit apps, replace `goto` with `window.location.href = url`.
 -->
 <script lang="ts">
@@ -18,7 +18,7 @@
     placeholder?: string;
   } = $props();
 
-  const search = createSearch({ endpoint });
+  const search = createSearch({ endpoint, topK: 8, groupBy: "page" });
 
   let activeIndex = $state(-1);
   let inputEl = $state<HTMLInputElement | null>(null);
@@ -32,9 +32,13 @@
 
   // Focus input when dialog opens
   $effect(() => {
-    if (open && inputEl) {
-      inputEl.focus();
-    }
+    if (open && inputEl) inputEl.focus();
+  });
+
+  // Lock body scroll when open
+  $effect(() => {
+    if (open) document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = ""; };
   });
 
   // Global Cmd+K / Ctrl+K shortcut
@@ -55,10 +59,9 @@
   });
 
   function activeOptionId(): string | undefined {
-    if (activeIndex >= 0 && activeIndex < search.results.length) {
-      return `ss-option-${activeIndex}`;
-    }
-    return undefined;
+    return activeIndex >= 0 && activeIndex < search.results.length
+      ? `ss-option-${activeIndex}`
+      : undefined;
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -74,9 +77,7 @@
         break;
       case "Enter":
         e.preventDefault();
-        if (activeIndex >= 0 && activeIndex < count) {
-          navigateTo(search.results[activeIndex]);
-        }
+        if (activeIndex >= 0 && activeIndex < count) navigateTo(search.results[activeIndex]);
         break;
       case "Escape":
         e.preventDefault();
@@ -93,25 +94,28 @@
 
   function highlightParts(text: string, query: string): Array<{ text: string; match: boolean }> {
     if (!query.trim()) return [{ text, match: false }];
-    const escaped = query
-      .trim()
-      .split(/\s+/)
-      .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-      .join("|");
+    const escaped = query.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
     const splitter = new RegExp(`(${escaped})`, "gi");
     const tester = new RegExp(`^(?:${escaped})$`, "i");
-    return text
-      .split(splitter)
-      .filter(Boolean)
-      .map((part) => ({ text: part, match: tester.test(part) }));
+    return text.split(splitter).filter(Boolean).map((part) => ({ text: part, match: tester.test(part) }));
   }
 </script>
 
 {#if open}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="ss-backdrop" onclick={() => (open = false)} onkeydown={handleKeydown}>
+  <div
+    class="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[15vh]"
+    onclick={() => (open = false)}
+    onkeydown={handleKeydown}
+  >
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="ss-dialog" role="dialog" aria-modal="true" aria-label="Site search" onclick={(e) => e.stopPropagation()}>
+    <div
+      class="flex w-full max-w-lg flex-col overflow-hidden rounded-lg border bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Site search"
+      onclick={(e) => e.stopPropagation()}
+    >
       <input
         bind:this={inputEl}
         type="text"
@@ -124,38 +128,37 @@
         {placeholder}
         value={search.query}
         oninput={(e) => (search.query = e.currentTarget.value)}
-        class="ss-input"
+        class="w-full border-b bg-transparent px-4 py-3 text-base outline-none dark:border-neutral-700"
       />
 
       {#if search.loading}
-        <div class="ss-loading" aria-live="polite">Searching...</div>
+        <div class="px-4 py-3 text-sm text-neutral-500" aria-live="polite">Searching...</div>
       {/if}
 
       {#if search.error}
-        <div class="ss-error" role="alert">{search.error.message}</div>
+        <div class="px-4 py-3 text-sm text-red-600" role="alert">{search.error.message}</div>
       {/if}
 
       {#if search.results.length > 0}
-        <ul role="listbox" id={listboxId} class="ss-results">
+        <ul role="listbox" id={listboxId} class="max-h-80 overflow-y-auto">
           {#each search.results as result, i}
             <li
               role="option"
               id="ss-option-{i}"
               aria-selected={i === activeIndex}
-              class="ss-result"
-              class:ss-result-active={i === activeIndex}
+              class="flex cursor-pointer flex-col gap-0.5 px-4 py-2.5 {i === activeIndex ? 'bg-neutral-100 dark:bg-neutral-800' : ''}"
               onclick={() => navigateTo(result)}
               onmouseenter={() => (activeIndex = i)}
             >
-              <span class="ss-result-title">
+              <span class="font-medium">
                 {#each highlightParts(result.title, search.query) as part}
-                  {#if part.match}<mark>{part.text}</mark>{:else}{part.text}{/if}
+                  {#if part.match}<mark class="rounded-sm bg-yellow-200 dark:bg-yellow-500/30">{part.text}</mark>{:else}{part.text}{/if}
                 {/each}
               </span>
               {#if result.snippet}
-                <span class="ss-result-snippet">
+                <span class="text-sm text-neutral-500 dark:text-neutral-400">
                   {#each highlightParts(result.snippet, search.query) as part}
-                    {#if part.match}<mark>{part.text}</mark>{:else}{part.text}{/if}
+                    {#if part.match}<mark class="rounded-sm bg-yellow-200 dark:bg-yellow-500/30">{part.text}</mark>{:else}{part.text}{/if}
                   {/each}
                 </span>
               {/if}
@@ -165,90 +168,8 @@
       {/if}
 
       {#if search.query && !search.loading && search.results.length === 0 && !search.error}
-        <div class="ss-empty">No results found.</div>
+        <div class="px-4 py-3 text-sm text-neutral-500">No results found.</div>
       {/if}
     </div>
   </div>
 {/if}
-
-<style>
-  .ss-backdrop {
-    position: fixed;
-    inset: 0;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding-top: var(--ss-dialog-top, 15vh);
-    background: var(--ss-backdrop-bg, rgba(0, 0, 0, 0.5));
-    z-index: var(--ss-z-index, 9999);
-  }
-
-  .ss-dialog {
-    width: var(--ss-dialog-width, 560px);
-    max-width: 90vw;
-    max-height: var(--ss-dialog-max-height, 480px);
-    display: flex;
-    flex-direction: column;
-    background: var(--ss-dialog-bg, #fff);
-    border-radius: var(--ss-dialog-radius, 12px);
-    box-shadow: var(--ss-dialog-shadow, 0 16px 70px rgba(0, 0, 0, 0.2));
-    overflow: hidden;
-  }
-
-  .ss-input {
-    width: 100%;
-    padding: var(--ss-input-padding, 16px);
-    border: none;
-    outline: none;
-    font-size: var(--ss-input-font-size, 16px);
-    background: transparent;
-    color: inherit;
-  }
-
-  .ss-loading,
-  .ss-empty,
-  .ss-error {
-    padding: var(--ss-message-padding, 12px 16px);
-    font-size: var(--ss-message-font-size, 14px);
-  }
-
-  .ss-error {
-    color: var(--ss-error-color, #dc2626);
-  }
-
-  .ss-results {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    overflow-y: auto;
-    border-top: 1px solid var(--ss-border-color, #e5e7eb);
-  }
-
-  .ss-result {
-    padding: var(--ss-result-padding, 10px 16px);
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .ss-result-active {
-    background: var(--ss-result-active-bg, #f3f4f6);
-  }
-
-  .ss-result-title {
-    font-weight: 500;
-  }
-
-  .ss-result-snippet {
-    font-size: var(--ss-snippet-font-size, 13px);
-    color: var(--ss-snippet-color, #6b7280);
-  }
-
-  mark {
-    background: var(--ss-mark-bg, #fef08a);
-    color: inherit;
-    border-radius: 2px;
-    padding: 0 1px;
-  }
-</style>

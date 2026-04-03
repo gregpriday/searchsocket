@@ -26,8 +26,8 @@ jobs:
       - run: pnpm build
       - run: pnpm searchsocket index --changed-only
         env:
-          UPSTASH_SEARCH_REST_URL: ${{ secrets.UPSTASH_SEARCH_REST_URL }}
-          UPSTASH_SEARCH_REST_TOKEN: ${{ secrets.UPSTASH_SEARCH_REST_TOKEN }}
+          UPSTASH_VECTOR_REST_URL: ${{ secrets.UPSTASH_VECTOR_REST_URL }}
+          UPSTASH_VECTOR_REST_TOKEN: ${{ secrets.UPSTASH_VECTOR_REST_TOKEN }}
 ```
 
 ## 2. PR Dry Run
@@ -55,8 +55,8 @@ jobs:
       - run: pnpm build
       - run: pnpm searchsocket index --dry-run --changed-only
         env:
-          UPSTASH_SEARCH_REST_URL: ${{ secrets.UPSTASH_SEARCH_REST_URL }}
-          UPSTASH_SEARCH_REST_TOKEN: ${{ secrets.UPSTASH_SEARCH_REST_TOKEN }}
+          UPSTASH_VECTOR_REST_URL: ${{ secrets.UPSTASH_VECTOR_REST_URL }}
+          UPSTASH_VECTOR_REST_TOKEN: ${{ secrets.UPSTASH_VECTOR_REST_TOKEN }}
 ```
 
 ## 3. Preview Branch Scope Indexing
@@ -69,8 +69,8 @@ Example with `scope.mode = "env"`:
 - run: pnpm searchsocket index --changed-only
   env:
     SEARCHSOCKET_SCOPE: ${{ github.head_ref || github.ref_name }}
-    UPSTASH_SEARCH_REST_URL: ${{ secrets.UPSTASH_SEARCH_REST_URL }}
-    UPSTASH_SEARCH_REST_TOKEN: ${{ secrets.UPSTASH_SEARCH_REST_TOKEN }}
+    UPSTASH_VECTOR_REST_URL: ${{ secrets.UPSTASH_VECTOR_REST_URL }}
+    UPSTASH_VECTOR_REST_TOKEN: ${{ secrets.UPSTASH_VECTOR_REST_TOKEN }}
 ```
 
 ## 4. Scheduled Prune Job
@@ -106,8 +106,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm searchsocket prune --older-than 30d --apply
         env:
-          UPSTASH_SEARCH_REST_URL: ${{ secrets.UPSTASH_SEARCH_REST_URL }}
-          UPSTASH_SEARCH_REST_TOKEN: ${{ secrets.UPSTASH_SEARCH_REST_TOKEN }}
+          UPSTASH_VECTOR_REST_URL: ${{ secrets.UPSTASH_VECTOR_REST_URL }}
+          UPSTASH_VECTOR_REST_TOKEN: ${{ secrets.UPSTASH_VECTOR_REST_TOKEN }}
 ```
 
 ## 5. Vercel Build-Triggered Indexing
@@ -115,7 +115,7 @@ jobs:
 Use the build plugin + env flags:
 
 - Set `SEARCHSOCKET_AUTO_INDEX=1` in Vercel project env
-- Set `UPSTASH_SEARCH_REST_URL` and `UPSTASH_SEARCH_REST_TOKEN` in Vercel project env
+- Set `UPSTASH_VECTOR_REST_URL` and `UPSTASH_VECTOR_REST_TOKEN` in Vercel project env
 
 Your Vite plugin setup:
 

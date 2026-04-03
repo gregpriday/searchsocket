@@ -1,18 +1,16 @@
 # Using SearchSocket MCP with Claude Code over HTTP
 
-SearchSocket exposes an MCP (Model Context Protocol) endpoint through its SvelteKit hook handler. When your SvelteKit app is running — locally via `npm run dev` or deployed to Vercel, Cloudflare, etc. — the MCP endpoint is available at `/api/mcp` by default.
+SearchSocket exposes an MCP endpoint through its SvelteKit hook handler. Once your site is deployed to Vercel, Cloudflare, Netlify, or any other platform, the MCP endpoint is available at `/api/mcp` — ready for Claude Code to connect to.
 
-This guide covers setting up Claude Code to connect to that endpoint over HTTP.
+This is the recommended setup: deploy your site, index on build, and point Claude Code at the production endpoint. The index stays current with every deploy, and there's nothing to run locally.
 
-## Why HTTP over stdio?
+## Why HTTP?
 
-SearchSocket also supports stdio transport (spawning a local process), but HTTP is the recommended approach:
-
-- **No local process to manage** — the MCP server runs inside your existing SvelteKit app
-- **Works with deployed sites** — connect to production, staging, or preview deployments
+- **Always up to date** — the index refreshes on every deploy, so Claude Code always searches current content
+- **No local process** — the MCP server runs inside your deployed SvelteKit app
+- **Works everywhere** — connect to production, staging, or preview deployments
 - **Serverless-compatible** — each request is a stateless JSON-RPC POST, no persistent connection needed
-- **No env vars in MCP config** — credentials live in your SvelteKit app's environment, not in `.mcp.json`
-- **Same server serves everything** — search API, MCP, and your site all run on the same process
+- **No env vars in MCP config** — credentials live in your hosting platform's environment, not in `.mcp.json`
 
 ## Server-side setup
 
@@ -49,24 +47,7 @@ The transport uses `WebStandardStreamableHTTPServerTransport` from `@modelcontex
 
 Claude Code supports remote HTTP MCP servers natively. Add a `.mcp.json` file to your project root.
 
-### Local development
-
-Point to your local dev server:
-
-```json
-{
-  "mcpServers": {
-    "searchsocket": {
-      "type": "http",
-      "url": "http://localhost:5173/api/mcp"
-    }
-  }
-}
-```
-
-Make sure your dev server is running (`npm run dev`) before starting Claude Code.
-
-### Production (deployed site)
+### Deployed site (recommended)
 
 Point to your deployed site:
 
@@ -80,6 +61,25 @@ Point to your deployed site:
   }
 }
 ```
+
+The index stays current automatically — every deploy rebuilds the index via the Vite plugin.
+
+### Local development
+
+During development, you can point to your local dev server instead:
+
+```json
+{
+  "mcpServers": {
+    "searchsocket": {
+      "type": "http",
+      "url": "http://localhost:5173/api/mcp"
+    }
+  }
+}
+```
+
+Make sure your dev server is running (`pnpm dev`) before starting Claude Code.
 
 ### With API key authentication
 
@@ -187,8 +187,8 @@ For local development, you can also use stdio transport which spawns a local Sea
       "command": "npx",
       "args": ["searchsocket", "mcp"],
       "env": {
-        "UPSTASH_SEARCH_REST_URL": "${UPSTASH_SEARCH_REST_URL}",
-        "UPSTASH_SEARCH_REST_TOKEN": "${UPSTASH_SEARCH_REST_TOKEN}"
+        "UPSTASH_VECTOR_REST_URL": "${UPSTASH_VECTOR_REST_URL}",
+        "UPSTASH_VECTOR_REST_TOKEN": "${UPSTASH_VECTOR_REST_TOKEN}"
       }
     }
   }
