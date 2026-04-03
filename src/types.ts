@@ -132,6 +132,7 @@ export interface SearchSocketConfig {
     title?: string;
     description?: string;
     generateFull?: boolean;
+    serveMarkdownVariants?: boolean;
   };
   state?: {
     dir?: string;
@@ -267,6 +268,7 @@ export interface ResolvedSearchSocketConfig {
     title?: string;
     description?: string;
     generateFull: boolean;
+    serveMarkdownVariants: boolean;
   };
   state: {
     dir: string;

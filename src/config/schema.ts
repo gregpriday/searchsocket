@@ -171,7 +171,8 @@ export const searchSocketConfigSchema = z.object({
       outputPath: z.string().optional(),
       title: z.string().optional(),
       description: z.string().optional(),
-      generateFull: z.boolean().optional()
+      generateFull: z.boolean().optional(),
+      serveMarkdownVariants: z.boolean().optional()
     })
     .optional(),
   state: z

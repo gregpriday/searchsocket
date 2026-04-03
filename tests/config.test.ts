@@ -44,6 +44,13 @@ describe("createDefaultConfig", () => {
     expect(config.embedding.batchSize).toBe(100);
   });
 
+  it("has llmsTxt defaults with generateFull enabled", () => {
+    const config = createDefaultConfig("example");
+    expect(config.llmsTxt.generateFull).toBe(true);
+    expect(config.llmsTxt.serveMarkdownVariants).toBe(false);
+    expect(config.llmsTxt.enable).toBe(false);
+  });
+
   it("has search defaults", () => {
     const config = createDefaultConfig("example");
     expect(config.search.dualSearch).toBe(true);

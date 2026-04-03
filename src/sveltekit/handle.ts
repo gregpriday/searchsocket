@@ -54,6 +54,7 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
   let configPromise: Promise<ResolvedSearchSocketConfig> | null = null;
   let apiPath = options.path;
   let llmsServePath: string | null = null;
+  let serveMarkdownVariants = false;
   let mcpPath: string | undefined;
   let mcpApiKey: string | undefined;
   let mcpEnableJsonResponse = true;
@@ -84,6 +85,7 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
         if (config.llmsTxt.enable) {
           llmsServePath = "/" + config.llmsTxt.outputPath.replace(/^static\//, "");
+          serveMarkdownVariants = config.llmsTxt.serveMarkdownVariants;
         }
 
         if (config.api.rateLimit && !isServerless()) {
@@ -132,21 +134,32 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
   return async ({ event, resolve }: { event: any; resolve: (event: any) => Promise<Response> }) => {
     if (apiPath && !isApiPath(event.url.pathname, apiPath) && event.url.pathname !== llmsServePath) {
+      const isMarkdownVariant = event.request.method === "GET" && event.url.pathname.endsWith(".md");
+
       if (mcpPath && event.url.pathname === mcpPath) {
         return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
       }
       if (mcpPath) {
         // Config loaded and path matches neither endpoint
-        return resolve(event);
-      }
-      // Config not yet loaded — if config is pending or available, resolve to learn mcpPath
-      if (configPromise || options.config || options.rawConfig) {
-        await getConfig();
-        if (mcpPath && event.url.pathname === mcpPath) {
-          return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
+        if (serveMarkdownVariants && isMarkdownVariant) {
+          // fall through to main body for markdown variant handling
+        } else {
+          return resolve(event);
+        }
+      } else {
+        // Config not yet loaded — if config is pending or available, resolve to learn mcpPath
+        if (configPromise || options.config || options.rawConfig) {
+          await getConfig();
+          if (mcpPath && event.url.pathname === mcpPath) {
+            return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
+          }
+          if (!(serveMarkdownVariants && isMarkdownVariant)) {
+            return resolve(event);
+          }
+        } else {
+          return resolve(event);
         }
       }
-      return resolve(event);
     }
 
     const config = await getConfig();
@@ -163,6 +176,30 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
         });
       } catch {
         return resolve(event);
+      }
+    }
+
+    // Serve markdown variant of indexed pages (e.g. /docs/api.md → markdown for /docs/api)
+    if (serveMarkdownVariants && event.request.method === "GET" && event.url.pathname.endsWith(".md")) {
+      let rawPath: string;
+      try {
+        rawPath = decodeURIComponent(event.url.pathname.slice(0, -3));
+      } catch {
+        return resolve(event);
+      }
+      const scope = event.url.searchParams?.get("scope") ?? undefined;
+      try {
+        const engine = await getEngine();
+        const page = await engine.getPage(rawPath, scope);
+        return new Response(page.markdown, {
+          status: 200,
+          headers: { "content-type": "text/markdown; charset=utf-8" }
+        });
+      } catch (error) {
+        if (error instanceof SearchSocketError && error.status === 404) {
+          return resolve(event);
+        }
+        throw error;
       }
     }
 
