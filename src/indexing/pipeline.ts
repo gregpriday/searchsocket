@@ -257,6 +257,11 @@ export class IndexPipeline {
         continue;
       }
 
+      // Merge source-level tags (e.g. "component") into extracted tags
+      if (sourcePage.tags && sourcePage.tags.length > 0) {
+        extracted.tags = [...new Set([...extracted.tags, ...sourcePage.tags])];
+      }
+
       let accepted: ExtractedPage;
       if (this.hooks.transformPage) {
         const transformed = await this.hooks.transformPage(extracted);
