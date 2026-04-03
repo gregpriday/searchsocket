@@ -1043,10 +1043,11 @@ program
       process.stdout.write(`skipped (exists): ${path.relative(cwd, filePath)}\n`);
     }
 
-    if (result.written.length > 0) {
+    const firstWritten = result.written[0];
+    if (firstWritten) {
       process.stdout.write(`\nUsage:\n`);
-      const fileName = path.basename(result.written[0]!, ".svelte");
-      process.stdout.write(`  import ${fileName} from "${path.relative(cwd, result.written[0]!).replace(/\\/g, "/")}";\n`);
+      const fileName = path.basename(firstWritten, ".svelte");
+      process.stdout.write(`  import ${fileName} from "${path.relative(cwd, firstWritten).replace(/\\/g, "/")}";\n`);
     }
   });
 

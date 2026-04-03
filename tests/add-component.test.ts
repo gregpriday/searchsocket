@@ -56,10 +56,10 @@ describe("add-helpers", () => {
 
       expect(result.written).toHaveLength(1);
       expect(result.skipped).toHaveLength(0);
-      expect(result.written[0]).toMatch(/SearchDialog\.svelte$/);
-      expect(fs.existsSync(result.written[0])).toBe(true);
+      expect(result.written[0]!).toMatch(/SearchDialog\.svelte$/);
+      expect(fs.existsSync(result.written[0]!)).toBe(true);
 
-      const content = await fsp.readFile(result.written[0], "utf8");
+      const content = await fsp.readFile(result.written[0]!, "utf8");
       expect(content).toContain("createSearch");
       expect(content).toContain('role="combobox"');
       expect(content).toContain('role="listbox"');
@@ -69,9 +69,9 @@ describe("add-helpers", () => {
       const result = await copyComponent("search-input", tmpDir);
 
       expect(result.written).toHaveLength(1);
-      expect(result.written[0]).toMatch(/SearchInput\.svelte$/);
+      expect(result.written[0]!).toMatch(/SearchInput\.svelte$/);
 
-      const content = await fsp.readFile(result.written[0], "utf8");
+      const content = await fsp.readFile(result.written[0]!, "utf8");
       expect(content).toContain("createSearch");
       expect(content).toContain('role="combobox"');
     });
@@ -80,9 +80,9 @@ describe("add-helpers", () => {
       const result = await copyComponent("search-results", tmpDir);
 
       expect(result.written).toHaveLength(1);
-      expect(result.written[0]).toMatch(/SearchResults\.svelte$/);
+      expect(result.written[0]!).toMatch(/SearchResults\.svelte$/);
 
-      const content = await fsp.readFile(result.written[0], "utf8");
+      const content = await fsp.readFile(result.written[0]!, "utf8");
       expect(content).toContain("buildResultUrl");
       expect(content).not.toContain("createSearch");
     });
@@ -95,7 +95,7 @@ describe("add-helpers", () => {
       const result = await copyComponent("search-dialog", tmpDir);
       expect(result.written).toHaveLength(0);
       expect(result.skipped).toHaveLength(1);
-      expect(result.skipped[0]).toMatch(/SearchDialog\.svelte$/);
+      expect(result.skipped[0]!).toMatch(/SearchDialog\.svelte$/);
     });
 
     it("overwrites existing files with overwrite option", async () => {
@@ -136,7 +136,7 @@ describe("add-helpers", () => {
     it("templates use Svelte 5 syntax, not legacy", async () => {
       for (const name of listAvailableComponents()) {
         const result = await copyComponent(name as "search-dialog", tmpDir);
-        const content = await fsp.readFile(result.written[0], "utf8");
+        const content = await fsp.readFile(result.written[0]!, "utf8");
 
         // Svelte 5 runes
         expect(content).toContain("$props()");
@@ -151,7 +151,7 @@ describe("add-helpers", () => {
 
     it("search-dialog has ARIA combobox attributes", async () => {
       const result = await copyComponent("search-dialog", tmpDir);
-      const content = await fsp.readFile(result.written[0], "utf8");
+      const content = await fsp.readFile(result.written[0]!, "utf8");
 
       expect(content).toContain('role="combobox"');
       expect(content).toContain('role="listbox"');
@@ -166,7 +166,7 @@ describe("add-helpers", () => {
 
     it("search-dialog has keyboard navigation", async () => {
       const result = await copyComponent("search-dialog", tmpDir);
-      const content = await fsp.readFile(result.written[0], "utf8");
+      const content = await fsp.readFile(result.written[0]!, "utf8");
 
       expect(content).toContain("ArrowDown");
       expect(content).toContain("ArrowUp");
@@ -176,7 +176,7 @@ describe("add-helpers", () => {
 
     it("search-dialog uses highlight with mark, not @html", async () => {
       const result = await copyComponent("search-dialog", tmpDir);
-      const content = await fsp.readFile(result.written[0], "utf8");
+      const content = await fsp.readFile(result.written[0]!, "utf8");
 
       expect(content).toContain("<mark>");
       expect(content).toContain("highlightParts");
