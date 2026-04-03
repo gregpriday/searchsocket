@@ -91,7 +91,7 @@ describe("SearchEngine — metadata filters", () => {
     });
 
     expect(store.search).toHaveBeenCalledTimes(1);
-    const callArgs = store.search.mock.calls[0];
+    const callArgs = store.search.mock.calls[0]!;
     expect(callArgs[1].filter).toBe("meta.version = 2");
   });
 
@@ -116,8 +116,8 @@ describe("SearchEngine — metadata filters", () => {
     expect(store.search).toHaveBeenCalledTimes(1);
     expect(store.searchPages).toHaveBeenCalledTimes(1);
 
-    const chunkFilter = store.search.mock.calls[0][1].filter;
-    const pageFilter = store.searchPages.mock.calls[0][1].filter;
+    const chunkFilter = store.search.mock.calls[0]![1].filter;
+    const pageFilter = store.searchPages.mock.calls[0]![1].filter;
 
     // Both should have the same filter
     expect(chunkFilter).toBe(pageFilter);
@@ -140,7 +140,7 @@ describe("SearchEngine — metadata filters", () => {
 
     await engine.search({ q: "test", filters: {} });
 
-    const callArgs = store.search.mock.calls[0];
+    const callArgs = store.search.mock.calls[0]!;
     expect(callArgs[1].filter).toBeUndefined();
   });
 
@@ -159,7 +159,7 @@ describe("SearchEngine — metadata filters", () => {
 
     await engine.search({ q: "test" });
 
-    const callArgs = store.search.mock.calls[0];
+    const callArgs = store.search.mock.calls[0]!;
     expect(callArgs[1].filter).toBeUndefined();
   });
 });
