@@ -18,6 +18,8 @@ import type {
 import type { UpstashSearchStore } from "../vector/upstash";
 import type { RankedHit, PageResult } from "./ranking";
 import { toSnippet } from "../utils/text";
+import { isServerless } from "../core/serverless";
+import { logAnalyticsEvent } from "../analytics/logger";
 
 const requestSchema = z.object({
   q: z.string().trim().min(1),
@@ -152,6 +154,16 @@ export class SearchEngine {
     const searchMs = hrTimeMs(searchStart);
 
     const results = this.buildResults(ranked, topK, groupByPage, input.q);
+
+    if (this.config.analytics.enabled && !isServerless()) {
+      const logPath = path.join(this.cwd, this.config.state.dir, "analytics.jsonl");
+      logAnalyticsEvent(logPath, {
+        ts: new Date().toISOString(),
+        q: input.q,
+        results: results.length,
+        latencyMs: Math.round(hrTimeMs(totalStart))
+      });
+    }
 
     return {
       q: input.q,
