@@ -113,6 +113,28 @@ describe("buildEmbeddingTitle", () => {
     const chunk: Chunk = { ...baseChunk, headingLevel: undefined };
     expect(buildEmbeddingTitle(chunk)).toBeUndefined();
   });
+
+  it("appends sectionTitle when truncated by headingPathDepth", () => {
+    const chunk: Chunk = {
+      ...baseChunk,
+      sectionTitle: "Node.js",
+      headingLevel: 4,
+      headingPath: ["Installation", "Prerequisites"]  // truncated at depth 2, missing "Node.js"
+    };
+    const result = buildEmbeddingTitle(chunk);
+    expect(result).toBe("Getting Started Guide — Installation > Prerequisites > Node.js");
+  });
+
+  it("does not duplicate sectionTitle when path is not truncated", () => {
+    const chunk: Chunk = {
+      ...baseChunk,
+      sectionTitle: "Prerequisites",
+      headingLevel: 3,
+      headingPath: ["Installation", "Setup", "Prerequisites"]
+    };
+    const result = buildEmbeddingTitle(chunk);
+    expect(result).toBe("Getting Started Guide — Installation > Setup > Prerequisites");
+  });
 });
 
 describe("contentHash includes embedding title", () => {

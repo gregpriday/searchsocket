@@ -301,7 +301,12 @@ export function buildEmbeddingTitle(chunk: Chunk): string | undefined {
   if (!chunk.sectionTitle || chunk.headingLevel === undefined) return undefined;
 
   if (chunk.headingPath.length > 1) {
-    return `${chunk.title} — ${chunk.headingPath.join(" > ")}`;
+    const path = chunk.headingPath.join(" > ");
+    const lastInPath = chunk.headingPath[chunk.headingPath.length - 1];
+    if (lastInPath !== chunk.sectionTitle) {
+      return `${chunk.title} — ${path} > ${chunk.sectionTitle}`;
+    }
+    return `${chunk.title} — ${path}`;
   }
 
   return `${chunk.title} — ${chunk.sectionTitle}`;
