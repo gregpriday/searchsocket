@@ -14,9 +14,11 @@ import { SearchSocketError } from "./errors";
 import { IndexPipeline } from "./indexing/pipeline";
 import { runMcpServer } from "./mcp/server";
 import { SearchEngine } from "./search/engine";
+import { reciprocalRank, mrr } from "./search/quality-metrics";
+import { testFileSchema } from "./cli/test-schemas";
 import { createUpstashStore } from "./vector";
 import { sanitizeScopeName } from "./utils/text";
-import type { IndexStats, ResolvedSearchSocketConfig, Scope, ScopeInfo } from "./types";
+import type { IndexStats, ResolvedSearchSocketConfig, Scope, ScopeInfo, SearchResult } from "./types";
 import type { UpstashSearchStore } from "./vector/upstash";
 import { ensureMcpJson } from "./init-helpers";
 import { readAnalyticsLog, computeReport } from "./analytics/report";
@@ -854,6 +856,138 @@ program
 
     process.stdout.write("\nLATENCY (ms)\n");
     process.stdout.write(`  p50: ${report.latency.p50}   p95: ${report.latency.p95}   p99: ${report.latency.p99}   (from ${report.latency.count} events)\n`);
+  });
+
+
+program
+  .command("test")
+  .description("Run search quality assertions against the live index")
+  .option("--file <path>", "path to test file", "searchsocket.test.json")
+  .option("--scope <name>", "scope override")
+  .option("--top-k <n>", "results per query", "10")
+  .action(async (opts, command) => {
+    const rootOpts = getRootOptions(command);
+    const cwd = path.resolve(rootOpts?.cwd ?? process.cwd());
+    const topK = parsePositiveInt(opts.topK, "--top-k");
+
+    const filePath = path.resolve(cwd, opts.file);
+    let rawContent: string;
+    try {
+      rawContent = await fsp.readFile(filePath, "utf8");
+    } catch {
+      process.stderr.write(`error: test file not found: ${filePath}\n`);
+      process.exitCode = 1;
+      return;
+    }
+
+    let rawJson: unknown;
+    try {
+      rawJson = JSON.parse(rawContent);
+    } catch {
+      process.stderr.write(`error: invalid JSON in ${filePath}\n`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const parsed = testFileSchema.safeParse(rawJson);
+    if (!parsed.success) {
+      process.stderr.write(`error: invalid test file: ${parsed.error.issues[0]?.message ?? "unknown error"}\n`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const testCases = parsed.data;
+
+    const engine = await SearchEngine.create({
+      cwd,
+      configPath: rootOpts?.config
+    });
+
+    let passed = 0;
+    let failed = 0;
+    const mrrData: Array<{ results: SearchResult[]; relevant: string[] }> = [];
+
+    for (const tc of testCases) {
+      let results: SearchResult[];
+      try {
+        const response = await engine.search({
+          q: tc.query,
+          topK,
+          scope: opts.scope
+        });
+        results = response.results;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        process.stdout.write(`FAIL "${tc.query}" → search error: ${msg}\n`);
+        failed++;
+        continue;
+      }
+
+      if (tc.expect.topResult !== undefined) {
+        const expectedUrl = tc.expect.topResult;
+        const rank = results.findIndex((r) => r.url === expectedUrl) + 1;
+
+        mrrData.push({ results, relevant: [expectedUrl] });
+
+        if (rank === 1) {
+          process.stdout.write(`PASS "${tc.query}" → ${expectedUrl} at rank 1\n`);
+          passed++;
+        } else {
+          const detail = rank === 0 ? "not found" : `got rank ${rank}`;
+          process.stdout.write(`FAIL "${tc.query}" → expected ${expectedUrl} at rank 1, ${detail}\n`);
+          failed++;
+        }
+      }
+
+      if (tc.expect.inTop5 !== undefined) {
+        const expectedUrls = tc.expect.inTop5;
+        const top5Urls = results.slice(0, 5).map((r) => r.url);
+        const missing = expectedUrls.filter((url) => !top5Urls.includes(url));
+
+        mrrData.push({ results, relevant: expectedUrls });
+
+        if (missing.length === 0) {
+          process.stdout.write(`PASS "${tc.query}" → all expected URLs in top 5\n`);
+          passed++;
+        } else {
+          const missingDetail = missing
+            .map((url) => {
+              const rank = results.findIndex((r) => r.url === url) + 1;
+              return rank === 0 ? `${url} (not found)` : `${url} (rank ${rank})`;
+            })
+            .join(", ");
+          process.stdout.write(`FAIL "${tc.query}" → missing from top 5: ${missingDetail}\n`);
+          failed++;
+        }
+      }
+
+      if (tc.expect.maxResults !== undefined) {
+        const max = tc.expect.maxResults;
+        const actual = results.length;
+
+        if (actual <= max) {
+          process.stdout.write(`PASS "${tc.query}" → ${actual} results (max ${max})\n`);
+          passed++;
+        } else {
+          process.stdout.write(`FAIL "${tc.query}" → expected at most ${max} results, got ${actual}\n`);
+          failed++;
+        }
+      }
+    }
+
+    const total = passed + failed;
+    process.stdout.write(`\nresults: ${passed} passed, ${failed} failed of ${total} assertions\n`);
+
+    if (mrrData.length > 0) {
+      const mrrValue = mrr(mrrData);
+      process.stdout.write(`MRR: ${mrrValue.toFixed(4)}\n`);
+    }
+
+    process.stdout.write(`pass rate: ${total > 0 ? ((passed / total) * 100).toFixed(1) : "0.0"}%\n`);
+
+    if (failed > 0) {
+      process.exitCode = 1;
+    }
   });
 
 async function main(): Promise<void> {

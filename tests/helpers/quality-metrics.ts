@@ -3,33 +3,11 @@
  */
 import type { SearchResult } from "../../src/types";
 
+export { reciprocalRank, mrr } from "../../src/search/quality-metrics";
+
 export interface GradedJudgment {
   url: string;
   relevance: number; // 0–3
-}
-
-/**
- * Mean Reciprocal Rank — how high is the first relevant result?
- * Returns 1/rank of the first result whose URL appears in `relevant`.
- * Returns 0 if no relevant result is found.
- */
-export function reciprocalRank(results: SearchResult[], relevant: string[]): number {
-  const set = new Set(relevant);
-  for (let i = 0; i < results.length; i++) {
-    if (set.has(results[i]!.url)) {
-      return 1 / (i + 1);
-    }
-  }
-  return 0;
-}
-
-/**
- * Mean Reciprocal Rank across multiple queries.
- */
-export function mrr(queries: Array<{ results: SearchResult[]; relevant: string[] }>): number {
-  if (queries.length === 0) return 0;
-  const sum = queries.reduce((acc, q) => acc + reciprocalRank(q.results, q.relevant), 0);
-  return sum / queries.length;
 }
 
 /**
