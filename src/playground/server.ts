@@ -49,7 +49,7 @@ export async function runPlaygroundServer(
         aggregationCap: config.ranking.aggregationCap,
         aggregationDecay: config.ranking.aggregationDecay,
         minChunkScoreRatio: config.ranking.minChunkScoreRatio,
-        minScore: config.ranking.minScore,
+        minScoreRatio: config.ranking.minScoreRatio,
         scoreGapThreshold: config.ranking.scoreGapThreshold,
         weights: { ...config.ranking.weights },
       },

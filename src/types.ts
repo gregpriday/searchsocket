@@ -93,7 +93,6 @@ export interface SearchSocketConfig {
   search?: {
     dualSearch?: boolean;
     pageSearchWeight?: number;
-    hybridChunks?: boolean;
   };
   ranking?: {
     enableIncomingLinkBoost?: boolean;
@@ -105,7 +104,7 @@ export interface SearchSocketConfig {
     aggregationCap?: number;
     aggregationDecay?: number;
     minChunkScoreRatio?: number;
-    minScore?: number;
+    minScoreRatio?: number;
     scoreGapThreshold?: number;
     weights?: {
       incomingLinks?: number;
@@ -240,7 +239,6 @@ export interface ResolvedSearchSocketConfig {
   search: {
     dualSearch: boolean;
     pageSearchWeight: number;
-    hybridChunks: boolean;
   };
   ranking: {
     enableIncomingLinkBoost: boolean;
@@ -252,7 +250,7 @@ export interface ResolvedSearchSocketConfig {
     aggregationCap: number;
     aggregationDecay: number;
     minChunkScoreRatio: number;
-    minScore: number;
+    minScoreRatio: number;
     scoreGapThreshold: number;
     weights: {
       incomingLinks: number;
@@ -460,7 +458,7 @@ export interface RankingOverrides {
     aggregationCap?: number;
     aggregationDecay?: number;
     minChunkScoreRatio?: number;
-    minScore?: number;
+    minScoreRatio?: number;
     scoreGapThreshold?: number;
     weights?: {
       incomingLinks?: number;

@@ -33,7 +33,7 @@ const rankingOverridesSchema = z.object({
     aggregationCap: z.number().int().positive().optional(),
     aggregationDecay: z.number().min(0).max(1).optional(),
     minChunkScoreRatio: z.number().min(0).max(1).optional(),
-    minScore: z.number().min(0).max(1).optional(),
+    minScoreRatio: z.number().min(0).max(1).optional(),
     scoreGapThreshold: z.number().min(0).max(1).optional(),
     weights: z.object({
       incomingLinks: z.number().optional(),
@@ -438,9 +438,13 @@ export class SearchEngine {
       });
     } else {
       let filtered = ordered;
-      const minScore = cfg.ranking.minScore;
-      if (minScore > 0) {
-        filtered = ordered.filter((entry) => entry.finalScore >= minScore);
+      const minScoreRatio = cfg.ranking.minScoreRatio;
+      if (minScoreRatio > 0 && ordered.length > 0) {
+        const topScore = ordered[0]!.finalScore;
+        if (Number.isFinite(topScore) && topScore > 0) {
+          const threshold = topScore * minScoreRatio;
+          filtered = ordered.filter((entry) => entry.finalScore >= threshold);
+        }
       }
       return filtered.slice(0, topK).map(({ hit, finalScore, breakdown }) => {
         const result: SearchResult = {

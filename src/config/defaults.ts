@@ -72,8 +72,7 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
     },
     search: {
       dualSearch: true,
-      pageSearchWeight: 0.3,
-      hybridChunks: true
+      pageSearchWeight: 0.3
     },
     ranking: {
       enableIncomingLinkBoost: true,
@@ -85,7 +84,7 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       aggregationCap: 5,
       aggregationDecay: 0.5,
       minChunkScoreRatio: 0.5,
-      minScore: 0.3,
+      minScoreRatio: 0.70,
       scoreGapThreshold: 0.4,
       weights: {
         incomingLinks: 0.05,

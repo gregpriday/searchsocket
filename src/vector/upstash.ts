@@ -1,4 +1,4 @@
-import { QueryMode } from "@upstash/vector";
+import { QueryMode, FusionAlgorithm } from "@upstash/vector";
 import type { Index } from "@upstash/vector";
 import type {
   PageHit,
@@ -61,20 +61,17 @@ export interface UpstashSearchStoreOptions {
   index: Index;
   pagesNamespace: string;
   chunksNamespace: string;
-  hybridChunks?: boolean;
 }
 
 export class UpstashSearchStore {
   private readonly index: Index;
   private readonly pagesNs: ReturnType<Index["namespace"]>;
   private readonly chunksNs: ReturnType<Index["namespace"]>;
-  private readonly hybridChunks: boolean;
 
   constructor(opts: UpstashSearchStoreOptions) {
     this.index = opts.index;
     this.pagesNs = opts.index.namespace(opts.pagesNamespace);
     this.chunksNs = opts.index.namespace(opts.chunksNamespace);
-    this.hybridChunks = opts.hybridChunks ?? false;
   }
 
   async upsertChunks(
@@ -126,7 +123,8 @@ export class UpstashSearchStore {
       topK: opts.limit,
       includeMetadata: true,
       filter: filterParts.join(" AND "),
-      ...(this.hybridChunks ? { queryMode: QueryMode.HYBRID } : {})
+      queryMode: QueryMode.HYBRID,
+      fusionAlgorithm: FusionAlgorithm.DBSF
     });
 
     return results.map((doc) => ({
@@ -183,7 +181,8 @@ export class UpstashSearchStore {
       topK: opts.limit,
       includeMetadata: true,
       filter: filterParts.join(" AND "),
-      ...(this.hybridChunks ? { queryMode: QueryMode.HYBRID } : {})
+      queryMode: QueryMode.HYBRID,
+      fusionAlgorithm: FusionAlgorithm.DBSF
     });
 
     return results.map((doc) => ({
@@ -261,7 +260,9 @@ export class UpstashSearchStore {
         ...input,
         topK: opts.limit,
         includeMetadata: true,
-        filter: filterParts.join(" AND ")
+        filter: filterParts.join(" AND "),
+        queryMode: QueryMode.HYBRID,
+        fusionAlgorithm: FusionAlgorithm.DBSF
       });
     } catch {
       return [];

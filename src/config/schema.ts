@@ -111,8 +111,7 @@ export const searchSocketConfigSchema = z.object({
   search: z
     .object({
       dualSearch: z.boolean().optional(),
-      pageSearchWeight: z.number().min(0).max(1).optional(),
-      hybridChunks: z.boolean().optional()
+      pageSearchWeight: z.number().min(0).max(1).optional()
     })
     .optional(),
   ranking: z
@@ -126,7 +125,7 @@ export const searchSocketConfigSchema = z.object({
       aggregationCap: z.number().int().positive().optional(),
       aggregationDecay: z.number().min(0).max(1).optional(),
       minChunkScoreRatio: z.number().min(0).max(1).optional(),
-      minScore: z.number().min(0).max(1).optional(),
+      minScoreRatio: z.number().min(0).max(1).optional(),
       scoreGapThreshold: z.number().min(0).max(1).optional(),
       weights: z
         .object({

@@ -112,16 +112,15 @@ export function trimByScoreGap(
   if (results.length === 0) return results;
 
   const threshold = config.ranking.scoreGapThreshold;
-  const minScore = config.ranking.minScore;
+  const minScoreRatio = config.ranking.minScoreRatio;
 
-  // Check median score — if below minScore, no strong matches
-  if (minScore > 0 && results.length > 0) {
-    const sortedScores = results.map((r) => r.pageScore).sort((a, b) => a - b);
-    const mid = Math.floor(sortedScores.length / 2);
-    const median = sortedScores.length % 2 === 0
-      ? (sortedScores[mid - 1]! + sortedScores[mid]!) / 2
-      : sortedScores[mid]!;
-    if (median < minScore) return [];
+  // Relative ratio thresholding: drop results scoring below X% of the top result
+  if (minScoreRatio > 0 && results.length > 0) {
+    const topScore = results[0]!.pageScore;
+    if (Number.isFinite(topScore) && topScore > 0) {
+      const minThreshold = topScore * minScoreRatio;
+      results = results.filter((r) => r.pageScore >= minThreshold);
+    }
   }
 
   // Score-gap trimming
@@ -420,16 +419,15 @@ export function trimPagesByScoreGap(
   if (results.length === 0) return results;
 
   const threshold = config.ranking.scoreGapThreshold;
-  const minScore = config.ranking.minScore;
+  const minScoreRatio = config.ranking.minScoreRatio;
 
-  // Check median score — if below minScore, no strong matches
-  if (minScore > 0 && results.length > 0) {
-    const sortedScores = results.map((r) => r.finalScore).sort((a, b) => a - b);
-    const mid = Math.floor(sortedScores.length / 2);
-    const median = sortedScores.length % 2 === 0
-      ? (sortedScores[mid - 1]! + sortedScores[mid]!) / 2
-      : sortedScores[mid]!;
-    if (median < minScore) return [];
+  // Relative ratio thresholding: drop results scoring below X% of the top result
+  if (minScoreRatio > 0 && results.length > 0) {
+    const topScore = results[0]!.finalScore;
+    if (Number.isFinite(topScore) && topScore > 0) {
+      const minThreshold = topScore * minScoreRatio;
+      results = results.filter((r) => r.finalScore >= minThreshold);
+    }
   }
 
   // Score-gap trimming

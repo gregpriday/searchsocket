@@ -127,7 +127,7 @@
   var tunerParams = [];
 
   var PARAM_DEFS = [
-    { group: 'Thresholds', key: 'ranking.minScore', label: 'minScore', min: 0, max: 1, step: 0.01 },
+    { group: 'Thresholds', key: 'ranking.minScoreRatio', label: 'minScoreRatio', min: 0, max: 1, step: 0.01 },
     { group: 'Thresholds', key: 'ranking.scoreGapThreshold', label: 'scoreGapThreshold', min: 0, max: 1, step: 0.01 },
     { group: 'Thresholds', key: 'ranking.minChunkScoreRatio', label: 'minChunkScoreRatio', min: 0, max: 1, step: 0.01 },
     { group: 'Boosts', key: 'ranking.enableIncomingLinkBoost', label: 'incomingLinkBoost', type: 'bool' },
@@ -318,7 +318,7 @@
     if (changed.ranking) {
       lines.push('ranking: {');
       var r = changed.ranking;
-      var simpleKeys = ['enableIncomingLinkBoost', 'enableDepthBoost', 'aggregationCap', 'aggregationDecay', 'minChunkScoreRatio', 'minScore', 'scoreGapThreshold'];
+      var simpleKeys = ['enableIncomingLinkBoost', 'enableDepthBoost', 'aggregationCap', 'aggregationDecay', 'minChunkScoreRatio', 'minScoreRatio', 'scoreGapThreshold'];
       simpleKeys.forEach(function(k) {
         if (r[k] !== undefined) lines.push('  ' + k + ': ' + JSON.stringify(r[k]) + ',');
       });
