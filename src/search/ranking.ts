@@ -220,9 +220,7 @@ export function aggregateByPage(
 /**
  * Merge page-level search results with chunk-level search results.
  *
- * - For chunks whose page appeared in page search: blend score = (1 - w) * chunkScore + w * pageScore
- * - For chunks whose page did NOT appear in page search: keep original score
- * - For pages found ONLY by page search (no matching chunks): create synthetic RankedHit entries
+ * @deprecated Use rankPageHits + per-page chunk retrieval instead (page-first pipeline).
  */
 export function mergePageAndChunkResults(
   pageHits: PageHit[],
@@ -295,4 +293,158 @@ export function mergePageAndChunkResults(
     const delta = b.finalScore - a.finalScore;
     return Number.isNaN(delta) ? 0 : delta;
   });
+}
+
+/**
+ * Page-first ranking: rank pages by their page-level embedding similarity,
+ * then apply page-level boosts (pageWeights, depth, incoming links, title match, etc.)
+ */
+export interface RankedPage {
+  url: string;
+  title: string;
+  description: string;
+  routeFile: string;
+  depth: number;
+  incomingLinks: number;
+  tags: string[];
+  baseScore: number;
+  finalScore: number;
+  publishedAt?: number;
+  breakdown?: PageScoreBreakdown;
+}
+
+export interface PageScoreBreakdown {
+  baseScore: number;
+  pageWeight: number;
+  incomingLinkBoost: number;
+  depthBoost: number;
+  titleMatchBoost: number;
+  freshnessBoost: number;
+}
+
+export function rankPageHits(
+  pageHits: PageHit[],
+  config: ResolvedSearchSocketConfig,
+  query?: string,
+  debug?: boolean
+): RankedPage[] {
+  const normalizedQuery = query ? normalizeForTitleMatch(query) : "";
+  const titleMatchWeight = config.ranking.weights.titleMatch;
+
+  return pageHits
+    .map((hit) => {
+      const baseScore = Number.isFinite(hit.score) ? hit.score : Number.NEGATIVE_INFINITY;
+      let score = baseScore;
+
+      let incomingLinkBoostValue = 0;
+      if (config.ranking.enableIncomingLinkBoost) {
+        const incomingBoost = Math.log(1 + nonNegativeOrZero(hit.incomingLinks));
+        incomingLinkBoostValue = incomingBoost * config.ranking.weights.incomingLinks;
+        score += incomingLinkBoostValue;
+      }
+
+      let depthBoostValue = 0;
+      if (config.ranking.enableDepthBoost) {
+        const depthBoost = 1 / (1 + nonNegativeOrZero(hit.depth));
+        depthBoostValue = depthBoost * config.ranking.weights.depth;
+        score += depthBoostValue;
+      }
+
+      let titleMatchBoostValue = 0;
+      if (normalizedQuery && titleMatchWeight > 0) {
+        const normalizedTitle = normalizeForTitleMatch(hit.title);
+        if (normalizedQuery.length > 0 && normalizedTitle.length > 0 &&
+            (normalizedTitle.includes(normalizedQuery) || normalizedQuery.includes(normalizedTitle))) {
+          titleMatchBoostValue = titleMatchWeight;
+          score += titleMatchBoostValue;
+        }
+      }
+
+      let freshnessBoostValue = 0;
+      if (config.ranking.enableFreshnessBoost) {
+        const publishedAt = hit.publishedAt;
+        if (typeof publishedAt === "number" && Number.isFinite(publishedAt)) {
+          const daysSince = Math.max(0, (Date.now() - publishedAt) / 86_400_000);
+          const decay = 1 / (1 + nonNegativeOrZero(daysSince) * config.ranking.freshnessDecayRate);
+          freshnessBoostValue = decay * config.ranking.weights.freshness;
+          score += freshnessBoostValue;
+        }
+      }
+
+      // Apply page weight multiplier
+      const pageWeight = findPageWeight(hit.url, config.ranking.pageWeights);
+      if (pageWeight !== 1) {
+        score *= pageWeight;
+      }
+
+      const result: RankedPage = {
+        url: hit.url,
+        title: hit.title,
+        description: hit.description,
+        routeFile: hit.routeFile,
+        depth: hit.depth,
+        incomingLinks: hit.incomingLinks,
+        tags: hit.tags,
+        baseScore,
+        finalScore: Number.isFinite(score) ? score : Number.NEGATIVE_INFINITY,
+        publishedAt: hit.publishedAt
+      };
+
+      if (debug) {
+        result.breakdown = {
+          baseScore,
+          pageWeight,
+          incomingLinkBoost: incomingLinkBoostValue,
+          depthBoost: depthBoostValue,
+          titleMatchBoost: titleMatchBoostValue,
+          freshnessBoost: freshnessBoostValue,
+        };
+      }
+
+      return result;
+    })
+    .filter((p) => findPageWeight(p.url, config.ranking.pageWeights) !== 0)
+    .sort((a, b) => {
+      const delta = b.finalScore - a.finalScore;
+      return Number.isNaN(delta) ? 0 : delta;
+    });
+}
+
+/**
+ * Trim ranked pages by score gap (same logic as trimByScoreGap but for RankedPage[]).
+ */
+export function trimPagesByScoreGap(
+  results: RankedPage[],
+  config: ResolvedSearchSocketConfig
+): RankedPage[] {
+  if (results.length === 0) return results;
+
+  const threshold = config.ranking.scoreGapThreshold;
+  const minScore = config.ranking.minScore;
+
+  // Check median score — if below minScore, no strong matches
+  if (minScore > 0 && results.length > 0) {
+    const sortedScores = results.map((r) => r.finalScore).sort((a, b) => a - b);
+    const mid = Math.floor(sortedScores.length / 2);
+    const median = sortedScores.length % 2 === 0
+      ? (sortedScores[mid - 1]! + sortedScores[mid]!) / 2
+      : sortedScores[mid]!;
+    if (median < minScore) return [];
+  }
+
+  // Score-gap trimming
+  if (threshold > 0 && results.length > 1) {
+    for (let i = 1; i < results.length; i++) {
+      const prev = results[i - 1]!.finalScore;
+      const current = results[i]!.finalScore;
+      if (prev > 0) {
+        const gap = (prev - current) / prev;
+        if (gap >= threshold) {
+          return results.slice(0, i);
+        }
+      }
+    }
+  }
+
+  return results;
 }

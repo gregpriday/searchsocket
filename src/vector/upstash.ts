@@ -150,6 +150,63 @@ export class UpstashSearchStore {
     }));
   }
 
+  async searchChunksByUrl(
+    vector: number[],
+    url: string,
+    opts: {
+      limit: number;
+      filter?: string;
+    },
+    scope: Scope
+  ): Promise<VectorHit[]> {
+    const filterParts = [
+      `projectId = '${scope.projectId}'`,
+      `scopeName = '${scope.scopeName}'`,
+      `type = 'chunk'`,
+      `url = '${url}'`
+    ];
+    if (opts.filter) {
+      filterParts.push(opts.filter);
+    }
+
+    const results = await this.index.query<ChunkVectorMetadata>({
+      vector,
+      topK: opts.limit,
+      includeMetadata: true,
+      filter: filterParts.join(" AND ")
+    });
+
+    return results.map((doc) => ({
+      id: String(doc.id),
+      score: doc.score,
+      metadata: {
+        projectId: doc.metadata?.projectId ?? "",
+        scopeName: doc.metadata?.scopeName ?? "",
+        url: doc.metadata?.url ?? "",
+        path: doc.metadata?.path ?? "",
+        title: doc.metadata?.title ?? "",
+        sectionTitle: doc.metadata?.sectionTitle ?? "",
+        headingPath: doc.metadata?.headingPath
+          ? String(doc.metadata.headingPath).split(" > ").filter(Boolean)
+          : [],
+        snippet: doc.metadata?.snippet ?? "",
+        chunkText: doc.metadata?.chunkText ?? "",
+        ordinal: doc.metadata?.ordinal ?? 0,
+        contentHash: doc.metadata?.contentHash ?? "",
+        depth: doc.metadata?.depth ?? 0,
+        incomingLinks: doc.metadata?.incomingLinks ?? 0,
+        routeFile: doc.metadata?.routeFile ?? "",
+        tags: doc.metadata?.tags ?? [],
+        description: doc.metadata?.description || undefined,
+        keywords: doc.metadata?.keywords?.length
+          ? doc.metadata.keywords
+          : undefined,
+        publishedAt: typeof doc.metadata?.publishedAt === "number" ? doc.metadata.publishedAt : undefined,
+        incomingAnchorText: doc.metadata?.incomingAnchorText || undefined
+      }
+    }));
+  }
+
   async searchPages(
     vector: number[],
     opts: {
