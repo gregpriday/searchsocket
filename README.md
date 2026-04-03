@@ -610,6 +610,8 @@ pnpm searchsocket search --q "upstash search integration" --top-k 5
 
 SearchSocket provides an **MCP server** for integration with Claude Code, Claude Desktop, and other MCP-compatible AI tools. This gives AI assistants direct access to your indexed site content for semantic search and page retrieval.
 
+> **Claude Code over HTTP**: For the recommended setup using SearchSocket's built-in HTTP MCP endpoint (no local process, works with deployed sites), see [docs/mcp-claude-code.md](docs/mcp-claude-code.md).
+
 ### Tools
 
 **`search(query, opts?)`**
