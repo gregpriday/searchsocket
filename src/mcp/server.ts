@@ -286,6 +286,12 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<void
   if (options.access) config.mcp.access = options.access;
   if (options.apiKey) config.mcp.http.apiKey = options.apiKey;
 
+  if (config.mcp.access === "public" && !resolveApiKey(config)) {
+    throw new Error(
+      'MCP access is "public" but no API key is configured. Pass --api-key or set mcp.http.apiKey / mcp.http.apiKeyEnv in config.'
+    );
+  }
+
   const resolvedTransport = options.transport ?? config.mcp.transport;
 
   // For stdio transport, redirect ALL output to stderr before server initialization

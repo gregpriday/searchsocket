@@ -4,7 +4,7 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { config as dotenvConfig } from "dotenv";
 import chokidar from "chokidar";
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import pkg from "../package.json";
 import { writeMinimalConfig, loadConfig, mergeConfig } from "./config/load";
 import { Logger } from "./core/logger";
@@ -753,7 +753,7 @@ program
   .option("--transport <transport>", "stdio|http", "stdio")
   .option("--port <n>", "HTTP port", "3338")
   .option("--path <path>", "HTTP path", "/mcp")
-  .option("--access <mode>", "public|private access mode")
+  .addOption(new Option("--access <mode>", "access mode").choices(["public", "private"]))
   .option("--api-key <key>", "API key for public access mode")
   .action(async (opts, command) => {
     const rootOpts = getRootOptions(command);

@@ -605,4 +605,20 @@ describe("startHttpServer access modes", () => {
     );
     expect(mockRes.status).toHaveBeenCalledWith(401);
   });
+
+  it("throws when CLI sets access to public without apiKey", async () => {
+    const config = {
+      mcp: {
+        access: "private" as const,
+        transport: "http" as const,
+        http: { port: 3338, path: "/mcp" }
+      }
+    };
+    mocks.loadConfig.mockResolvedValue(config);
+    mocks.createEngine.mockResolvedValue({ getConfig: () => config });
+
+    await expect(
+      runMcpServer({ transport: "http", access: "public" })
+    ).rejects.toThrow("no API key");
+  });
 });
