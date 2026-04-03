@@ -1,3 +1,5 @@
+export type Awaitable<T> = T | Promise<T>;
+
 export type ScopeMode = "fixed" | "git" | "env";
 export type SourceMode = "static-output" | "crawl" | "content-files" | "build";
 
@@ -432,6 +434,13 @@ export interface IndexStats {
   routeExact: number;
   routeBestEffort: number;
   stageTimingsMs: Record<string, number>;
+}
+
+export interface IndexingHooks {
+  transformPage?: (page: ExtractedPage) => Awaitable<ExtractedPage | null>;
+  transformChunk?: (chunk: Chunk) => Awaitable<Chunk | null>;
+  beforeIndex?: (chunks: Chunk[]) => Awaitable<Chunk[]>;
+  afterIndex?: (stats: IndexStats) => Awaitable<void>;
 }
 
 export interface IndexOptions {

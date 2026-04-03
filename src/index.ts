@@ -1,5 +1,7 @@
 export type {
+  Awaitable,
   Chunk,
+  IndexingHooks,
   IndexOptions,
   IndexStats,
   ResolvedSearchSocketConfig,
