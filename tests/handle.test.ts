@@ -1240,6 +1240,55 @@ describe("searchsocketHandle markdown variant serving", () => {
     expect(response.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
     expect(await response.text()).toBe("# Install");
   });
+
+  it("decodes URL-encoded paths correctly", async () => {
+    const mockGetPage = vi.fn().mockResolvedValue({
+      url: "/docs/getting started",
+      frontmatter: {},
+      markdown: "# Getting Started"
+    });
+
+    const config = makeConfig({
+      llmsTxt: {
+        enable: true,
+        outputPath: "static/llms.txt",
+        generateFull: true,
+        serveMarkdownVariants: true
+      }
+    } as Partial<ResolvedSearchSocketConfig>);
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      getPage: mockGetPage
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("fallback"));
+    const event = makeEvent({ pathname: "/docs/getting%20started.md", method: "GET" });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(200);
+    expect(mockGetPage).toHaveBeenCalledWith("/docs/getting started", undefined);
+  });
+
+  it("falls through on malformed percent-encoding", async () => {
+    const config = makeConfig({
+      llmsTxt: {
+        enable: true,
+        outputPath: "static/llms.txt",
+        generateFull: true,
+        serveMarkdownVariants: true
+      }
+    } as Partial<ResolvedSearchSocketConfig>);
+
+    const handle = searchsocketHandle({ config });
+    const resolveResult = new Response("fallback");
+    const resolve = vi.fn().mockResolvedValue(resolveResult);
+    const event = makeEvent({ pathname: "/docs/%ZZ.md", method: "GET" });
+
+    const response = await handle({ event, resolve });
+    expect(resolve).toHaveBeenCalled();
+    expect(await response.text()).toBe("fallback");
+  });
 });
 
 describe("MCP endpoint", () => {
