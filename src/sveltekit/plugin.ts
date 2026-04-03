@@ -1,6 +1,7 @@
 import path from "node:path";
 import { IndexPipeline } from "../indexing/pipeline";
 import { Logger } from "../core/logger";
+import type { IndexingHooks } from "../types";
 
 interface MinimalVitePlugin {
   name: string;
@@ -20,6 +21,7 @@ export interface SearchSocketAutoIndexOptions {
   dryRun?: boolean;
   scope?: string;
   verbose?: boolean;
+  hooks?: IndexingHooks;
 }
 
 function shouldRunAutoIndex(options: SearchSocketAutoIndexOptions): boolean {
@@ -75,7 +77,8 @@ export function searchsocketVitePlugin(options: SearchSocketAutoIndexOptions = {
         const pipeline = await IndexPipeline.create({
           cwd,
           configPath: options.configPath,
-          logger
+          logger,
+          hooks: options.hooks
         });
 
         const stats = await pipeline.run({

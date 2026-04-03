@@ -24,6 +24,7 @@ import type {
   Chunk,
   ExtractedPage,
   IndexedPage,
+  IndexingHooks,
   IndexOptions,
   IndexStats,
   PageRecord,
@@ -88,6 +89,7 @@ interface IndexPipelineOptions {
   config?: ResolvedSearchSocketConfig;
   store?: UpstashSearchStore;
   logger?: Logger;
+  hooks?: IndexingHooks;
 }
 
 export class IndexPipeline {
@@ -95,17 +97,20 @@ export class IndexPipeline {
   private readonly config: ResolvedSearchSocketConfig;
   private readonly store: UpstashSearchStore;
   private readonly logger: Logger;
+  private readonly hooks: IndexingHooks;
 
   private constructor(options: {
     cwd: string;
     config: ResolvedSearchSocketConfig;
     store: UpstashSearchStore;
     logger: Logger;
+    hooks: IndexingHooks;
   }) {
     this.cwd = options.cwd;
     this.config = options.config;
     this.store = options.store;
     this.logger = options.logger;
+    this.hooks = options.hooks;
   }
 
   static async create(options: IndexPipelineOptions = {}): Promise<IndexPipeline> {
@@ -117,7 +122,8 @@ export class IndexPipeline {
       cwd,
       config,
       store,
-      logger: options.logger ?? new Logger()
+      logger: options.logger ?? new Logger(),
+      hooks: options.hooks ?? {}
     });
   }
 
@@ -251,9 +257,18 @@ export class IndexPipeline {
         continue;
       }
 
-      extractedPages.push(extracted);
+      if (this.hooks.transformPage) {
+        const transformed = await this.hooks.transformPage(extracted);
+        if (transformed === null) {
+          this.logger.debug(`Page ${sourcePage.url} skipped by transformPage hook`);
+          continue;
+        }
+        extractedPages.push(transformed);
+      } else {
+        extractedPages.push(extracted);
+      }
       this.logger.event("page_extracted", {
-        url: extracted.url
+        url: extractedPages[extractedPages.length - 1].url
       });
     }
 
@@ -428,6 +443,19 @@ export class IndexPipeline {
       chunks = chunks.slice(0, maxChunks);
     }
 
+    if (this.hooks.transformChunk) {
+      const transformed: Chunk[] = [];
+      for (const chunk of chunks) {
+        const result = await this.hooks.transformChunk(chunk);
+        if (result === null) {
+          this.logger.debug(`Chunk ${chunk.chunkKey} skipped by transformChunk hook`);
+          continue;
+        }
+        transformed.push(result);
+      }
+      chunks = transformed;
+    }
+
     for (const chunk of chunks) {
       this.logger.event("chunked", {
         url: chunk.url,
@@ -443,7 +471,7 @@ export class IndexPipeline {
       currentChunkMap.set(chunk.chunkKey, chunk);
     }
 
-    const changedChunks = chunks.filter((chunk) => {
+    let changedChunks = chunks.filter((chunk) => {
       if (options.force) {
         return true;
       }
@@ -461,6 +489,10 @@ export class IndexPipeline {
     });
 
     const deletes = [...existingHashes.keys()].filter((chunkKey) => !currentChunkMap.has(chunkKey));
+
+    if (this.hooks.beforeIndex) {
+      changedChunks = await this.hooks.beforeIndex(changedChunks);
+    }
 
     this.logger.info(`Changes detected: ${changedChunks.length} changed, ${deletes.length} deleted, ${chunks.length - changedChunks.length} unchanged`);
 
@@ -532,7 +564,7 @@ export class IndexPipeline {
 
     this.logger.info("Done.");
 
-    return {
+    const stats: IndexStats = {
       pagesProcessed: pages.length,
       pagesChanged,
       pagesDeleted,
@@ -544,5 +576,11 @@ export class IndexPipeline {
       routeBestEffort,
       stageTimingsMs
     };
+
+    if (this.hooks.afterIndex) {
+      await this.hooks.afterIndex(stats);
+    }
+
+    return stats;
   }
 }
