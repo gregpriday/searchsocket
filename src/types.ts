@@ -87,6 +87,11 @@ export interface SearchSocketConfig {
     apiKeyEnv?: string;
     images?: {
       enable?: boolean;
+      model?: string;
+      maxPerPage?: number;
+      minWidth?: number;
+      minHeight?: number;
+      apiKeyEnv?: string;
     };
     batchSize?: number;
   };
@@ -233,6 +238,11 @@ export interface ResolvedSearchSocketConfig {
     apiKeyEnv: string;
     images: {
       enable: boolean;
+      model: string;
+      maxPerPage: number;
+      minWidth: number;
+      minHeight: number;
+      apiKeyEnv?: string;
     };
     batchSize: number;
   };
@@ -373,6 +383,9 @@ export interface Chunk {
   routeFile: string;
   tags: string[];
   contentHash: string;
+  contentType?: "text" | "image";
+  imageUrl?: string;
+  imageAlt?: string;
   description?: string;
   keywords?: string[];
   publishedAt?: number;
@@ -536,6 +549,7 @@ export interface IndexStats {
   deletes: number;
   routeExact: number;
   routeBestEffort: number;
+  imagesIndexed?: number;
   stageTimingsMs: Record<string, number>;
 }
 

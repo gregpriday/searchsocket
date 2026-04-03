@@ -102,7 +102,12 @@ export const searchSocketConfigSchema = z.object({
       apiKeyEnv: z.string().min(1).optional(),
       images: z
         .object({
-          enable: z.boolean().optional()
+          enable: z.boolean().optional(),
+          model: z.string().optional(),
+          maxPerPage: z.number().int().positive().optional(),
+          minWidth: z.number().int().nonnegative().optional(),
+          minHeight: z.number().int().nonnegative().optional(),
+          apiKeyEnv: z.string().min(1).optional()
         })
         .optional(),
       batchSize: z.number().int().positive().optional()

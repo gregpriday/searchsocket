@@ -7,6 +7,7 @@ import { createUpstashStore } from "../vector";
 import { UpstashSearchStore } from "../vector/upstash";
 import { buildEmbeddingText, chunkPage } from "./chunker";
 import { extractFromHtml, extractFromMarkdown } from "./extractor";
+import { extractImageCandidates, describeImages } from "./image-describer";
 import { buildRoutePatterns, mapUrlToRoute } from "./route-mapper";
 import { loadBuildPages } from "./sources/build";
 import { loadContentFilesPages } from "./sources/content-files";
@@ -621,6 +622,52 @@ export class IndexPipeline {
     stageEnd("chunk", chunkStart);
     this.logger.info(`Chunked into ${chunks.length} chunk${chunks.length === 1 ? "" : "s"} (${stageTimingsMs["chunk"]}ms)`);
 
+    // --- Image indexing stage ---
+    let imagesIndexed = 0;
+    if (this.config.embedding.images.enable) {
+      const imageStart = stageStart();
+      this.logger.info("Generating image descriptions...");
+
+      // Build a map of pageUrl → rawHtml from source pages that have HTML
+      const htmlByUrl = new Map<string, string>();
+      for (const sp of filteredSourcePages) {
+        if (sp.html) {
+          htmlByUrl.set(normalizeUrlPath(sp.url), sp.html);
+        }
+      }
+
+      // Only process pages that made it into indexablePages
+      const indexableUrls = new Set(indexablePages.map((p) => p.url));
+
+      for (const page of pages) {
+        if (!indexableUrls.has(page.url)) continue;
+        const rawHtml = htmlByUrl.get(page.url);
+        if (!rawHtml) continue;
+
+        const candidates = extractImageCandidates(rawHtml, page.url, this.config);
+        if (candidates.length === 0) continue;
+
+        const imageChunks = await describeImages({
+          candidates,
+          pageUrl: page.url,
+          pageTitle: page.title,
+          pageDepth: page.depth,
+          pageTags: page.tags,
+          pageRouteFile: page.routeFile,
+          pageIncomingLinks: page.incomingLinks,
+          scope,
+          config: this.config,
+          logger: this.logger
+        });
+
+        chunks.push(...imageChunks);
+        imagesIndexed += imageChunks.length;
+      }
+
+      stageEnd("images", imageStart);
+      this.logger.info(`Generated ${imagesIndexed} image description${imagesIndexed === 1 ? "" : "s"} (${stageTimingsMs["images"]}ms)`);
+    }
+
     const currentChunkMap = new Map<string, Chunk>();
     for (const chunk of chunks) {
       currentChunkMap.set(chunk.chunkKey, chunk);
@@ -679,7 +726,12 @@ export class IndexPipeline {
           keywords: chunk.keywords ?? [],
           publishedAt: chunk.publishedAt ?? null,
           incomingAnchorText: chunk.incomingAnchorText ?? "",
-          ...(chunk.meta && Object.keys(chunk.meta).length > 0 ? { meta: chunk.meta } : {})
+          ...(chunk.meta && Object.keys(chunk.meta).length > 0 ? { meta: chunk.meta } : {}),
+          ...(chunk.contentType === "image" ? {
+            type: "image" as const,
+            imageSrc: chunk.imageUrl ?? "",
+            imageAlt: chunk.imageAlt ?? ""
+          } : {})
         }
       }));
 
@@ -719,6 +771,7 @@ export class IndexPipeline {
       deletes: deletes.length,
       routeExact,
       routeBestEffort,
+      ...(imagesIndexed > 0 ? { imagesIndexed } : {}),
       stageTimingsMs
     };
 

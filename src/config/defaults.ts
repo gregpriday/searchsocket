@@ -66,7 +66,11 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       taskType: "RETRIEVAL_DOCUMENT",
       apiKeyEnv: "GEMINI_API_KEY",
       images: {
-        enable: false
+        enable: false,
+        model: "gemini-2.0-flash",
+        maxPerPage: 10,
+        minWidth: 50,
+        minHeight: 50
       },
       batchSize: 100
     },
