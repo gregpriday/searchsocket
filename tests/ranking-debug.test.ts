@@ -41,6 +41,7 @@ describe("rankHits debug mode", () => {
     expect(typeof ranked[0]!.breakdown!.incomingLinkBoost).toBe("number");
     expect(typeof ranked[0]!.breakdown!.depthBoost).toBe("number");
     expect(typeof ranked[0]!.breakdown!.titleMatchBoost).toBe("number");
+    expect(typeof ranked[0]!.breakdown!.anchorTextMatchBoost).toBe("number");
   });
 
   it("does not include breakdown when debug is false", () => {
@@ -59,7 +60,7 @@ describe("rankHits debug mode", () => {
     const hits = [makeHit({ score: 0.7, url: "/a", incomingLinks: 10, depth: 3, title: "Test Query" })];
     const ranked = rankHits(hits, config, "test query", true);
     const b = ranked[0]!.breakdown!;
-    const sum = b.baseScore + b.incomingLinkBoost + b.depthBoost + b.titleMatchBoost;
+    const sum = b.baseScore + b.incomingLinkBoost + b.depthBoost + b.titleMatchBoost + b.anchorTextMatchBoost;
     expect(ranked[0]!.finalScore).toBeCloseTo(sum, 10);
   });
 
@@ -73,5 +74,19 @@ describe("rankHits debug mode", () => {
     const hits = [makeHit({ score: 0.7, url: "/about", title: "About" })];
     const ranked = rankHits(hits, config, "recipes", true);
     expect(ranked[0]!.breakdown!.titleMatchBoost).toBe(0);
+  });
+
+  it("shows anchor text match boost when enabled and matching", () => {
+    const anchorConfig = createDefaultConfig("test");
+    anchorConfig.ranking.enableAnchorTextBoost = true;
+    const hits = [makeHit({ score: 0.7, url: "/install", incomingAnchorText: "installation guide" })];
+    const ranked = rankHits(hits, anchorConfig, "installation guide", true);
+    expect(ranked[0]!.breakdown!.anchorTextMatchBoost).toBeGreaterThan(0);
+  });
+
+  it("shows zero anchor text boost when disabled", () => {
+    const hits = [makeHit({ score: 0.7, url: "/install", incomingAnchorText: "installation guide" })];
+    const ranked = rankHits(hits, config, "installation guide", true);
+    expect(ranked[0]!.breakdown!.anchorTextMatchBoost).toBe(0);
   });
 });

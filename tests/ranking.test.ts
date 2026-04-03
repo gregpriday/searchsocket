@@ -409,6 +409,81 @@ describe("title-match boost", () => {
   });
 });
 
+describe("anchor-text-match boost", () => {
+  it("does not apply boost when enableAnchorTextBoost is false (default)", () => {
+    const config = createDefaultConfig("test");
+    const hits = [
+      makeHit({ score: 0.7, url: "/install", incomingAnchorText: "installation guide" }),
+      makeHit({ score: 0.75, url: "/about", title: "About Us" })
+    ];
+
+    const ranked = rankHits(hits, config, "installation guide");
+    // Default has enableAnchorTextBoost: false, so /about wins with higher base score
+    expect(ranked[0]?.hit.metadata.url).toBe("/about");
+  });
+
+  it("boosts hits when anchor text matches query and feature is enabled", () => {
+    const config = createDefaultConfig("test");
+    config.ranking.enableAnchorTextBoost = true;
+    const hits = [
+      makeHit({ score: 0.7, url: "/install", incomingAnchorText: "installation guide" }),
+      makeHit({ score: 0.75, url: "/about", title: "About Us" })
+    ];
+
+    const ranked = rankHits(hits, config, "installation guide");
+    expect(ranked[0]?.hit.metadata.url).toBe("/install");
+  });
+
+  it("normalizes case and punctuation for anchor text matching", () => {
+    const config = createDefaultConfig("test");
+    config.ranking.enableAnchorTextBoost = true;
+    const hits = [
+      makeHit({ score: 0.7, url: "/install", incomingAnchorText: "Installation Guide!" }),
+      makeHit({ score: 0.75, url: "/about" })
+    ];
+
+    const ranked = rankHits(hits, config, "installation guide");
+    expect(ranked[0]?.hit.metadata.url).toBe("/install");
+  });
+
+  it("does not crash with undefined incomingAnchorText", () => {
+    const config = createDefaultConfig("test");
+    config.ranking.enableAnchorTextBoost = true;
+    const hits = [
+      makeHit({ score: 0.7, url: "/no-anchor" }),
+      makeHit({ score: 0.6, url: "/also-none" })
+    ];
+
+    const ranked = rankHits(hits, config, "test query");
+    expect(ranked.length).toBe(2);
+    expect(Number.isFinite(ranked[0]?.finalScore)).toBe(true);
+  });
+
+  it("matches when query is substring of anchor text", () => {
+    const config = createDefaultConfig("test");
+    config.ranking.enableAnchorTextBoost = true;
+    const hits = [
+      makeHit({ score: 0.7, url: "/install", incomingAnchorText: "complete installation guide for beginners" }),
+      makeHit({ score: 0.75, url: "/other" })
+    ];
+
+    const ranked = rankHits(hits, config, "installation guide");
+    expect(ranked[0]?.hit.metadata.url).toBe("/install");
+  });
+
+  it("matches when anchor text is substring of query", () => {
+    const config = createDefaultConfig("test");
+    config.ranking.enableAnchorTextBoost = true;
+    const hits = [
+      makeHit({ score: 0.7, url: "/install", incomingAnchorText: "install" }),
+      makeHit({ score: 0.75, url: "/other" })
+    ];
+
+    const ranked = rankHits(hits, config, "how to install packages");
+    expect(ranked[0]?.hit.metadata.url).toBe("/install");
+  });
+});
+
 describe("trimByScoreGap", () => {
   const config = createDefaultConfig("test");
 

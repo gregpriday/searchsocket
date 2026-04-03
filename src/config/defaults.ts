@@ -75,6 +75,7 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       enableDepthBoost: true,
       enableFreshnessBoost: false,
       freshnessDecayRate: 0.001,
+      enableAnchorTextBoost: false,
       pageWeights: {},
       aggregationCap: 5,
       aggregationDecay: 0.5,
@@ -86,7 +87,8 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
         depth: 0.03,
         aggregation: 0.1,
         titleMatch: 0.15,
-        freshness: 0.1
+        freshness: 0.1,
+        anchorText: 0.10
       }
     },
     api: {

@@ -3,6 +3,11 @@ export type Awaitable<T> = T | Promise<T>;
 export type ScopeMode = "fixed" | "git" | "env";
 export type SourceMode = "static-output" | "crawl" | "content-files" | "build";
 
+export interface OutgoingLink {
+  url: string;
+  anchorText: string;
+}
+
 export interface SearchSocketConfig {
   project?: {
     id?: string;
@@ -90,6 +95,7 @@ export interface SearchSocketConfig {
     enableDepthBoost?: boolean;
     enableFreshnessBoost?: boolean;
     freshnessDecayRate?: number;
+    enableAnchorTextBoost?: boolean;
     pageWeights?: Record<string, number>;
     aggregationCap?: number;
     aggregationDecay?: number;
@@ -102,6 +108,7 @@ export interface SearchSocketConfig {
       aggregation?: number;
       titleMatch?: number;
       freshness?: number;
+      anchorText?: number;
     };
   };
   api?: {
@@ -230,6 +237,7 @@ export interface ResolvedSearchSocketConfig {
     enableDepthBoost: boolean;
     enableFreshnessBoost: boolean;
     freshnessDecayRate: number;
+    enableAnchorTextBoost: boolean;
     pageWeights: Record<string, number>;
     aggregationCap: number;
     aggregationDecay: number;
@@ -242,6 +250,7 @@ export interface ResolvedSearchSocketConfig {
       aggregation: number;
       titleMatch: number;
       freshness: number;
+      anchorText: number;
     };
   };
   api: {
@@ -295,7 +304,7 @@ export interface PageSourceRecord {
   markdown?: string;
   title?: string;
   sourcePath?: string;
-  outgoingLinks: string[];
+  outgoingLinks: OutgoingLink[];
   tags?: string[];
   routeFile?: string;
   routeResolution?: "exact" | "best-effort";
@@ -310,7 +319,7 @@ export interface ExtractedPage {
   url: string;
   title: string;
   markdown: string;
-  outgoingLinks: string[];
+  outgoingLinks: OutgoingLink[];
   noindex: boolean;
   tags: string[];
   description?: string;
@@ -334,6 +343,7 @@ export interface IndexedPage {
   description?: string;
   keywords?: string[];
   publishedAt?: number;
+  incomingAnchorText?: string;
 }
 
 export interface Chunk {
@@ -355,6 +365,7 @@ export interface Chunk {
   description?: string;
   keywords?: string[];
   publishedAt?: number;
+  incomingAnchorText?: string;
 }
 
 export interface VectorHit {
@@ -379,6 +390,7 @@ export interface VectorHit {
     type?: "chunk" | "page" | "image";
     description?: string;
     keywords?: string[];
+    incomingAnchorText?: string;
     imageSrc?: string;
     imageAlt?: string;
     publishedAt?: number;
@@ -442,6 +454,7 @@ export interface ScoreBreakdown {
   depthBoost: number;
   titleMatchBoost: number;
   freshnessBoost: number;
+  anchorTextMatchBoost: number;
 }
 
 export interface SearchResultChunk {

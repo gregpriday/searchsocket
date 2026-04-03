@@ -82,7 +82,8 @@ export function buildPageContentHash(page: IndexedPage): string {
     page.tags.slice().sort().join(","),
     page.markdown,
     String(page.outgoingLinks),
-    String(page.publishedAt ?? "")
+    String(page.publishedAt ?? ""),
+    page.incomingAnchorText ?? ""
   ];
   return sha256(parts.join("|"));
 }
@@ -373,18 +374,29 @@ export class IndexPipeline {
     const linkStart = stageStart();
     const pageSet = new Set(indexablePages.map((page) => normalizeUrlPath(page.url)));
     const incomingLinkCount = new Map<string, number>();
+    const incomingAnchorTexts = new Map<string, Set<string>>();
 
     for (const page of indexablePages) {
       incomingLinkCount.set(page.url, incomingLinkCount.get(page.url) ?? 0);
     }
 
     for (const page of indexablePages) {
-      for (const outgoing of page.outgoingLinks) {
+      const seenTargets = new Set<string>();
+      for (const { url: outgoing, anchorText } of page.outgoingLinks) {
         if (!pageSet.has(outgoing)) {
           continue;
         }
 
         incomingLinkCount.set(outgoing, (incomingLinkCount.get(outgoing) ?? 0) + 1);
+
+        // Collect anchor text: one phrase per source-page/target pair
+        if (anchorText && !seenTargets.has(outgoing)) {
+          seenTargets.add(outgoing);
+          if (!incomingAnchorTexts.has(outgoing)) {
+            incomingAnchorTexts.set(outgoing, new Set());
+          }
+          incomingAnchorTexts.get(outgoing)!.add(anchorText);
+        }
       }
     }
     stageEnd("links", linkStart);
@@ -438,6 +450,19 @@ export class IndexPipeline {
         routeExact += 1;
       }
 
+      // Build incoming anchor text string: deduped, space-joined, capped at 500 chars
+      const anchorSet = incomingAnchorTexts.get(page.url);
+      let incomingAnchorText: string | undefined;
+      if (anchorSet && anchorSet.size > 0) {
+        let joined = "";
+        for (const phrase of anchorSet) {
+          const next = joined ? `${joined} ${phrase}` : phrase;
+          if (next.length > 500) break;
+          joined = next;
+        }
+        incomingAnchorText = joined || undefined;
+      }
+
       const indexedPage: IndexedPage = {
         url: page.url,
         title: page.title,
@@ -452,7 +477,8 @@ export class IndexPipeline {
         markdown: page.markdown,
         description: page.description,
         keywords: page.keywords,
-        publishedAt: page.publishedAt
+        publishedAt: page.publishedAt,
+        incomingAnchorText
       };
 
       pages.push(indexedPage);
@@ -658,7 +684,8 @@ export class IndexPipeline {
           routeFile: chunk.routeFile,
           description: chunk.description ?? "",
           keywords: chunk.keywords ?? [],
-          publishedAt: chunk.publishedAt ?? null
+          publishedAt: chunk.publishedAt ?? null,
+          incomingAnchorText: chunk.incomingAnchorText ?? ""
         }
       }));
 

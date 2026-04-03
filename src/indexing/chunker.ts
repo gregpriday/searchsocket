@@ -351,7 +351,8 @@ export function chunkPage(
       contentHash: "",
       description: page.description,
       keywords: page.keywords,
-      publishedAt: page.publishedAt
+      publishedAt: page.publishedAt,
+      incomingAnchorText: page.incomingAnchorText
     };
 
     const embeddingText = buildEmbeddingText(summaryChunk, config.chunking.prependTitle);
@@ -386,7 +387,8 @@ export function chunkPage(
       contentHash: "",
       description: page.description,
       keywords: page.keywords,
-      publishedAt: page.publishedAt
+      publishedAt: page.publishedAt,
+      incomingAnchorText: page.incomingAnchorText
     };
 
     const embeddingText = buildEmbeddingText(chunk, config.chunking.prependTitle);

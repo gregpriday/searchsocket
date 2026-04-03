@@ -2,7 +2,7 @@ import { load, type CheerioAPI } from "cheerio";
 import matter from "gray-matter";
 import TurndownService from "turndown";
 import { gfm, highlightedCodeBlock, strikethrough, tables, taskListItems } from "turndown-plugin-gfm";
-import type { ExtractedPage, ResolvedSearchSocketConfig } from "../types";
+import type { ExtractedPage, OutgoingLink, ResolvedSearchSocketConfig } from "../types";
 import { normalizeMarkdown, normalizeText } from "../utils/text";
 import { normalizeUrlPath } from "../utils/path";
 
@@ -159,6 +159,18 @@ function resolveImageText(
   return null;
 }
 
+const STOP_ANCHORS = new Set([
+  "here", "click", "click here", "read more", "link", "this", "more"
+]);
+
+export function normalizeAnchorText(raw: string): string {
+  const normalized = raw.replace(/\s+/g, " ").trim().toLowerCase();
+  if (normalized.length < 3) return "";
+  if (STOP_ANCHORS.has(normalized)) return "";
+  if (normalized.length > 100) return normalized.slice(0, 100);
+  return normalized;
+}
+
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -265,7 +277,8 @@ export function extractFromHtml(
   // Replace <img> elements with descriptive text before Turndown
   preprocessImages(root, $, config.extract.imageDescAttr);
 
-  const outgoingLinks: string[] = [];
+  const outgoingLinks: OutgoingLink[] = [];
+  const seenLinkKeys = new Set<string>();
   root.find("a[href]").each((_index, node) => {
     const href = $(node).attr("href");
     if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:")) {
@@ -278,7 +291,20 @@ export function extractFromHtml(
         return;
       }
 
-      outgoingLinks.push(normalizeUrlPath(parsed.pathname));
+      const url = normalizeUrlPath(parsed.pathname);
+      let anchorText = normalizeAnchorText($(node).text());
+      if (!anchorText) {
+        const imgAlt = $(node).find("img").first().attr("alt") ?? "";
+        if (isMeaningfulAlt(imgAlt)) {
+          anchorText = normalizeAnchorText(imgAlt);
+        }
+      }
+
+      const key = `${url}|${anchorText}`;
+      if (!seenLinkKeys.has(key)) {
+        seenLinkKeys.add(key);
+        outgoingLinks.push({ url, anchorText });
+      }
     } catch {
       // ignore malformed links
     }
@@ -321,7 +347,7 @@ export function extractFromHtml(
     url: normalizeUrlPath(url),
     title,
     markdown,
-    outgoingLinks: [...new Set(outgoingLinks)],
+    outgoingLinks,
     noindex: false,
     tags,
     description,
