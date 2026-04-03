@@ -57,6 +57,7 @@ interface PageMetadata {
   outgoingLinks: number;
   depth: number;
   indexedAt: string;
+  contentHash: string;
   [key: string]: unknown;
 }
 
@@ -329,6 +330,40 @@ export class UpstashSearchStore {
     }
   }
 
+  async getPageHashes(scope: Scope): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    const index = this.pageIndex(scope);
+
+    let cursor = "0";
+    try {
+      for (;;) {
+        const result = await index.range({ cursor, limit: 100 });
+        for (const doc of result.documents) {
+          if (doc.metadata?.contentHash) {
+            map.set(doc.id, doc.metadata.contentHash as string);
+          }
+        }
+        if (!result.nextCursor || result.nextCursor === "0") break;
+        cursor = result.nextCursor;
+      }
+    } catch {
+      // Index may not exist yet
+    }
+
+    return map;
+  }
+
+  async deletePagesByIds(ids: string[], scope: Scope): Promise<void> {
+    if (ids.length === 0) return;
+
+    const index = this.pageIndex(scope);
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = ids.slice(i, i + BATCH_SIZE);
+      await index.delete(batch);
+    }
+  }
+
   async upsertPages(pages: PageRecord[], scope: Scope): Promise<void> {
     if (pages.length === 0) return;
 
@@ -356,7 +391,8 @@ export class UpstashSearchStore {
           incomingLinks: p.incomingLinks,
           outgoingLinks: p.outgoingLinks,
           depth: p.depth,
-          indexedAt: p.indexedAt
+          indexedAt: p.indexedAt,
+          contentHash: p.contentHash ?? ""
         } as PageMetadata
       }));
       await index.upsert(docs);

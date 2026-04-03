@@ -337,6 +337,7 @@ export interface PageRecord {
   summary?: string;
   description?: string;
   keywords?: string[];
+  contentHash?: string;
 }
 
 export interface PageHit {
@@ -398,6 +399,8 @@ export interface SearchResponse {
 
 export interface IndexStats {
   pagesProcessed: number;
+  pagesChanged: number;
+  pagesDeleted: number;
   chunksTotal: number;
   chunksChanged: number;
   documentsUpserted: number;

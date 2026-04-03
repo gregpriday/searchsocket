@@ -33,6 +33,8 @@ function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): Upst
     }),
     listPages: vi.fn(async () => ({ pages: [] })),
     deletePages: vi.fn(async () => undefined),
+    getPageHashes: vi.fn(async () => new Map()),
+    deletePagesByIds: vi.fn(async () => undefined),
     dropAllIndexes: vi.fn(async () => undefined),
     _pages: pages
   };
