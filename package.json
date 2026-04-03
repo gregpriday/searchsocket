@@ -26,6 +26,7 @@
   "files": [
     "dist",
     "!dist/**/*.map",
+    "src/svelte",
     "README.md"
   ],
   "bin": {
@@ -51,6 +52,19 @@
       "types": "./dist/scroll.d.ts",
       "import": "./dist/scroll.js",
       "require": "./dist/scroll.cjs"
+    },
+    "./svelte": {
+      "types": "./src/svelte/index.svelte.ts",
+      "svelte": "./src/svelte/index.svelte.ts",
+      "default": "./src/svelte/index.svelte.ts"
+    }
+  },
+  "peerDependencies": {
+    "svelte": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "svelte": {
+      "optional": true
     }
   },
   "scripts": {
@@ -82,10 +96,12 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "@types/express": "^5.0.6",
     "@types/node": "^25.2.2",
     "@types/turndown": "^5.0.6",
     "jsdom": "^28.1.0",
+    "svelte": "^5.55.1",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
