@@ -439,6 +439,27 @@ export interface ScopeInfo {
   documentCount?: number;
 }
 
+export interface RankingOverrides {
+  ranking?: {
+    enableIncomingLinkBoost?: boolean;
+    enableDepthBoost?: boolean;
+    aggregationCap?: number;
+    aggregationDecay?: number;
+    minChunkScoreRatio?: number;
+    minScore?: number;
+    scoreGapThreshold?: number;
+    weights?: {
+      incomingLinks?: number;
+      depth?: number;
+      aggregation?: number;
+      titleMatch?: number;
+    };
+  };
+  search?: {
+    pageSearchWeight?: number;
+  };
+}
+
 export interface SearchRequest {
   q: string;
   topK?: number;
@@ -448,6 +469,7 @@ export interface SearchRequest {
   groupBy?: "page" | "chunk";
   maxSubResults?: number;
   debug?: boolean;
+  rankingOverrides?: RankingOverrides;
 }
 
 export interface ScoreBreakdown {

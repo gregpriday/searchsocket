@@ -35,7 +35,26 @@ const mocks = vi.hoisted(() => {
 
   const loadConfig = vi.fn().mockResolvedValue({
     project: { id: "test" },
-    upstash: { urlEnv: "UPSTASH_URL", tokenEnv: "UPSTASH_TOKEN" }
+    upstash: { urlEnv: "UPSTASH_URL", tokenEnv: "UPSTASH_TOKEN" },
+    ranking: {
+      enableIncomingLinkBoost: true,
+      enableDepthBoost: true,
+      aggregationCap: 5,
+      aggregationDecay: 0.5,
+      minChunkScoreRatio: 0.5,
+      minScore: 0.3,
+      scoreGapThreshold: 0.4,
+      weights: {
+        incomingLinks: 0.05,
+        depth: 0.03,
+        aggregation: 0.1,
+        titleMatch: 0.15
+      }
+    },
+    search: {
+      dualSearch: true,
+      pageSearchWeight: 0.3
+    }
   });
 
   return { app, expressFn, serverInstance, searchFn, createEngine, loadConfig };
@@ -114,6 +133,45 @@ describe("runPlaygroundServer", () => {
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(errorJsonFn).toHaveBeenCalledWith({ error: "Missing or empty 'q' field" });
+  });
+
+  it("GET /_searchsocket/config returns tunable ranking parameters", async () => {
+    await runPlaygroundServer({ cwd: "/tmp", port: 3337 });
+
+    const getHandler = mocks.app.get.mock.calls.find(
+      (call: unknown[]) => call[0] === "/_searchsocket/config"
+    )?.[1] as (req: unknown, res: { json: (d: unknown) => void }) => void;
+
+    expect(getHandler).toBeDefined();
+
+    const jsonFn = vi.fn();
+    getHandler({}, { json: jsonFn });
+
+    expect(jsonFn).toHaveBeenCalledTimes(1);
+    const configData = jsonFn.mock.calls[0]![0] as Record<string, unknown>;
+    expect(configData).toHaveProperty("ranking");
+    expect(configData).toHaveProperty("search");
+  });
+
+  it("POST /_searchsocket/search forwards rankingOverrides", async () => {
+    await runPlaygroundServer({ cwd: "/tmp", port: 3337 });
+
+    const postHandler = mocks.app.post.mock.calls.find(
+      (call: unknown[]) => call[0] === "/_searchsocket/search"
+    )?.[1] as (req: { body: Record<string, unknown> }, res: { json: (d: unknown) => void; status: (n: number) => { json: (d: unknown) => void } }) => Promise<void>;
+
+    const jsonFn = vi.fn();
+    const res = { json: jsonFn, status: vi.fn(() => ({ json: vi.fn() })) };
+    const overrides = { ranking: { minScore: 0.1 } };
+    await postHandler({ body: { q: "test", debug: true, rankingOverrides: overrides } }, res);
+
+    expect(mocks.searchFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        q: "test",
+        debug: true,
+        rankingOverrides: overrides
+      })
+    );
   });
 
   it("close() resolves cleanly", async () => {
