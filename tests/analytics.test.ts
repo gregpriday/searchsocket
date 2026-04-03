@@ -31,9 +31,7 @@ describe("logAnalyticsEvent", () => {
     const dir = await makeTempDir();
     const logPath = path.join(dir, "analytics.jsonl");
 
-    logAnalyticsEvent(logPath, sampleEntry);
-    // Wait for the fire-and-forget write
-    await new Promise((r) => setTimeout(r, 100));
+    await logAnalyticsEvent(logPath, sampleEntry);
 
     const content = await fsp.readFile(logPath, "utf8");
     const parsed = JSON.parse(content.trim());
@@ -44,9 +42,8 @@ describe("logAnalyticsEvent", () => {
     const dir = await makeTempDir();
     const logPath = path.join(dir, "analytics.jsonl");
 
-    logAnalyticsEvent(logPath, sampleEntry);
-    logAnalyticsEvent(logPath, { ...sampleEntry, q: "second query" });
-    await new Promise((r) => setTimeout(r, 100));
+    await logAnalyticsEvent(logPath, sampleEntry);
+    await logAnalyticsEvent(logPath, { ...sampleEntry, q: "second query" });
 
     const lines = (await fsp.readFile(logPath, "utf8")).trim().split("\n");
     expect(lines).toHaveLength(2);
@@ -57,8 +54,7 @@ describe("logAnalyticsEvent", () => {
     const dir = await makeTempDir();
     const logPath = path.join(dir, "nested", "dir", "analytics.jsonl");
 
-    logAnalyticsEvent(logPath, sampleEntry);
-    await new Promise((r) => setTimeout(r, 100));
+    await logAnalyticsEvent(logPath, sampleEntry);
 
     expect(fs.existsSync(logPath)).toBe(true);
   });
