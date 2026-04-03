@@ -36,7 +36,7 @@ function createStatefulMockStore(): {
     deleteScope: vi.fn().mockResolvedValue(undefined),
     listScopes: vi.fn().mockResolvedValue([]),
     getContentHashes: vi.fn().mockImplementation(async () => new Map(chunkHashes)),
-    upsertPages: vi.fn().mockImplementation(async (pages: Array<{ id: string; vector: number[]; metadata: Record<string, unknown> }>) => {
+    upsertPages: vi.fn().mockImplementation(async (pages: Array<{ id: string; data: string; metadata: Record<string, unknown> }>) => {
       for (const page of pages) {
         const contentHash = page.metadata.contentHash as string;
         if (contentHash) {
