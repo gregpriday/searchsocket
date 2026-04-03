@@ -181,10 +181,6 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
       ...defaults.llmsTxt,
       ...parsed.llmsTxt
     },
-    analytics: {
-      ...defaults.analytics,
-      ...parsed.analytics
-    },
     state: {
       ...defaults.state,
       ...parsed.state
@@ -193,10 +189,6 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
 
   merged.project.id = projectId;
   merged.source.mode = detectSourceMode(cwd, merged, parsed);
-
-  if (/^(1|true|yes)$/i.test(process.env.SEARCHSOCKET_ANALYTICS ?? "")) {
-    merged.analytics.enabled = true;
-  }
 
   if (merged.source.mode === "build" && !merged.source.build) {
     merged.source.build = {

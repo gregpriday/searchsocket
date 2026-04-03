@@ -335,6 +335,19 @@ describe("mergeConfig mcp.access", () => {
   });
 });
 
+describe("mergeConfig legacy analytics field", () => {
+  it("silently strips removed analytics field from user config", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    const merged = mergeConfig(dir, {
+      analytics: { enabled: true }
+    } as any);
+
+    expect(merged).not.toHaveProperty("analytics");
+  });
+});
+
 describe("mergeConfigServerless", () => {
   it("throws when project.id is missing", () => {
     expect(() =>

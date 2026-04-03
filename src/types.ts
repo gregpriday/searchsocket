@@ -133,9 +133,6 @@ export interface SearchSocketConfig {
     description?: string;
     generateFull?: boolean;
   };
-  analytics?: {
-    enabled?: boolean;
-  };
   state?: {
     dir?: string;
   };
@@ -270,9 +267,6 @@ export interface ResolvedSearchSocketConfig {
     title?: string;
     description?: string;
     generateFull: boolean;
-  };
-  analytics: {
-    enabled: boolean;
   };
   state: {
     dir: string;
@@ -501,20 +495,6 @@ export interface JsonLogEntry {
   event: string;
   ts: string;
   data?: Record<string, unknown>;
-}
-
-export interface AnalyticsEntry {
-  ts: string;
-  q: string;
-  results: number;
-  latencyMs: number;
-}
-
-export interface AnalyticsReport {
-  topQueries: Array<{ q: string; count: number }>;
-  zeroResultQueries: Array<{ q: string; count: number }>;
-  dailyVolume: Array<{ date: string; count: number }>;
-  latency: { p50: number; p95: number; p99: number; count: number };
 }
 
 export interface SiteTreeNode {
