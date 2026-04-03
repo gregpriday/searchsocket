@@ -186,7 +186,7 @@ export class UpstashSearchStore {
     }));
   }
 
-  async deleteByIds(ids: string[], scope: Scope): Promise<void> {
+  async deleteByIds(ids: string[], _scope: Scope): Promise<void> {
     if (ids.length === 0) return;
 
     const BATCH_SIZE = 100;
@@ -368,7 +368,7 @@ export class UpstashSearchStore {
     return map;
   }
 
-  async deletePagesByIds(ids: string[], scope: Scope): Promise<void> {
+  async deletePagesByIds(ids: string[], _scope: Scope): Promise<void> {
     if (ids.length === 0) return;
 
     const BATCH_SIZE = 50;

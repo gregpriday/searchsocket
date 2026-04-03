@@ -126,6 +126,14 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
       ...defaults.upstash,
       ...parsed.upstash
     },
+    embedding: {
+      ...defaults.embedding,
+      ...parsed.embedding,
+      images: {
+        ...defaults.embedding.images,
+        ...parsed.embedding?.images
+      }
+    },
     search: {
       ...defaults.search,
       ...parsed.search

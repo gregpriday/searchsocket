@@ -16,6 +16,7 @@ export function ensureMcpJson(cwd: string): void {
     env: {
       UPSTASH_VECTOR_REST_URL: "${UPSTASH_VECTOR_REST_URL}",
       UPSTASH_VECTOR_REST_TOKEN: "${UPSTASH_VECTOR_REST_TOKEN}",
+      GEMINI_API_KEY: "${GEMINI_API_KEY}",
     },
   };
 

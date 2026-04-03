@@ -205,6 +205,21 @@ describe("mergeConfig", () => {
     expect(merged.source.build?.previewTimeout).toBe(30000);
   });
 
+  it("merges embedding overrides with nested images", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    const merged = mergeConfig(dir, {
+      embedding: { dimensions: 768, batchSize: 50, images: { enable: true } }
+    });
+
+    expect(merged.embedding.dimensions).toBe(768);
+    expect(merged.embedding.batchSize).toBe(50);
+    expect(merged.embedding.images.enable).toBe(true);
+    expect(merged.embedding.model).toBe("gemini-embedding-001"); // default preserved
+    expect(merged.embedding.apiKeyEnv).toBe("GEMINI_API_KEY"); // default preserved
+  });
+
   it("merges upstash overrides", async () => {
     const dir = await makeTempDir();
     await fs.mkdir(path.join(dir, "build"), { recursive: true });
