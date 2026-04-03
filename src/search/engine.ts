@@ -20,7 +20,7 @@ import type {
 } from "../types";
 import type { UpstashSearchStore } from "../vector/upstash";
 import type { RankedHit, PageResult } from "./ranking";
-import { toSnippet } from "../utils/text";
+import { toSnippet, queryAwareExcerpt } from "../utils/text";
 
 const requestSchema = z.object({
   q: z.string().trim().min(1),
@@ -265,15 +265,16 @@ export class SearchEngine {
     };
   }
 
-  private ensureSnippet(hit: RankedHit): string {
+  private ensureSnippet(hit: RankedHit, query?: string): string {
+    const chunkText = hit.hit.metadata.chunkText;
+    if (query && chunkText) return queryAwareExcerpt(chunkText, query);
     const snippet = hit.hit.metadata.snippet;
     if (snippet && snippet.length >= 30) return snippet;
-    const chunkText = hit.hit.metadata.chunkText;
     if (chunkText) return toSnippet(chunkText);
     return snippet || "";
   }
 
-  private buildResults(ordered: RankedHit[], topK: number, groupByPage: boolean, _query?: string, debug?: boolean): SearchResult[] {
+  private buildResults(ordered: RankedHit[], topK: number, groupByPage: boolean, query?: string, debug?: boolean): SearchResult[] {
     if (groupByPage) {
       let pages = aggregateByPage(ordered, this.config);
       pages = trimByScoreGap(pages, this.config);
@@ -288,13 +289,15 @@ export class SearchEngine {
           url: page.url,
           title: page.title,
           sectionTitle: page.bestChunk.hit.metadata.sectionTitle || undefined,
-          snippet: this.ensureSnippet(page.bestChunk),
+          snippet: this.ensureSnippet(page.bestChunk, query),
+          chunkText: page.bestChunk.hit.metadata.chunkText || undefined,
           score: Number(page.pageScore.toFixed(6)),
           routeFile: page.routeFile,
           chunks: meaningful.length > 1
             ? meaningful.map((c) => ({
                 sectionTitle: c.hit.metadata.sectionTitle || undefined,
-                snippet: this.ensureSnippet(c),
+                snippet: this.ensureSnippet(c, query),
+                chunkText: c.hit.metadata.chunkText || undefined,
                 headingPath: c.hit.metadata.headingPath,
                 score: Number(c.finalScore.toFixed(6))
               }))
@@ -316,7 +319,8 @@ export class SearchEngine {
           url: hit.metadata.url,
           title: hit.metadata.title,
           sectionTitle: hit.metadata.sectionTitle || undefined,
-          snippet: this.ensureSnippet({ hit, finalScore }),
+          snippet: this.ensureSnippet({ hit, finalScore }, query),
+          chunkText: hit.metadata.chunkText || undefined,
           score: Number(finalScore.toFixed(6)),
           routeFile: hit.metadata.routeFile
         };

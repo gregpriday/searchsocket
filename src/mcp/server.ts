@@ -29,7 +29,7 @@ export function createServer(engine: SearchEngine): McpServer {
     "search",
     {
       description:
-        "Semantic site search powered by Upstash Search. Returns url/title/snippet/score/routeFile for each match. Supports optional scope, pathPrefix, tags, topK, and groupBy.",
+        "Semantic site search powered by Upstash Search. Returns url/title/snippet/chunkText/score/routeFile for each match. chunkText contains the full raw chunk markdown. Supports optional scope, pathPrefix, tags, topK, and groupBy.",
       inputSchema: {
         query: z.string().min(1),
         scope: z.string().optional(),
