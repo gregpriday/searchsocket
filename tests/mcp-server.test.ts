@@ -172,6 +172,105 @@ describe("runMcpServer", () => {
   });
 });
 
+describe("get_site_structure tool", () => {
+  function getHandler(mockEngine: Record<string, unknown>) {
+    const server = createServer(mockEngine as never);
+    const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
+    const call = calls.find((c: unknown[]) => c[0] === "get_site_structure");
+    expect(call).toBeDefined();
+    return call![2] as (input: Record<string, unknown>) => Promise<{
+      content: Array<{ type: string; text: string }>;
+    }>;
+  }
+
+  it("registers the get_site_structure tool", () => {
+    const mockEngine = { search: vi.fn(), getSiteStructure: vi.fn() };
+    const server = createServer(mockEngine as never);
+    const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
+    const toolNames = calls.map((c: unknown[]) => c[0]);
+    expect(toolNames).toContain("get_site_structure");
+  });
+
+  it("registers exactly 5 tools", () => {
+    const mockEngine = { search: vi.fn(), getSiteStructure: vi.fn() };
+    const server = createServer(mockEngine as never);
+    const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBe(5);
+  });
+
+  it("returns site structure JSON from engine", async () => {
+    const mockResult = {
+      root: {
+        url: "/",
+        title: "Home",
+        depth: 0,
+        routeFile: "",
+        isIndexed: true,
+        childCount: 1,
+        children: [
+          {
+            url: "/docs",
+            title: "Docs",
+            depth: 1,
+            routeFile: "",
+            isIndexed: true,
+            childCount: 0,
+            children: []
+          }
+        ]
+      },
+      totalPages: 2,
+      truncated: false
+    };
+
+    const mockEngine = {
+      search: vi.fn(),
+      getSiteStructure: vi.fn().mockResolvedValue(mockResult)
+    };
+
+    const handler = getHandler(mockEngine);
+    const result = await handler({});
+    const parsed = JSON.parse(result.content[0]!.text);
+
+    expect(parsed).toEqual(mockResult);
+    expect(mockEngine.getSiteStructure).toHaveBeenCalledWith({
+      pathPrefix: undefined,
+      scope: undefined,
+      maxPages: undefined
+    });
+  });
+
+  it("passes pathPrefix, scope, and maxPages to engine", async () => {
+    const mockEngine = {
+      search: vi.fn(),
+      getSiteStructure: vi.fn().mockResolvedValue({
+        root: { url: "/docs", title: "", depth: 1, routeFile: "", isIndexed: false, childCount: 0, children: [] },
+        totalPages: 0,
+        truncated: false
+      })
+    };
+
+    const handler = getHandler(mockEngine);
+    await handler({ pathPrefix: "/docs", scope: "my-scope", maxPages: 500 });
+
+    expect(mockEngine.getSiteStructure).toHaveBeenCalledWith({
+      pathPrefix: "/docs",
+      scope: "my-scope",
+      maxPages: 500
+    });
+  });
+
+  it("propagates engine errors", async () => {
+    const mockEngine = {
+      search: vi.fn(),
+      getSiteStructure: vi.fn().mockRejectedValue(new Error("Store unavailable"))
+    };
+
+    const handler = getHandler(mockEngine);
+    await expect(handler({})).rejects.toThrow("Store unavailable");
+  });
+});
+
 describe("find_source_file tool", () => {
   function getHandler(mockEngine: Record<string, unknown>) {
     const server = createServer(mockEngine as never);

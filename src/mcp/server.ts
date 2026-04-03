@@ -115,6 +115,34 @@ export function createServer(engine: SearchEngine): McpServer {
   );
 
   server.registerTool(
+    "get_site_structure",
+    {
+      description:
+        "Returns the hierarchical page tree derived from URL paths. Use this to understand site navigation structure, find where pages belong, or scope further operations to a section. Nodes with isIndexed: false are implicit structural parents not directly in the index. Large sites (>2000 pages) return truncated: true.",
+      inputSchema: {
+        pathPrefix: z.string().optional(),
+        scope: z.string().optional(),
+        maxPages: z.number().int().positive().max(2000).optional()
+      }
+    },
+    async (input) => {
+      const result = await engine.getSiteStructure({
+        pathPrefix: input.pathPrefix,
+        scope: input.scope,
+        maxPages: input.maxPages
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }
+        ]
+      };
+    }
+  );
+
+  server.registerTool(
     "find_source_file",
     {
       description:
