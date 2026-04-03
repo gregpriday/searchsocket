@@ -131,7 +131,7 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
   const bodyLimit = options.maxBodyBytes ?? 64 * 1024;
 
   return async ({ event, resolve }: { event: any; resolve: (event: any) => Promise<Response> }) => {
-    if (apiPath && event.url.pathname !== apiPath && event.url.pathname !== llmsServePath) {
+    if (apiPath && !isApiPath(event.url.pathname, apiPath) && event.url.pathname !== llmsServePath) {
       if (mcpPath && event.url.pathname === mcpPath) {
         return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
       }
@@ -172,45 +172,18 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
     }
     const targetPath = apiPath ?? config.api.path;
 
-    if (event.url.pathname !== targetPath) {
+    if (!isApiPath(event.url.pathname, targetPath)) {
       return resolve(event);
     }
 
-    if (event.request.method === "OPTIONS") {
+    const subPath = event.url.pathname.slice(targetPath.length); // "" | "/health" | "/pages/..."
+    const method = event.request.method;
+
+    if (method === "OPTIONS") {
       return new Response(null, {
         status: 204,
         headers: buildCorsHeaders(event.request, config)
       });
-    }
-
-    if (event.request.method !== "POST") {
-      return withCors(
-        new Response(JSON.stringify(toErrorPayload(new SearchSocketError("INVALID_REQUEST", "Method not allowed", 405))), {
-          status: 405,
-          headers: {
-            "content-type": "application/json"
-          }
-        }),
-        event.request,
-        config
-      );
-    }
-
-    const contentLength = Number(event.request.headers.get("content-length") ?? 0);
-    if (contentLength > bodyLimit) {
-      return withCors(
-        new Response(
-          JSON.stringify(toErrorPayload(new SearchSocketError("INVALID_REQUEST", "Request body too large", 413))),
-          {
-            status: 413,
-            headers: {
-              "content-type": "application/json"
-            }
-          }
-        ),
-        event.request,
-        config
-      );
     }
 
     if (rateLimiter) {
@@ -237,44 +210,36 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
     }
 
     try {
-      let rawBody: string;
-      if (typeof event.request.text === "function") {
-        rawBody = await event.request.text();
-      } else {
-        let parsedFallback: unknown;
-        try {
-          parsedFallback = await event.request.json();
-        } catch (error) {
-          if (error instanceof SyntaxError) {
-            throw new SearchSocketError("INVALID_REQUEST", "Malformed JSON request body", 400);
-          }
-          throw error;
+      if (method === "GET") {
+        if (subPath === "" || subPath === "/") {
+          return await handleGetSearch(event, config, getEngine);
         }
-        rawBody = JSON.stringify(parsedFallback);
+        if (subPath === "/health") {
+          return await handleGetHealth(event, config, getEngine);
+        }
+        if (subPath.startsWith("/pages/")) {
+          return await handleGetPage(event, config, getEngine, subPath);
+        }
+        // Unknown GET sub-route
+        return withCors(
+          new Response(JSON.stringify(toErrorPayload(new SearchSocketError("INVALID_REQUEST", "Not found", 404))), {
+            status: 404,
+            headers: { "content-type": "application/json" }
+          }),
+          event.request,
+          config
+        );
       }
 
-      if (Buffer.byteLength(rawBody, "utf8") > bodyLimit) {
-        throw new SearchSocketError("INVALID_REQUEST", "Request body too large", 413);
+      if (method === "POST" && (subPath === "" || subPath === "/")) {
+        return await handlePostSearch(event, config, getEngine, bodyLimit);
       }
 
-      let body: unknown;
-      try {
-        body = JSON.parse(rawBody);
-      } catch {
-        throw new SearchSocketError("INVALID_REQUEST", "Malformed JSON request body", 400);
-      }
-
-      const engine = await getEngine();
-      const searchRequest = body as SearchRequest;
-
-      const result = await engine.search(searchRequest);
-
+      // Unsupported method or sub-route
       return withCors(
-        new Response(JSON.stringify(result), {
-          status: 200,
-          headers: {
-            "content-type": "application/json"
-          }
+        new Response(JSON.stringify(toErrorPayload(new SearchSocketError("INVALID_REQUEST", "Method not allowed", 405))), {
+          status: 405,
+          headers: { "content-type": "application/json" }
         }),
         event.request,
         config
@@ -295,6 +260,161 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
       );
     }
   };
+}
+
+function isApiPath(pathname: string, apiPath: string): boolean {
+  return pathname === apiPath || pathname.startsWith(apiPath + "/");
+}
+
+async function handleGetSearch(
+  event: any,
+  config: ResolvedSearchSocketConfig,
+  getEngine: () => Promise<SearchEngine>
+): Promise<Response> {
+  const params = event.url.searchParams;
+  const q = params.get("q");
+
+  if (!q || q.trim() === "") {
+    throw new SearchSocketError("INVALID_REQUEST", "Missing required query parameter: q", 400);
+  }
+
+  const searchRequest: SearchRequest = { q };
+
+  const topK = params.get("topK");
+  if (topK !== null) {
+    const parsed = Number.parseInt(topK, 10);
+    if (Number.isNaN(parsed) || parsed < 1) {
+      throw new SearchSocketError("INVALID_REQUEST", "topK must be a positive integer", 400);
+    }
+    searchRequest.topK = parsed;
+  }
+
+  const scope = params.get("scope");
+  if (scope !== null) searchRequest.scope = scope;
+
+  const pathPrefix = params.get("pathPrefix");
+  if (pathPrefix !== null) searchRequest.pathPrefix = pathPrefix;
+
+  const groupBy = params.get("groupBy");
+  if (groupBy) {
+    if (groupBy !== "page" && groupBy !== "chunk") {
+      throw new SearchSocketError("INVALID_REQUEST", 'groupBy must be "page" or "chunk"', 400);
+    }
+    searchRequest.groupBy = groupBy;
+  }
+
+  const tags = params.getAll("tags");
+  if (tags.length > 0) searchRequest.tags = tags;
+
+  const engine = await getEngine();
+  const result = await engine.search(searchRequest);
+
+  return withCors(
+    new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }),
+    event.request,
+    config
+  );
+}
+
+async function handleGetHealth(
+  event: any,
+  config: ResolvedSearchSocketConfig,
+  getEngine: () => Promise<SearchEngine>
+): Promise<Response> {
+  const engine = await getEngine();
+  const result = await engine.health();
+
+  return withCors(
+    new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }),
+    event.request,
+    config
+  );
+}
+
+async function handleGetPage(
+  event: any,
+  config: ResolvedSearchSocketConfig,
+  getEngine: () => Promise<SearchEngine>,
+  subPath: string
+): Promise<Response> {
+  const rawPath = subPath.slice("/pages".length); // includes leading "/"
+  let pagePath: string;
+  try {
+    pagePath = decodeURIComponent(rawPath);
+  } catch {
+    throw new SearchSocketError("INVALID_REQUEST", "Malformed page path", 400);
+  }
+
+  const scope = event.url.searchParams?.get("scope") ?? undefined;
+  const engine = await getEngine();
+  const result = await engine.getPage(pagePath, scope);
+
+  return withCors(
+    new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }),
+    event.request,
+    config
+  );
+}
+
+async function handlePostSearch(
+  event: any,
+  config: ResolvedSearchSocketConfig,
+  getEngine: () => Promise<SearchEngine>,
+  bodyLimit: number
+): Promise<Response> {
+  const contentLength = Number(event.request.headers.get("content-length") ?? 0);
+  if (contentLength > bodyLimit) {
+    throw new SearchSocketError("INVALID_REQUEST", "Request body too large", 413);
+  }
+
+  let rawBody: string;
+  if (typeof event.request.text === "function") {
+    rawBody = await event.request.text();
+  } else {
+    let parsedFallback: unknown;
+    try {
+      parsedFallback = await event.request.json();
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw new SearchSocketError("INVALID_REQUEST", "Malformed JSON request body", 400);
+      }
+      throw error;
+    }
+    rawBody = JSON.stringify(parsedFallback);
+  }
+
+  if (Buffer.byteLength(rawBody, "utf8") > bodyLimit) {
+    throw new SearchSocketError("INVALID_REQUEST", "Request body too large", 413);
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    throw new SearchSocketError("INVALID_REQUEST", "Malformed JSON request body", 400);
+  }
+
+  const engine = await getEngine();
+  const searchRequest = body as SearchRequest;
+  const result = await engine.search(searchRequest);
+
+  return withCors(
+    new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }),
+    event.request,
+    config
+  );
 }
 
 async function handleMcpRequest(
@@ -378,7 +498,7 @@ function buildCorsHeaders(request: Request, config: ResolvedSearchSocketConfig):
 
   return {
     "access-control-allow-origin": allowOrigins.includes("*") ? "*" : origin,
-    "access-control-allow-methods": "POST, OPTIONS",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
     "access-control-allow-headers": "content-type"
   };
 }
