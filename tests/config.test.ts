@@ -32,8 +32,8 @@ describe("createDefaultConfig", () => {
 
   it("has upstash defaults", () => {
     const config = createDefaultConfig("example");
-    expect(config.upstash.urlEnv).toBe("UPSTASH_VECTOR_REST_URL");
-    expect(config.upstash.tokenEnv).toBe("UPSTASH_VECTOR_REST_TOKEN");
+    expect(config.upstash.urlEnv).toBe("UPSTASH_SEARCH_REST_URL");
+    expect(config.upstash.tokenEnv).toBe("UPSTASH_SEARCH_REST_TOKEN");
   });
 
   it("has embedding defaults", () => {
@@ -75,7 +75,7 @@ describe("mergeConfig", () => {
       chunking: { maxChars: 3000 }
     });
 
-    expect(merged.upstash.urlEnv).toBe("UPSTASH_VECTOR_REST_URL");
+    expect(merged.upstash.urlEnv).toBe("UPSTASH_SEARCH_REST_URL");
     expect(merged.chunking.maxChars).toBe(3000);
     expect(merged.chunking.overlapChars).toBe(200);
     expect(merged.search.dualSearch).toBe(true);
@@ -236,7 +236,7 @@ describe("mergeConfig", () => {
     });
 
     expect(merged.upstash.urlEnv).toBe("CUSTOM_UPSTASH_URL");
-    expect(merged.upstash.tokenEnv).toBe("UPSTASH_VECTOR_REST_TOKEN");
+    expect(merged.upstash.tokenEnv).toBe("UPSTASH_SEARCH_REST_TOKEN");
   });
 
   it("merges search overrides", async () => {
@@ -264,8 +264,8 @@ describe("mergeConfig", () => {
 
     expect(merged.upstash.url).toBe("https://my-index.upstash.io");
     expect(merged.upstash.token).toBe("my-token");
-    expect(merged.upstash.urlEnv).toBe("UPSTASH_VECTOR_REST_URL");
-    expect(merged.upstash.tokenEnv).toBe("UPSTASH_VECTOR_REST_TOKEN");
+    expect(merged.upstash.urlEnv).toBe("UPSTASH_SEARCH_REST_URL");
+    expect(merged.upstash.tokenEnv).toBe("UPSTASH_SEARCH_REST_TOKEN");
   });
 });
 
@@ -382,7 +382,7 @@ describe("mergeConfigServerless", () => {
     expect(config.project.id).toBe("my-site");
     expect(config.source.mode).toBe("static-output");
     expect(config.upstash.urlEnv).toBe("CUSTOM_UPSTASH_URL");
-    expect(config.upstash.tokenEnv).toBe("UPSTASH_VECTOR_REST_TOKEN");
+    expect(config.upstash.tokenEnv).toBe("UPSTASH_SEARCH_REST_TOKEN");
   });
 });
 
@@ -395,8 +395,8 @@ describe("loadConfig", () => {
   it("falls back to upstash defaults when allowMissing is true", async () => {
     const dir = await makeTempDir();
     const config = await loadConfig({ cwd: dir, allowMissing: true });
-    expect(config.upstash.urlEnv).toBe("UPSTASH_VECTOR_REST_URL");
-    expect(config.upstash.tokenEnv).toBe("UPSTASH_VECTOR_REST_TOKEN");
+    expect(config.upstash.urlEnv).toBe("UPSTASH_SEARCH_REST_URL");
+    expect(config.upstash.tokenEnv).toBe("UPSTASH_SEARCH_REST_TOKEN");
     expect(config.search.dualSearch).toBe(true);
   });
 });

@@ -14,8 +14,8 @@ export function ensureMcpJson(cwd: string): void {
     command: "npx",
     args: ["searchsocket", "mcp"],
     env: {
-      UPSTASH_VECTOR_REST_URL: "${UPSTASH_VECTOR_REST_URL}",
-      UPSTASH_VECTOR_REST_TOKEN: "${UPSTASH_VECTOR_REST_TOKEN}",
+      UPSTASH_SEARCH_REST_URL: "${UPSTASH_SEARCH_REST_URL}",
+      UPSTASH_SEARCH_REST_TOKEN: "${UPSTASH_SEARCH_REST_TOKEN}",
       GEMINI_API_KEY: "${GEMINI_API_KEY}",
     },
   };
@@ -194,11 +194,11 @@ export function writeEnvFile(cwd: string, url: string, token: string): void {
   }
 
   const lines: string[] = [];
-  if (!content.includes("UPSTASH_VECTOR_REST_URL=")) {
-    lines.push(`UPSTASH_VECTOR_REST_URL=${url}`);
+  if (!content.includes("UPSTASH_SEARCH_REST_URL=")) {
+    lines.push(`UPSTASH_SEARCH_REST_URL=${url}`);
   }
-  if (!content.includes("UPSTASH_VECTOR_REST_TOKEN=")) {
-    lines.push(`UPSTASH_VECTOR_REST_TOKEN=${token}`);
+  if (!content.includes("UPSTASH_SEARCH_REST_TOKEN=")) {
+    lines.push(`UPSTASH_SEARCH_REST_TOKEN=${token}`);
   }
 
   if (lines.length > 0) {

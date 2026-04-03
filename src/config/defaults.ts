@@ -53,8 +53,8 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       weightHeadings: true
     },
     upstash: {
-      urlEnv: "UPSTASH_VECTOR_REST_URL",
-      tokenEnv: "UPSTASH_VECTOR_REST_TOKEN"
+      urlEnv: "UPSTASH_SEARCH_REST_URL",
+      tokenEnv: "UPSTASH_SEARCH_REST_TOKEN"
     },
     embedding: {
       model: "gemini-embedding-001",

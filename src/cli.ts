@@ -260,8 +260,8 @@ async function runInteractiveInit(cwd: string): Promise<void> {
   s.stop("Config files created");
 
   // Step 2: Check for Upstash credentials
-  const hasUrl = Boolean(process.env.UPSTASH_VECTOR_REST_URL);
-  const hasToken = Boolean(process.env.UPSTASH_VECTOR_REST_TOKEN);
+  const hasUrl = Boolean(process.env.UPSTASH_SEARCH_REST_URL);
+  const hasToken = Boolean(process.env.UPSTASH_SEARCH_REST_TOKEN);
 
   if (!hasUrl || !hasToken) {
     clack.log.warn("Upstash Search credentials not found in environment.");
@@ -278,7 +278,7 @@ async function runInteractiveInit(cwd: string): Promise<void> {
 
     if (shouldConfigure) {
       const url = hasUrl
-        ? process.env.UPSTASH_VECTOR_REST_URL!
+        ? process.env.UPSTASH_SEARCH_REST_URL!
         : await clack.text({
             message: "Upstash Search REST URL:",
             placeholder: "https://your-index.upstash.io",
@@ -291,7 +291,7 @@ async function runInteractiveInit(cwd: string): Promise<void> {
       }
 
       const token = hasToken
-        ? process.env.UPSTASH_VECTOR_REST_TOKEN!
+        ? process.env.UPSTASH_SEARCH_REST_TOKEN!
         : await clack.text({
             message: "Upstash Search REST Token:",
             placeholder: "AX...",
