@@ -17,5 +17,9 @@ export async function createUpstashStore(config: ResolvedSearchSocketConfig): Pr
   const { Index } = await import("@upstash/vector");
   const index = new Index({ url, token });
 
-  return new UpstashSearchStore({ index });
+  return new UpstashSearchStore({
+    index,
+    pagesNamespace: config.upstash.namespaces.pages,
+    chunksNamespace: config.upstash.namespaces.chunks
+  });
 }

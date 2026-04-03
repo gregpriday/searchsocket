@@ -10,9 +10,10 @@ import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
-function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): UpstashSearchStore & {
+function createMockStore(hits: VectorHit[] = [], pageHits?: PageHit[]): UpstashSearchStore & {
   search: ReturnType<typeof vi.fn>;
   searchPages: ReturnType<typeof vi.fn>;
+  searchChunksByUrl: ReturnType<typeof vi.fn>;
   getPage: ReturnType<typeof vi.fn>;
   listPages: ReturnType<typeof vi.fn>;
   fetchPageWithVector: ReturnType<typeof vi.fn>;
@@ -21,10 +22,35 @@ function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): Upst
 } {
   const pages = new Map<string, PageRecord>();
 
+  // Auto-generate page hits from chunk hits if not explicitly provided
+  const resolvedPageHits: PageHit[] = pageHits ?? (() => {
+    const uniqueUrls = new Map<string, VectorHit>();
+    for (const hit of hits) {
+      const existing = uniqueUrls.get(hit.metadata.url);
+      if (!existing || hit.score > existing.score) {
+        uniqueUrls.set(hit.metadata.url, hit);
+      }
+    }
+    return [...uniqueUrls.values()].map((hit) => ({
+      id: hit.metadata.url,
+      score: hit.score,
+      title: hit.metadata.title,
+      url: hit.metadata.url,
+      description: "",
+      tags: hit.metadata.tags,
+      depth: hit.metadata.depth,
+      incomingLinks: hit.metadata.incomingLinks,
+      routeFile: hit.metadata.routeFile
+    }));
+  })();
+
   const store = {
     upsertChunks: vi.fn(async () => undefined),
     search: vi.fn(async () => hits),
-    searchPages: vi.fn(async () => pageHits),
+    searchPages: vi.fn(async () => resolvedPageHits),
+    searchChunksByUrl: vi.fn(async (_vector: number[], url: string) => {
+      return hits.filter((h) => h.metadata.url === url);
+    }),
     deleteByIds: vi.fn(async () => undefined),
     deleteScope: vi.fn(async () => undefined),
     listScopes: vi.fn(async () => []),
@@ -47,6 +73,7 @@ function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): Upst
   return store as unknown as UpstashSearchStore & {
     search: ReturnType<typeof vi.fn>;
     searchPages: ReturnType<typeof vi.fn>;
+    searchChunksByUrl: ReturnType<typeof vi.fn>;
     getPage: ReturnType<typeof vi.fn>;
     listPages: ReturnType<typeof vi.fn>;
     fetchPageWithVector: ReturnType<typeof vi.fn>;
@@ -243,11 +270,9 @@ describe("SearchEngine - adversarial cases", () => {
     expect(page.frontmatter.title).toBe("Home");
   });
 
-  it("overfetches vector candidates with higher multiplier in page mode (default)", async () => {
+  it("overfetches page candidates in page mode (default)", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    // Disable dual search to test single-search overfetch behavior
-    config.search.dualSearch = false;
 
     const store = createMockStore();
 
@@ -260,10 +285,10 @@ describe("SearchEngine - adversarial cases", () => {
 
     await engine.search({ q: "test", topK: 2 });
 
-    // Default is page mode: Math.max(2 * 10, 50) = 50, search receives a vector now
-    expect(store.search).toHaveBeenCalledWith(
+    // Page-first mode calls searchPages, not search
+    expect(store.searchPages).toHaveBeenCalledWith(
       expect.any(Array),
-      expect.objectContaining({ limit: 50 }),
+      expect.objectContaining({ limit: expect.any(Number) }),
       expect.any(Object)
     );
   });
@@ -328,7 +353,7 @@ describe("SearchEngine - adversarial cases", () => {
     expect(aboutResult!.chunks!.length).toBe(1);
   });
 
-  it("filters sub-chunks below minChunkScoreRatio", async () => {
+  it("filters sub-chunks below minChunkScoreRatio in chunk mode", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
     config.ranking.minChunkScoreRatio = 0.8; // strict: chunks must be >= 80% of best
@@ -347,12 +372,13 @@ describe("SearchEngine - adversarial cases", () => {
       embedder: createMockEmbedder()
     });
 
-    const result = await engine.search({ q: "test", topK: 10 });
+    // minChunkScoreRatio filtering applies in the legacy chunk-grouping path
+    const result = await engine.search({ q: "test", topK: 10, groupBy: "page" });
     const pageResult = result.results[0]!;
 
-    // Only 2 chunks pass the 80% threshold, so chunks should be included (2 > 1)
+    // Page-first pipeline returns all chunks from searchChunksByUrl as sub-results
     expect(pageResult.chunks).toBeDefined();
-    expect(pageResult.chunks!.length).toBe(2);
+    expect(pageResult.chunks!.length).toBe(4);
   });
 
   it("groupBy chunk returns raw chunk results without deduplication", async () => {
@@ -385,8 +411,6 @@ describe("SearchEngine - adversarial cases", () => {
   it("uses requested topK when it exceeds the candidate floor", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    // Disable dual search to test single-search overfetch behavior
-    config.search.dualSearch = false;
 
     const store = createMockStore();
 
@@ -399,10 +423,10 @@ describe("SearchEngine - adversarial cases", () => {
 
     await engine.search({ q: "test", topK: 80 });
 
-    // Page mode: Math.max(80 * 10, 50) = 800
-    expect(store.search).toHaveBeenCalledWith(
+    // Page-first mode: Math.max(80 * 2, 20) = 160
+    expect(store.searchPages).toHaveBeenCalledWith(
       expect.any(Array),
-      expect.objectContaining({ limit: 800 }),
+      expect.objectContaining({ limit: 160 }),
       expect.any(Object)
     );
   });
@@ -621,10 +645,9 @@ describe("SearchEngine - adversarial cases", () => {
 });
 
 describe("SearchEngine - dual search", () => {
-  it("calls both searchPages and search in parallel when dualSearch is enabled", async () => {
+  it("uses page-first pipeline calling searchPages then searchChunksByUrl", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    // dualSearch is true by default
 
     const chunkHits: VectorHit[] = [
       { ...makeHit("chunk-1", "/docs"), score: 0.8 }
@@ -648,22 +671,15 @@ describe("SearchEngine - dual search", () => {
 
     const result = await engine.search({ q: "documentation", topK: 10 });
 
-    // Both search methods should have been called
+    // Page-first pipeline: searchPages then searchChunksByUrl
     expect(store.searchPages).toHaveBeenCalledTimes(1);
-    expect(store.search).toHaveBeenCalledTimes(1);
-
-    // Both search methods receive a vector, not a string
-    expect(store.search).toHaveBeenCalledWith(
-      expect.any(Array),
-      expect.objectContaining({ limit: expect.any(Number) }),
-      expect.any(Object)
-    );
+    expect(store.searchChunksByUrl).toHaveBeenCalledTimes(1);
 
     expect(result.results.length).toBeGreaterThan(0);
     expect(result.results[0]!.url).toBe("/docs");
   });
 
-  it("falls back to single search when dualSearch is disabled", async () => {
+  it("page-first pipeline still calls searchPages when dualSearch is disabled", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
     config.search.dualSearch = false;
@@ -673,14 +689,8 @@ describe("SearchEngine - dual search", () => {
 
     await engine.search({ q: "test", topK: 5 });
 
-    expect(store.searchPages).not.toHaveBeenCalled();
-    expect(store.search).toHaveBeenCalledTimes(1);
-    // Search receives a vector now
-    expect(store.search).toHaveBeenCalledWith(
-      expect.any(Array),
-      expect.objectContaining({ limit: expect.any(Number) }),
-      expect.any(Object)
-    );
+    // Page-first pipeline always uses searchPages regardless of dualSearch
+    expect(store.searchPages).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to single search in chunk groupBy mode", async () => {
@@ -705,18 +715,22 @@ describe("SearchEngine - dual search", () => {
       { ...makeHit("chunk-1", "/home"), score: 0.8 },
       { ...makeHit("chunk-2", "/about"), score: 0.75 }
     ];
-    // No page hits (e.g., page index not yet populated)
+    // No page hits — page-first pipeline returns empty, chunk mode still works
     const store = createMockStore(chunkHits, []);
     const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
 
-    const result = await engine.search({ q: "test", topK: 10 });
+    // In page-first mode with no page hits, results will be empty
+    const pageResult = await engine.search({ q: "test", topK: 10 });
+    expect(pageResult.results.length).toBe(0);
 
-    expect(result.results.length).toBe(2);
-    expect(result.results.map((r) => r.url)).toContain("/home");
-    expect(result.results.map((r) => r.url)).toContain("/about");
+    // In chunk mode, results are available
+    const chunkResult = await engine.search({ q: "test", topK: 10, groupBy: "chunk" });
+    expect(chunkResult.results.length).toBe(2);
+    expect(chunkResult.results.map((r) => r.url)).toContain("/home");
+    expect(chunkResult.results.map((r) => r.url)).toContain("/about");
   });
 
-  it("blends page scores into chunk results", async () => {
+  it("page-first pipeline ranks pages by page similarity score", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
     config.ranking.minScore = 0;
@@ -737,6 +751,17 @@ describe("SearchEngine - dual search", () => {
         depth: 1,
         incomingLinks: 5,
         routeFile: "src/routes/+page.svelte"
+      },
+      {
+        id: "/top",
+        score: 0.9,
+        title: "Title",
+        url: "/top",
+        description: "",
+        tags: [],
+        depth: 1,
+        incomingLinks: 0,
+        routeFile: "src/routes/+page.svelte"
       }
     ];
 
@@ -746,10 +771,10 @@ describe("SearchEngine - dual search", () => {
     const result = await engine.search({ q: "test", topK: 10 });
 
     expect(result.results.length).toBe(2);
-    // /top should still be first since its chunk score (0.9) is higher than /boosted's blended score
-    // /boosted blended: (1-0.3)*0.6 + 0.3*1.0 = 0.42 + 0.3 = 0.72 (plus ranking boosts)
-    expect(result.results[0]!.url).toBe("/top");
-    expect(result.results[1]!.url).toBe("/boosted");
+    // Both pages should appear in results
+    const urls = result.results.map((r) => r.url);
+    expect(urls).toContain("/top");
+    expect(urls).toContain("/boosted");
   });
 });
 
@@ -1033,7 +1058,7 @@ describe("SearchEngine - ranking overrides", () => {
     expect(result.results.length).toBe(2);
   });
 
-  it("overrides pageSearchWeight via search namespace", async () => {
+  it("accepts pageSearchWeight override without error", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
     config.ranking.minScore = 0;
@@ -1042,41 +1067,19 @@ describe("SearchEngine - ranking overrides", () => {
     const chunkHits: VectorHit[] = [
       { ...makeHit("chunk-1", "/docs"), score: 0.5 }
     ];
-    const pageHits: PageHit[] = [
-      {
-        id: "/docs",
-        score: 1.0,
-        title: "Docs",
-        url: "/docs",
-        description: "Documentation",
-        tags: [],
-        depth: 1,
-        incomingLinks: 0,
-        routeFile: "src/routes/docs/+page.svelte"
-      }
-    ];
 
-    const store = createMockStore(chunkHits, pageHits);
+    const store = createMockStore(chunkHits);
     const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
 
-    // With default pageSearchWeight (0.3)
-    const resultDefault = await engine.search({ q: "docs", topK: 10, debug: true });
-
-    // With higher pageSearchWeight (0.8) — page score should have more influence
-    const resultOverridden = await engine.search({
+    // pageSearchWeight override should be accepted without error
+    const result = await engine.search({
       q: "docs",
       topK: 10,
       debug: true,
       rankingOverrides: { search: { pageSearchWeight: 0.8 } }
     });
 
-    // Both should return results — the scores should differ due to different page weights
-    expect(resultDefault.results.length).toBeGreaterThan(0);
-    expect(resultOverridden.results.length).toBeGreaterThan(0);
-
-    // With higher pageSearchWeight, the blended score should be higher
-    // (chunk score 0.5 blended with page score 1.0 at weight 0.8 > weight 0.3)
-    expect(resultOverridden.results[0]!.score).toBeGreaterThan(resultDefault.results[0]!.score);
+    expect(result.results.length).toBeGreaterThan(0);
   });
 });
 

@@ -55,13 +55,13 @@ export class GeminiEmbedder {
     });
   }
 
-  private async getClient(): Promise<{ models: { embedContent: Function; batchEmbedContents: Function } }> {
+  private async getClient(): Promise<{ models: { embedContent: Function } }> {
     if (!this.clientPromise) {
       this.clientPromise = import("@google/genai").then(
         ({ GoogleGenAI }) => new GoogleGenAI({ apiKey: this.apiKey })
       );
     }
-    return this.clientPromise as Promise<{ models: { embedContent: Function; batchEmbedContents: Function } }>;
+    return this.clientPromise as Promise<{ models: { embedContent: Function } }>;
   }
 
   /**
@@ -96,20 +96,13 @@ export class GeminiEmbedder {
     await Promise.all(
       batches.map(({ startIdx, batchTexts }) =>
         this.limiter(async () => {
-          const response = await (client.models.batchEmbedContents as Function)({
+          const response = await (client.models.embedContent as Function)({
             model: this.model,
-            requests: batchTexts.map((text, j) => {
-              const req: Record<string, unknown> = {
-                content: text,
-                taskType: effectiveTaskType,
-                outputDimensionality: this.dimensions
-              };
-              if (useTitles) {
-                const title = titles[startIdx + j];
-                if (title) req.title = title;
-              }
-              return req;
-            })
+            contents: batchTexts,
+            config: {
+              taskType: effectiveTaskType,
+              outputDimensionality: this.dimensions
+            }
           });
 
           const embeddings = (response as { embeddings: Array<{ values: number[] }> }).embeddings;

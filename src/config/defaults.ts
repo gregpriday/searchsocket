@@ -54,7 +54,11 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
     },
     upstash: {
       urlEnv: "UPSTASH_VECTOR_REST_URL",
-      tokenEnv: "UPSTASH_VECTOR_REST_TOKEN"
+      tokenEnv: "UPSTASH_VECTOR_REST_TOKEN",
+      namespaces: {
+        pages: "pages",
+        chunks: "chunks"
+      }
     },
     embedding: {
       model: "gemini-embedding-001",

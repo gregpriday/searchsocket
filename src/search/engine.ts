@@ -7,7 +7,7 @@ import { hrTimeMs } from "../utils/time";
 import { normalizeUrlPath } from "../utils/path";
 import { createUpstashStore } from "../vector/factory";
 import { GeminiEmbedder } from "../vector/gemini";
-import { rankHits, aggregateByPage, trimByScoreGap, mergePageAndChunkResults } from "./ranking";
+import { rankHits, aggregateByPage, trimByScoreGap, mergePageAndChunkResults, rankPageHits, trimPagesByScoreGap } from "./ranking";
 import type {
   PageHit,
   RankingOverrides,
@@ -22,7 +22,7 @@ import type {
   VectorHit
 } from "../types";
 import type { UpstashSearchStore } from "../vector/upstash";
-import type { RankedHit, PageResult } from "./ranking";
+import type { RankedHit, PageResult, RankedPage } from "./ranking";
 import { diceScore, compositeScore, dominantRelationshipType } from "./related-pages";
 import { toSnippet, queryAwareExcerpt } from "../utils/text";
 import { buildMetaFilterString } from "../utils/structured-meta";
@@ -221,20 +221,11 @@ export class SearchEngine {
     const topK = input.topK ?? 10;
     const maxSubResults = input.maxSubResults ?? 5;
     const groupByPage = (input.groupBy ?? "page") === "page";
-    // Fetch more candidates for page aggregation
-    const candidateK = groupByPage
-      ? Math.max(topK * 10, 50)
-      : Math.max(50, topK);
-
-    const useDualSearch = effectiveConfig.search.dualSearch && groupByPage;
 
     // Embed the query text via Gemini
     const queryVector = await this.embedder.embedQuery(input.q);
 
-    const searchStart = process.hrtime.bigint();
-    let ranked: RankedHit[];
-
-    // Post-query filtering for pathPrefix and tags (Upstash Vector doesn't support GLOB)
+    // Post-query filtering for pathPrefix and tags
     const pathPrefix = input.pathPrefix
       ? (input.pathPrefix.startsWith("/") ? input.pathPrefix : `/${input.pathPrefix}`)
       : undefined;
@@ -245,19 +236,6 @@ export class SearchEngine {
       ? buildMetaFilterString(input.filters)
       : "";
     const metaFilter = metaFilterStr || undefined;
-
-    const applyPostFilters = (hits: VectorHit[]): VectorHit[] => {
-      let filtered = hits;
-      if (pathPrefix) {
-        filtered = filtered.filter((h) => h.metadata.url.startsWith(pathPrefix));
-      }
-      if (filterTags) {
-        filtered = filtered.filter((h) =>
-          filterTags.every((tag) => h.metadata.tags.includes(tag))
-        );
-      }
-      return filtered;
-    };
 
     const applyPagePostFilters = (hits: PageHit[]): PageHit[] => {
       let filtered = hits;
@@ -272,34 +250,68 @@ export class SearchEngine {
       return filtered;
     };
 
-    if (useDualSearch) {
-      // Parallel search: page search + chunk search using the same query vector
-      const chunkLimit = Math.max(topK * 10, 100);
-      const pageLimit = 20;
+    const applyChunkPostFilters = (hits: VectorHit[]): VectorHit[] => {
+      let filtered = hits;
+      if (filterTags) {
+        filtered = filtered.filter((h) =>
+          filterTags.every((tag) => h.metadata.tags.includes(tag))
+        );
+      }
+      return filtered;
+    };
 
-      // Over-fetch when post-filters are active (metadata filters are server-side, no multiplier needed)
+    const searchStart = process.hrtime.bigint();
+
+    if (groupByPage) {
+      // ── Page-first pipeline ──
+      // 1. Search page vectors to get top pages ranked by similarity
       const fetchMultiplier = (pathPrefix || filterTags) ? 2 : 1;
+      const pageLimit = Math.max(topK * 2, 20);
 
-      const [pageHits, chunkHits] = await Promise.all([
-        this.store.searchPages(
-          queryVector,
-          { limit: pageLimit * fetchMultiplier, filter: metaFilter },
-          resolvedScope
-        ),
-        this.store.search(
-          queryVector,
-          { limit: chunkLimit * fetchMultiplier, filter: metaFilter },
-          resolvedScope
-        )
-      ]);
+      const pageHits = await this.store.searchPages(
+        queryVector,
+        { limit: pageLimit * fetchMultiplier, filter: metaFilter },
+        resolvedScope
+      );
 
-      const filteredChunks = applyPostFilters(chunkHits);
       const filteredPages = applyPagePostFilters(pageHits);
 
-      const rankedChunks = rankHits(filteredChunks, effectiveConfig, input.q, input.debug);
-      ranked = mergePageAndChunkResults(filteredPages, rankedChunks, effectiveConfig);
+      // 2. Rank pages with boosts (depth, incoming links, title match, page weights, etc.)
+      let rankedPages = rankPageHits(filteredPages, effectiveConfig, input.q, input.debug);
+      rankedPages = trimPagesByScoreGap(rankedPages, effectiveConfig);
+
+      // Take top N pages
+      const topPages = rankedPages.slice(0, topK);
+
+      // 3. For each top page, find best-matching chunks within that page
+      const chunkPromises = topPages.map((page) =>
+        this.store.searchChunksByUrl(
+          queryVector,
+          page.url,
+          { limit: maxSubResults, filter: metaFilter },
+          resolvedScope
+        ).then((chunks) => applyChunkPostFilters(chunks))
+      );
+      const allChunks = await Promise.all(chunkPromises);
+
+      // 4. Build results: pages with nested chunks for navigation
+      const searchMs = hrTimeMs(searchStart);
+      const results = this.buildPageFirstResults(topPages, allChunks, input.q, input.debug, maxSubResults);
+
+      return {
+        q: input.q,
+        scope: resolvedScope.scopeName,
+        results,
+        meta: {
+          timingsMs: {
+            search: Math.round(searchMs),
+            total: Math.round(hrTimeMs(totalStart))
+          }
+        }
+      };
     } else {
-      // Single search
+      // ── Chunk-only mode (groupBy: "chunk") — legacy behavior ──
+      const candidateK = Math.max(50, topK);
       const fetchMultiplier = (pathPrefix || filterTags) ? 2 : 1;
 
       const hits = await this.store.search(
@@ -307,24 +319,85 @@ export class SearchEngine {
         { limit: candidateK * fetchMultiplier, filter: metaFilter },
         resolvedScope
       );
-      const filtered = applyPostFilters(hits);
-      ranked = rankHits(filtered, effectiveConfig, input.q, input.debug);
-    }
-    const searchMs = hrTimeMs(searchStart);
 
-    const results = this.buildResults(ranked, topK, groupByPage, maxSubResults, input.q, input.debug, effectiveConfig);
-
-    return {
-      q: input.q,
-      scope: resolvedScope.scopeName,
-      results,
-      meta: {
-        timingsMs: {
-          search: Math.round(searchMs),
-          total: Math.round(hrTimeMs(totalStart))
-        }
+      let filtered = hits;
+      if (pathPrefix) {
+        filtered = filtered.filter((h) => h.metadata.url.startsWith(pathPrefix));
       }
-    };
+      if (filterTags) {
+        filtered = filtered.filter((h) =>
+          filterTags!.every((tag) => h.metadata.tags.includes(tag))
+        );
+      }
+
+      const ranked = rankHits(filtered, effectiveConfig, input.q, input.debug);
+      const searchMs = hrTimeMs(searchStart);
+      const results = this.buildResults(ranked, topK, false, maxSubResults, input.q, input.debug, effectiveConfig);
+
+      return {
+        q: input.q,
+        scope: resolvedScope.scopeName,
+        results,
+        meta: {
+          timingsMs: {
+            search: Math.round(searchMs),
+            total: Math.round(hrTimeMs(totalStart))
+          }
+        }
+      };
+    }
+  }
+
+  private buildPageFirstResults(
+    rankedPages: RankedPage[],
+    allChunks: VectorHit[][],
+    query?: string,
+    debug?: boolean,
+    maxSubResults: number = 5
+  ): SearchResult[] {
+    return rankedPages.map((page, i) => {
+      const chunks = allChunks[i] ?? [];
+
+      // Best chunk is the first one (highest similarity to query within this page)
+      const bestChunk = chunks[0];
+
+      // Build snippet from best chunk, or fall back to page description
+      const snippet = bestChunk
+        ? (query ? queryAwareExcerpt(bestChunk.metadata.chunkText, query) : toSnippet(bestChunk.metadata.chunkText))
+        : (page.description || page.title);
+
+      const result: SearchResult = {
+        url: page.url,
+        title: page.title,
+        sectionTitle: bestChunk?.metadata.sectionTitle || undefined,
+        snippet,
+        chunkText: bestChunk?.metadata.chunkText || undefined,
+        score: Number(page.finalScore.toFixed(6)),
+        routeFile: page.routeFile,
+        chunks: chunks.length > 0
+          ? chunks.slice(0, maxSubResults).map((c) => ({
+              sectionTitle: c.metadata.sectionTitle || undefined,
+              snippet: query ? queryAwareExcerpt(c.metadata.chunkText, query) : toSnippet(c.metadata.chunkText),
+              chunkText: c.metadata.chunkText || undefined,
+              headingPath: c.metadata.headingPath,
+              score: Number(c.score.toFixed(6))
+            }))
+          : undefined
+      };
+
+      if (debug && page.breakdown) {
+        result.breakdown = {
+          baseScore: page.breakdown.baseScore,
+          incomingLinkBoost: page.breakdown.incomingLinkBoost,
+          depthBoost: page.breakdown.depthBoost,
+          titleMatchBoost: page.breakdown.titleMatchBoost,
+          freshnessBoost: page.breakdown.freshnessBoost,
+          anchorTextMatchBoost: 0
+        };
+      }
+
+      return result;
+    });
   }
 
   private ensureSnippet(hit: RankedHit, query?: string): string {

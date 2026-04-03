@@ -13,11 +13,15 @@ const tempDirs: string[] = [];
 function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): UpstashSearchStore & {
   search: ReturnType<typeof vi.fn>;
   searchPages: ReturnType<typeof vi.fn>;
+  searchChunksByUrl: ReturnType<typeof vi.fn>;
 } {
   const store = {
     upsertChunks: vi.fn(async () => undefined),
     search: vi.fn(async () => hits),
     searchPages: vi.fn(async () => pageHits),
+    searchChunksByUrl: vi.fn(async (_vector: number[], url: string) => {
+      return hits.filter((h) => h.metadata.url === url);
+    }),
     deleteByIds: vi.fn(async () => undefined),
     deleteScope: vi.fn(async () => undefined),
     listScopes: vi.fn(async () => []),
@@ -34,6 +38,7 @@ function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): Upst
   return store as unknown as UpstashSearchStore & {
     search: ReturnType<typeof vi.fn>;
     searchPages: ReturnType<typeof vi.fn>;
+    searchChunksByUrl: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -72,10 +77,9 @@ afterEach(async () => {
 });
 
 describe("SearchEngine — metadata filters", () => {
-  it("passes metadata filter string to store.search()", async () => {
+  it("passes metadata filter string to store.search() in chunk mode", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("test");
-    config.search.dualSearch = false;
     const store = createMockStore([makeHit("1", "/page")]);
 
     const engine = await SearchEngine.create({
@@ -87,6 +91,7 @@ describe("SearchEngine — metadata filters", () => {
 
     await engine.search({
       q: "test query",
+      groupBy: "chunk",
       filters: { version: 2 }
     });
 
@@ -95,11 +100,13 @@ describe("SearchEngine — metadata filters", () => {
     expect(callArgs[1].filter).toBe("meta.version = 2");
   });
 
-  it("passes metadata filter to both store.search and store.searchPages in dual search", async () => {
+  it("passes metadata filter to searchPages in page-first mode", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("test");
-    config.search.dualSearch = true;
-    const store = createMockStore([makeHit("1", "/page")], []);
+    const pageHits: PageHit[] = [
+      { id: "/page", score: 0.8, title: "Title", url: "/page", description: "", tags: [], depth: 1, incomingLinks: 0, routeFile: "" }
+    ];
+    const store = createMockStore([makeHit("1", "/page")], pageHits);
 
     const engine = await SearchEngine.create({
       cwd,
@@ -113,22 +120,21 @@ describe("SearchEngine — metadata filters", () => {
       filters: { deprecated: false, category: "auth" }
     });
 
-    expect(store.search).toHaveBeenCalledTimes(1);
     expect(store.searchPages).toHaveBeenCalledTimes(1);
 
-    const chunkFilter = store.search.mock.calls[0]![1].filter;
     const pageFilter = store.searchPages.mock.calls[0]![1].filter;
+    expect(pageFilter).toContain("meta.deprecated = false");
+    expect(pageFilter).toContain("meta.category CONTAINS 'auth'");
 
-    // Both should have the same filter
+    // searchChunksByUrl also receives the filter
+    expect(store.searchChunksByUrl).toHaveBeenCalledTimes(1);
+    const chunkFilter = store.searchChunksByUrl.mock.calls[0]![2].filter;
     expect(chunkFilter).toBe(pageFilter);
-    expect(chunkFilter).toContain("meta.deprecated = false");
-    expect(chunkFilter).toContain("meta.category CONTAINS 'auth'");
   });
 
   it("does not pass filter when filters is empty", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("test");
-    config.search.dualSearch = false;
     const store = createMockStore([makeHit("1", "/page")]);
 
     const engine = await SearchEngine.create({
@@ -138,7 +144,7 @@ describe("SearchEngine — metadata filters", () => {
       embedder: createMockEmbedder()
     });
 
-    await engine.search({ q: "test", filters: {} });
+    await engine.search({ q: "test", groupBy: "chunk", filters: {} });
 
     const callArgs = store.search.mock.calls[0]!;
     expect(callArgs[1].filter).toBeUndefined();
@@ -147,7 +153,6 @@ describe("SearchEngine — metadata filters", () => {
   it("does not pass filter when filters is omitted", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("test");
-    config.search.dualSearch = false;
     const store = createMockStore([makeHit("1", "/page")]);
 
     const engine = await SearchEngine.create({
@@ -157,7 +162,7 @@ describe("SearchEngine — metadata filters", () => {
       embedder: createMockEmbedder()
     });
 
-    await engine.search({ q: "test" });
+    await engine.search({ q: "test", groupBy: "chunk" });
 
     const callArgs = store.search.mock.calls[0]!;
     expect(callArgs[1].filter).toBeUndefined();
