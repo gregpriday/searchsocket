@@ -436,7 +436,7 @@ describe("SearchEngine - adversarial cases", () => {
   it("falls back to chunkText snippet when snippet is too short", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minScore = 0;
+    config.ranking.minScoreRatio = 0;
     config.ranking.scoreGapThreshold = 0;
 
     const hits: VectorHit[] = [
@@ -468,7 +468,7 @@ describe("SearchEngine - adversarial cases", () => {
   it("generates query-aware snippet from chunkText when query is present", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minScore = 0;
+    config.ranking.minScoreRatio = 0;
     config.ranking.scoreGapThreshold = 0;
 
     const longSnippet = "This is the original stored snippet that was computed at index time without query context.";
@@ -500,7 +500,7 @@ describe("SearchEngine - adversarial cases", () => {
   it("trims low-confidence results via score-gap trimming", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    // Use default scoreGapThreshold (0.4) and minScore (0.3)
+    // Use default scoreGapThreshold (0.4) and minScoreRatio (0.70)
 
     const hits: VectorHit[] = [
       { ...makeHit("chunk-1", "/relevant"), score: 0.8 },
@@ -524,7 +524,7 @@ describe("SearchEngine - adversarial cases", () => {
   it("populates chunkText on top-level result when metadata.chunkText is present", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minScore = 0;
+    config.ranking.minScoreRatio = 0;
     config.ranking.scoreGapThreshold = 0;
 
     const hits: VectorHit[] = [
@@ -552,7 +552,7 @@ describe("SearchEngine - adversarial cases", () => {
   it("chunkText is undefined when metadata.chunkText is empty", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minScore = 0;
+    config.ranking.minScoreRatio = 0;
     config.ranking.scoreGapThreshold = 0;
 
     const hits: VectorHit[] = [
@@ -580,7 +580,7 @@ describe("SearchEngine - adversarial cases", () => {
   it("populates chunkText on nested chunk entries", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minScore = 0;
+    config.ranking.minScoreRatio = 0;
     config.ranking.scoreGapThreshold = 0;
 
     const hits: VectorHit[] = [
@@ -605,7 +605,7 @@ describe("SearchEngine - adversarial cases", () => {
   it("populates chunkText in chunk-mode results", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minScore = 0;
+    config.ranking.minScoreRatio = 0;
     config.ranking.scoreGapThreshold = 0;
 
     const hits: VectorHit[] = [
@@ -736,7 +736,7 @@ describe("SearchEngine - dual search", () => {
   it("page-first pipeline ranks pages by page similarity score", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minScore = 0;
+    config.ranking.minScoreRatio = 0;
     config.ranking.scoreGapThreshold = 0;
 
     const chunkHits: VectorHit[] = [
@@ -913,7 +913,7 @@ describe("SearchEngine - maxSubResults", () => {
   it("has no effect on chunk-mode results", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minScore = 0;
+    config.ranking.minScoreRatio = 0;
     config.ranking.scoreGapThreshold = 0;
 
     const hits: VectorHit[] = [
@@ -1031,7 +1031,7 @@ describe("SearchEngine - ranking overrides", () => {
   it("applies partial overrides — only specified fields change", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minScore = 0;
+    config.ranking.minScoreRatio = 0;
     config.ranking.scoreGapThreshold = 0;
 
     const hits: VectorHit[] = [
@@ -1062,7 +1062,7 @@ describe("SearchEngine - ranking overrides", () => {
   it("accepts pageSearchWeight override without error", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minScore = 0;
+    config.ranking.minScoreRatio = 0;
     config.ranking.scoreGapThreshold = 0;
 
     const chunkHits: VectorHit[] = [

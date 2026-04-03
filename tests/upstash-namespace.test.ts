@@ -294,31 +294,11 @@ describe("UpstashSearchStore namespace routing", () => {
 });
 
 describe("UpstashSearchStore hybrid query mode", () => {
-  it("search() passes queryMode HYBRID when hybridChunks is true", async () => {
-    const { index, chunksNs } = createFakeIndex();
-    const store = new UpstashSearchStore({ index, pagesNamespace: "pages", chunksNamespace: "chunks", hybridChunks: true });
-
-    await store.search("test query", { limit: 10 }, scope);
-
-    const queryArgs = (chunksNs.query.mock.lastCall as unknown as [Record<string, unknown>])[0];
-    expect(queryArgs.queryMode).toBe(QueryMode.HYBRID);
-  });
-
-  it("search() always passes queryMode HYBRID regardless of options", async () => {
+  it("search() always passes queryMode HYBRID", async () => {
     const { index, chunksNs } = createFakeIndex();
     const store = new UpstashSearchStore({ index, pagesNamespace: "pages", chunksNamespace: "chunks" });
 
     await store.search("test query", { limit: 10 }, scope);
-
-    const queryArgs = (chunksNs.query.mock.lastCall as unknown as [Record<string, unknown>])[0];
-    expect(queryArgs.queryMode).toBe(QueryMode.HYBRID);
-  });
-
-  it("searchChunksByUrl() passes queryMode HYBRID when hybridChunks is true", async () => {
-    const { index, chunksNs } = createFakeIndex();
-    const store = new UpstashSearchStore({ index, pagesNamespace: "pages", chunksNamespace: "chunks", hybridChunks: true });
-
-    await store.searchChunksByUrl("test query", "/test", { limit: 10 }, scope);
 
     const queryArgs = (chunksNs.query.mock.lastCall as unknown as [Record<string, unknown>])[0];
     expect(queryArgs.queryMode).toBe(QueryMode.HYBRID);

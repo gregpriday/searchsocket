@@ -535,7 +535,7 @@ describe("trimByScoreGap", () => {
     expect(trimmed[0]!.url).toBe("/a");
   });
 
-  it("returns results when median is above minScore", () => {
+  it("returns results when all scores are above minScoreRatio threshold", () => {
     const pages: PageResult[] = [
       makePageResult("/a", 0.9),
       makePageResult("/b", 0.8),

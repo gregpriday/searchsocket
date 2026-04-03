@@ -42,7 +42,7 @@ const mocks = vi.hoisted(() => {
       aggregationCap: 5,
       aggregationDecay: 0.5,
       minChunkScoreRatio: 0.5,
-      minScore: 0.3,
+      minScoreRatio: 0.70,
       scoreGapThreshold: 0.4,
       weights: {
         incomingLinks: 0.05,
@@ -162,7 +162,7 @@ describe("runPlaygroundServer", () => {
 
     const jsonFn = vi.fn();
     const res = { json: jsonFn, status: vi.fn(() => ({ json: vi.fn() })) };
-    const overrides = { ranking: { minScore: 0.1 } };
+    const overrides = { ranking: { minScoreRatio: 0.1 } };
     await postHandler({ body: { q: "test", debug: true, rankingOverrides: overrides } }, res);
 
     expect(mocks.searchFn).toHaveBeenCalledWith(
