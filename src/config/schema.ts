@@ -76,7 +76,8 @@ export const searchSocketConfigSchema = z.object({
       headingPathDepth: z.number().int().positive().optional(),
       dontSplitInside: z.array(z.enum(["code", "table", "blockquote"])).optional(),
       prependTitle: z.boolean().optional(),
-      pageSummaryChunk: z.boolean().optional()
+      pageSummaryChunk: z.boolean().optional(),
+      weightHeadings: z.boolean().optional()
     })
     .optional(),
   upstash: z

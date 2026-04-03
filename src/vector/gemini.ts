@@ -68,10 +68,18 @@ export class GeminiEmbedder {
    * Embed an array of texts using the configured model.
    * Handles batching and rate limiting internally.
    */
-  async embedTexts(texts: string[], taskType?: string): Promise<number[][]> {
+  async embedTexts(texts: string[], taskType?: string, titles?: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
 
+    if (titles && titles.length !== texts.length) {
+      throw new SearchSocketError(
+        "EMBEDDING_FAILED",
+        `Titles array length (${titles.length}) must match texts array length (${texts.length})`
+      );
+    }
+
     const effectiveTaskType = taskType ?? this.taskType;
+    const useTitles = titles && effectiveTaskType === "RETRIEVAL_DOCUMENT";
     const needsNormalize = this.dimensions < 3072;
     const results: number[][] = new Array(texts.length);
 
@@ -90,11 +98,18 @@ export class GeminiEmbedder {
         this.limiter(async () => {
           const response = await (client.models.batchEmbedContents as Function)({
             model: this.model,
-            requests: batchTexts.map((text) => ({
-              content: text,
-              taskType: effectiveTaskType,
-              outputDimensionality: this.dimensions
-            }))
+            requests: batchTexts.map((text, j) => {
+              const req: Record<string, unknown> = {
+                content: text,
+                taskType: effectiveTaskType,
+                outputDimensionality: this.dimensions
+              };
+              if (useTitles) {
+                const title = titles[startIdx + j];
+                if (title) req.title = title;
+              }
+              return req;
+            })
           });
 
           const embeddings = (response as { embeddings: Array<{ values: number[] }> }).embeddings;
