@@ -52,7 +52,51 @@ function createMockStore(): {
       }));
       return results;
     }),
-    searchPages: vi.fn(async () => []),
+    searchPages: vi.fn(async () => {
+      // Return page hits from upserted pages for page-first pipeline
+      return upsertedPages.map((page) => ({
+        id: String(page.metadata.url ?? page.id),
+        score: 0.8,
+        title: String(page.metadata.title ?? ""),
+        url: String(page.metadata.url ?? ""),
+        description: String(page.metadata.description ?? ""),
+        tags: Array.isArray(page.metadata.tags) ? (page.metadata.tags as string[]) : [],
+        depth: Number(page.metadata.depth ?? 0),
+        incomingLinks: Number(page.metadata.incomingLinks ?? 0),
+        routeFile: String(page.metadata.routeFile ?? "")
+      }));
+    }),
+    searchChunksByUrl: vi.fn(async (_vector: number[], url: string) => {
+      // Return chunks matching the given URL for page-first pipeline
+      const results: VectorHit[] = upsertedChunks
+        .filter((chunk) => String(chunk.metadata.url ?? "") === url)
+        .map((chunk) => ({
+          id: chunk.id,
+          score: 0.8,
+          metadata: {
+            projectId: String(chunk.metadata.projectId ?? ""),
+            scopeName: String(chunk.metadata.scopeName ?? ""),
+            url: String(chunk.metadata.url ?? ""),
+            path: String(chunk.metadata.path ?? ""),
+            title: String(chunk.metadata.title ?? ""),
+            sectionTitle: String(chunk.metadata.sectionTitle ?? ""),
+            headingPath: chunk.metadata.headingPath
+              ? String(chunk.metadata.headingPath).split(" > ").filter(Boolean)
+              : [],
+            snippet: String(chunk.metadata.snippet ?? ""),
+            chunkText: String(chunk.metadata.chunkText ?? ""),
+            ordinal: Number(chunk.metadata.ordinal ?? 0),
+            contentHash: String(chunk.metadata.contentHash ?? ""),
+            depth: Number(chunk.metadata.depth ?? 0),
+            incomingLinks: Number(chunk.metadata.incomingLinks ?? 0),
+            routeFile: String(chunk.metadata.routeFile ?? ""),
+            tags: Array.isArray(chunk.metadata.tags)
+              ? (chunk.metadata.tags as string[])
+              : []
+          }
+        }));
+      return results;
+    }),
     deleteByIds: vi.fn(async () => undefined),
     deleteScope: vi.fn(async () => undefined),
     listScopes: vi.fn(async () => []),
