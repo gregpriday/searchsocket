@@ -478,7 +478,7 @@ export class IndexPipeline {
         generatedAt: nowIso(),
         incomingLinks: incomingLinkCount.get(page.url) ?? 0,
         outgoingLinks: page.outgoingLinks.length,
-        outgoingLinkUrls: page.outgoingLinks,
+        outgoingLinkUrls: page.outgoingLinks.map((l) => typeof l === "string" ? l : l.url),
         depth: getUrlDepth(page.url),
         tags: page.tags,
         markdown: page.markdown,
