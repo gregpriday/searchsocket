@@ -753,6 +753,8 @@ program
   .option("--transport <transport>", "stdio|http", "stdio")
   .option("--port <n>", "HTTP port", "3338")
   .option("--path <path>", "HTTP path", "/mcp")
+  .option("--access <mode>", "public|private access mode")
+  .option("--api-key <key>", "API key for public access mode")
   .action(async (opts, command) => {
     const rootOpts = getRootOptions(command);
     const cwd = path.resolve(rootOpts?.cwd ?? process.cwd());
@@ -762,7 +764,9 @@ program
       configPath: rootOpts?.config,
       transport: opts.transport,
       httpPort: parsePositiveInt(opts.port, "--port"),
-      httpPath: opts.path
+      httpPath: opts.path,
+      access: opts.access,
+      apiKey: opts.apiKey
     });
   });
 

@@ -195,6 +195,17 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
     };
   }
 
+  if (merged.mcp.access === "public") {
+    const resolvedKey = merged.mcp.http.apiKey
+      ?? (merged.mcp.http.apiKeyEnv ? process.env[merged.mcp.http.apiKeyEnv] : undefined);
+    if (!resolvedKey) {
+      throw new SearchSocketError(
+        "CONFIG_MISSING",
+        '`mcp.access` is "public" but no API key is configured. Set `mcp.http.apiKey` or `mcp.http.apiKeyEnv`.'
+      );
+    }
+  }
+
   if (merged.source.mode === "crawl" && !merged.source.crawl?.baseUrl) {
     throw new SearchSocketError("CONFIG_MISSING", "`source.crawl.baseUrl` is required when source.mode is crawl.");
   }

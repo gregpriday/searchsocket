@@ -86,6 +86,7 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
     },
     mcp: {
       enable: process.env.NODE_ENV !== "production",
+      access: "private",
       transport: "stdio",
       http: {
         port: 3338,

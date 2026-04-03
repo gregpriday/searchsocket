@@ -105,10 +105,13 @@ export interface SearchSocketConfig {
   };
   mcp?: {
     enable?: boolean;
+    access?: "public" | "private";
     transport?: "stdio" | "http";
     http?: {
       port?: number;
       path?: string;
+      apiKey?: string;
+      apiKeyEnv?: string;
     };
     handle?: {
       path?: string;
@@ -230,10 +233,13 @@ export interface ResolvedSearchSocketConfig {
   };
   mcp: {
     enable: boolean;
+    access: "public" | "private";
     transport: "stdio" | "http";
     http: {
       port: number;
       path: string;
+      apiKey?: string;
+      apiKeyEnv?: string;
     };
     handle: {
       path: string;

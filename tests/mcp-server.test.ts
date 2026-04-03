@@ -70,7 +70,7 @@ vi.mock("../src/config/load", () => {
   };
 });
 
-import { runMcpServer, createServer } from "../src/mcp/server";
+import { runMcpServer, createServer, resolveApiKey, verifyApiKey } from "../src/mcp/server";
 
 describe("runMcpServer", () => {
   const originalLog = console.log;
@@ -305,5 +305,304 @@ describe("find_source_file tool", () => {
     await expect(handler({ query: "fail" })).rejects.toThrow(
       "Upstash unreachable"
     );
+  });
+});
+
+describe("verifyApiKey", () => {
+  it("returns true for matching keys", () => {
+    expect(verifyApiKey("test-key-123", "test-key-123")).toBe(true);
+  });
+
+  it("returns false for mismatched keys", () => {
+    expect(verifyApiKey("wrong-key", "test-key-123")).toBe(false);
+  });
+
+  it("returns false for keys with different lengths", () => {
+    expect(verifyApiKey("short", "a-much-longer-key-value")).toBe(false);
+  });
+
+  it("returns false for empty provided key", () => {
+    expect(verifyApiKey("", "test-key-123")).toBe(false);
+  });
+});
+
+describe("resolveApiKey", () => {
+  it("returns apiKey from config when set", () => {
+    const config = {
+      mcp: { http: { apiKey: "direct-key", port: 3338, path: "/mcp" } }
+    } as never;
+    expect(resolveApiKey(config)).toBe("direct-key");
+  });
+
+  it("returns env var value when apiKeyEnv is set", () => {
+    const envKey = "TEST_SEARCHSOCKET_MCP_KEY_" + Date.now();
+    process.env[envKey] = "env-key-value";
+    try {
+      const config = {
+        mcp: { http: { apiKeyEnv: envKey, port: 3338, path: "/mcp" } }
+      } as never;
+      expect(resolveApiKey(config)).toBe("env-key-value");
+    } finally {
+      delete process.env[envKey];
+    }
+  });
+
+  it("prefers apiKey over apiKeyEnv", () => {
+    const envKey = "TEST_SEARCHSOCKET_MCP_KEY2_" + Date.now();
+    process.env[envKey] = "env-value";
+    try {
+      const config = {
+        mcp: { http: { apiKey: "direct-value", apiKeyEnv: envKey, port: 3338, path: "/mcp" } }
+      } as never;
+      expect(resolveApiKey(config)).toBe("direct-value");
+    } finally {
+      delete process.env[envKey];
+    }
+  });
+
+  it("returns undefined when neither is set", () => {
+    const config = {
+      mcp: { http: { port: 3338, path: "/mcp" } }
+    } as never;
+    expect(resolveApiKey(config)).toBeUndefined();
+  });
+});
+
+describe("startHttpServer access modes", () => {
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    console.log = originalLog;
+    console.warn = originalWarn;
+  });
+
+  afterEach(() => {
+    console.log = originalLog;
+    console.warn = originalWarn;
+  });
+
+  it("binds to 127.0.0.1 in private mode (default)", async () => {
+    const config = {
+      mcp: {
+        access: "private" as const,
+        transport: "http" as const,
+        http: { port: 3338, path: "/mcp" }
+      }
+    };
+    mocks.loadConfig.mockResolvedValue(config);
+    mocks.createEngine.mockResolvedValue({ getConfig: () => config });
+
+    await runMcpServer({ transport: "http" });
+
+    expect(mocks.app.listen).toHaveBeenCalledWith(
+      3338,
+      "127.0.0.1",
+      expect.any(Function)
+    );
+  });
+
+  it("binds to 0.0.0.0 in public mode", async () => {
+    const config = {
+      mcp: {
+        access: "public" as const,
+        transport: "http" as const,
+        http: { port: 3338, path: "/mcp", apiKey: "test-key" }
+      }
+    };
+    mocks.loadConfig.mockResolvedValue(config);
+    mocks.createEngine.mockResolvedValue({ getConfig: () => config });
+
+    await runMcpServer({ transport: "http" });
+
+    expect(mocks.app.listen).toHaveBeenCalledWith(
+      3338,
+      "0.0.0.0",
+      expect.any(Function)
+    );
+  });
+
+  it("rejects requests without auth in public mode", async () => {
+    const config = {
+      mcp: {
+        access: "public" as const,
+        transport: "http" as const,
+        http: { port: 3338, path: "/mcp", apiKey: "secret-key" }
+      }
+    };
+    mocks.loadConfig.mockResolvedValue(config);
+    mocks.createEngine.mockResolvedValue({ getConfig: () => config });
+
+    await runMcpServer({ transport: "http" });
+
+    const postHandler = mocks.app.post.mock.calls[0]![1] as (req: unknown, res: unknown) => Promise<void>;
+    const mockRes = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn()
+    };
+
+    await postHandler(
+      { headers: {}, body: {} },
+      mockRes
+    );
+
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+    expect(mockRes.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jsonrpc: "2.0",
+        error: expect.objectContaining({ code: -32001, message: "Unauthorized" })
+      })
+    );
+  });
+
+  it("accepts requests with valid Bearer token in public mode", async () => {
+    const config = {
+      mcp: {
+        access: "public" as const,
+        transport: "http" as const,
+        http: { port: 3338, path: "/mcp", apiKey: "secret-key" }
+      }
+    };
+    mocks.loadConfig.mockResolvedValue(config);
+    mocks.createEngine.mockResolvedValue({ getConfig: () => config });
+
+    await runMcpServer({ transport: "http" });
+
+    const postHandler = mocks.app.post.mock.calls[0]![1] as (req: unknown, res: unknown) => Promise<void>;
+    const mockRes = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+      on: vi.fn(),
+      headersSent: false
+    };
+
+    await postHandler(
+      { headers: { authorization: "Bearer secret-key" }, body: {} },
+      mockRes
+    );
+
+    // Should NOT have returned 401
+    expect(mockRes.status).not.toHaveBeenCalledWith(401);
+  });
+
+  it("accepts requests with valid x-api-key header in public mode", async () => {
+    const config = {
+      mcp: {
+        access: "public" as const,
+        transport: "http" as const,
+        http: { port: 3338, path: "/mcp", apiKey: "secret-key" }
+      }
+    };
+    mocks.loadConfig.mockResolvedValue(config);
+    mocks.createEngine.mockResolvedValue({ getConfig: () => config });
+
+    await runMcpServer({ transport: "http" });
+
+    const postHandler = mocks.app.post.mock.calls[0]![1] as (req: unknown, res: unknown) => Promise<void>;
+    const mockRes = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+      on: vi.fn(),
+      headersSent: false
+    };
+
+    await postHandler(
+      { headers: { "x-api-key": "secret-key" }, body: {} },
+      mockRes
+    );
+
+    expect(mockRes.status).not.toHaveBeenCalledWith(401);
+  });
+
+  it("rejects requests with wrong Bearer token in public mode", async () => {
+    const config = {
+      mcp: {
+        access: "public" as const,
+        transport: "http" as const,
+        http: { port: 3338, path: "/mcp", apiKey: "secret-key" }
+      }
+    };
+    mocks.loadConfig.mockResolvedValue(config);
+    mocks.createEngine.mockResolvedValue({ getConfig: () => config });
+
+    await runMcpServer({ transport: "http" });
+
+    const postHandler = mocks.app.post.mock.calls[0]![1] as (req: unknown, res: unknown) => Promise<void>;
+    const mockRes = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn()
+    };
+
+    await postHandler(
+      { headers: { authorization: "Bearer wrong-key" }, body: {} },
+      mockRes
+    );
+
+    expect(mockRes.status).toHaveBeenCalledWith(401);
+  });
+
+  it("does not require auth in private mode", async () => {
+    const config = {
+      mcp: {
+        access: "private" as const,
+        transport: "http" as const,
+        http: { port: 3338, path: "/mcp" }
+      }
+    };
+    mocks.loadConfig.mockResolvedValue(config);
+    mocks.createEngine.mockResolvedValue({ getConfig: () => config });
+
+    await runMcpServer({ transport: "http" });
+
+    const postHandler = mocks.app.post.mock.calls[0]![1] as (req: unknown, res: unknown) => Promise<void>;
+    const mockRes = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+      on: vi.fn(),
+      headersSent: false
+    };
+
+    await postHandler(
+      { headers: {}, body: {} },
+      mockRes
+    );
+
+    // Should NOT have returned 401
+    expect(mockRes.status).not.toHaveBeenCalledWith(401);
+  });
+
+  it("applies CLI access and apiKey overrides", async () => {
+    const config = {
+      mcp: {
+        access: "private" as const,
+        transport: "http" as const,
+        http: { port: 3338, path: "/mcp" }
+      }
+    };
+    mocks.loadConfig.mockResolvedValue(config);
+    mocks.createEngine.mockResolvedValue({ getConfig: () => config });
+
+    await runMcpServer({ transport: "http", access: "public", apiKey: "cli-key" });
+
+    // Should bind to 0.0.0.0 because CLI overrode access to public
+    expect(mocks.app.listen).toHaveBeenCalledWith(
+      3338,
+      "0.0.0.0",
+      expect.any(Function)
+    );
+
+    // Auth should be enforced with the CLI key
+    const postHandler = mocks.app.post.mock.calls[0]![1] as (req: unknown, res: unknown) => Promise<void>;
+    const mockRes = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn()
+    };
+
+    await postHandler(
+      { headers: {}, body: {} },
+      mockRes
+    );
+    expect(mockRes.status).toHaveBeenCalledWith(401);
   });
 });
