@@ -13,6 +13,7 @@ import { ensureStateDirs } from "./core/state";
 import { SearchSocketError } from "./errors";
 import { IndexPipeline } from "./indexing/pipeline";
 import { runMcpServer } from "./mcp/server";
+import { runPlaygroundServer } from "./playground/server";
 import { SearchEngine } from "./search/engine";
 import { reciprocalRank, mrr } from "./search/quality-metrics";
 import { testFileSchema } from "./cli/test-schemas";
@@ -378,6 +379,9 @@ program
   .command("dev")
   .description("Watch content files/routes and incrementally reindex on changes")
   .option("--scope <name>", "scope override")
+  .option("--playground", "serve playground UI at /_searchsocket (default: true)", true)
+  .option("--no-playground", "disable playground UI")
+  .option("--playground-port <n>", "playground HTTP port", "3337")
   .option("--mcp", "start MCP server (http transport) alongside watcher", false)
   .option("--mcp-port <n>", "MCP HTTP port", "3338")
   .option("--mcp-path <path>", "MCP HTTP path", "/mcp")
@@ -465,6 +469,23 @@ program
         httpPort: parsePositiveInt(opts.mcpPort, "--mcp-port"),
         httpPath: opts.mcpPath
       });
+    }
+
+    if (opts.playground) {
+      if (backendMissing) {
+        process.stdout.write("playground disabled: search backend not configured\n");
+      } else {
+        void runPlaygroundServer({
+          cwd,
+          configPath: rootOpts?.config,
+          config,
+          port: parsePositiveInt(opts.playgroundPort, "--playground-port")
+        }).then(({ port }) => {
+          process.stdout.write(`playground available at http://127.0.0.1:${port}/_searchsocket\n`);
+        }).catch((err) => {
+          process.stderr.write(`playground error: ${err instanceof Error ? err.message : String(err)}\n`);
+        });
+      }
     }
 
     await new Promise<void>((resolve) => {

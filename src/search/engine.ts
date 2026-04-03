@@ -29,7 +29,8 @@ const requestSchema = z.object({
   scope: z.string().optional(),
   pathPrefix: z.string().optional(),
   tags: z.array(z.string()).optional(),
-  groupBy: z.enum(["page", "chunk"]).optional()
+  groupBy: z.enum(["page", "chunk"]).optional(),
+  debug: z.boolean().optional()
 });
 
 const MAX_SITE_STRUCTURE_PAGES = 2000;
@@ -211,7 +212,7 @@ export class SearchEngine {
         )
       ]);
 
-      const rankedChunks = rankHits(chunkHits, this.config, input.q);
+      const rankedChunks = rankHits(chunkHits, this.config, input.q, input.debug);
       ranked = mergePageAndChunkResults(pageHits, rankedChunks, this.config);
     } else {
       // Legacy single-search behavior
@@ -226,11 +227,11 @@ export class SearchEngine {
         },
         resolvedScope
       );
-      ranked = rankHits(hits, this.config, input.q);
+      ranked = rankHits(hits, this.config, input.q, input.debug);
     }
     const searchMs = hrTimeMs(searchStart);
 
-    const results = this.buildResults(ranked, topK, groupByPage, input.q);
+    const results = this.buildResults(ranked, topK, groupByPage, input.q, input.debug);
 
     if (this.config.analytics.enabled && !isServerless()) {
       const logPath = path.join(this.cwd, this.config.state.dir, "analytics.jsonl");
@@ -263,7 +264,7 @@ export class SearchEngine {
     return snippet || "";
   }
 
-  private buildResults(ordered: RankedHit[], topK: number, groupByPage: boolean, _query?: string): SearchResult[] {
+  private buildResults(ordered: RankedHit[], topK: number, groupByPage: boolean, _query?: string, debug?: boolean): SearchResult[] {
     if (groupByPage) {
       let pages = aggregateByPage(ordered, this.config);
       pages = trimByScoreGap(pages, this.config);
@@ -274,7 +275,7 @@ export class SearchEngine {
         const meaningful = page.matchingChunks
           .filter((c) => c.finalScore >= minChunkScore)
           .slice(0, 5);
-        return {
+        const result: SearchResult = {
           url: page.url,
           title: page.title,
           sectionTitle: page.bestChunk.hit.metadata.sectionTitle || undefined,
@@ -290,6 +291,10 @@ export class SearchEngine {
               }))
             : undefined
         };
+        if (debug && page.bestChunk.breakdown) {
+          result.breakdown = page.bestChunk.breakdown;
+        }
+        return result;
       });
     } else {
       let filtered = ordered;
@@ -297,14 +302,20 @@ export class SearchEngine {
       if (minScore > 0) {
         filtered = ordered.filter((entry) => entry.finalScore >= minScore);
       }
-      return filtered.slice(0, topK).map(({ hit, finalScore }) => ({
-        url: hit.metadata.url,
-        title: hit.metadata.title,
-        sectionTitle: hit.metadata.sectionTitle || undefined,
-        snippet: this.ensureSnippet({ hit, finalScore }),
-        score: Number(finalScore.toFixed(6)),
-        routeFile: hit.metadata.routeFile
-      }));
+      return filtered.slice(0, topK).map(({ hit, finalScore, breakdown }) => {
+        const result: SearchResult = {
+          url: hit.metadata.url,
+          title: hit.metadata.title,
+          sectionTitle: hit.metadata.sectionTitle || undefined,
+          snippet: this.ensureSnippet({ hit, finalScore }),
+          score: Number(finalScore.toFixed(6)),
+          routeFile: hit.metadata.routeFile
+        };
+        if (debug && breakdown) {
+          result.breakdown = breakdown;
+        }
+        return result;
+      });
     }
   }
 

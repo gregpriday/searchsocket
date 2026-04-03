@@ -1,9 +1,10 @@
 import { matchUrlPattern } from "../utils/pattern";
-import type { PageHit, ResolvedSearchSocketConfig, VectorHit } from "../types";
+import type { PageHit, ResolvedSearchSocketConfig, ScoreBreakdown, VectorHit } from "../types";
 
 export interface RankedHit {
   hit: VectorHit;
   finalScore: number;
+  breakdown?: ScoreBreakdown;
 }
 
 export interface PageResult {
@@ -26,36 +27,54 @@ function normalizeForTitleMatch(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
 }
 
-export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig, query?: string): RankedHit[] {
+export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig, query?: string, debug?: boolean): RankedHit[] {
   const normalizedQuery = query ? normalizeForTitleMatch(query) : "";
   const titleMatchWeight = config.ranking.weights.titleMatch;
 
   return hits
     .map((hit) => {
-      let score = Number.isFinite(hit.score) ? hit.score : Number.NEGATIVE_INFINITY;
+      const baseScore = Number.isFinite(hit.score) ? hit.score : Number.NEGATIVE_INFINITY;
+      let score = baseScore;
 
+      let incomingLinkBoostValue = 0;
       if (config.ranking.enableIncomingLinkBoost) {
         const incomingBoost = Math.log(1 + nonNegativeOrZero(hit.metadata.incomingLinks));
-        score += incomingBoost * config.ranking.weights.incomingLinks;
+        incomingLinkBoostValue = incomingBoost * config.ranking.weights.incomingLinks;
+        score += incomingLinkBoostValue;
       }
 
+      let depthBoostValue = 0;
       if (config.ranking.enableDepthBoost) {
         const depthBoost = 1 / (1 + nonNegativeOrZero(hit.metadata.depth));
-        score += depthBoost * config.ranking.weights.depth;
+        depthBoostValue = depthBoost * config.ranking.weights.depth;
+        score += depthBoostValue;
       }
 
+      let titleMatchBoostValue = 0;
       if (normalizedQuery && titleMatchWeight > 0) {
         const normalizedTitle = normalizeForTitleMatch(hit.metadata.title);
         if (normalizedQuery.length > 0 && normalizedTitle.length > 0 &&
             (normalizedTitle.includes(normalizedQuery) || normalizedQuery.includes(normalizedTitle))) {
-          score += titleMatchWeight;
+          titleMatchBoostValue = titleMatchWeight;
+          score += titleMatchBoostValue;
         }
       }
 
-      return {
+      const result: RankedHit = {
         hit,
         finalScore: Number.isFinite(score) ? score : Number.NEGATIVE_INFINITY
       };
+
+      if (debug) {
+        result.breakdown = {
+          baseScore,
+          incomingLinkBoost: incomingLinkBoostValue,
+          depthBoost: depthBoostValue,
+          titleMatchBoost: titleMatchBoostValue
+        };
+      }
+
+      return result;
     })
     .sort((a, b) => {
       const delta = b.finalScore - a.finalScore;

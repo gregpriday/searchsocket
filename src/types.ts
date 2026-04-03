@@ -404,6 +404,14 @@ export interface SearchRequest {
   pathPrefix?: string;
   tags?: string[];
   groupBy?: "page" | "chunk";
+  debug?: boolean;
+}
+
+export interface ScoreBreakdown {
+  baseScore: number;
+  incomingLinkBoost: number;
+  depthBoost: number;
+  titleMatchBoost: number;
 }
 
 export interface SearchResultChunk {
@@ -421,6 +429,7 @@ export interface SearchResult {
   score: number;
   routeFile: string;
   chunks?: SearchResultChunk[];
+  breakdown?: ScoreBreakdown;
 }
 
 export interface SearchResponse {
