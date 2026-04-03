@@ -5,7 +5,6 @@ import { execSync } from "node:child_process";
 import { config as dotenvConfig } from "dotenv";
 import chokidar from "chokidar";
 import { Command, Option } from "commander";
-import { z } from "zod";
 import pkg from "../package.json";
 import { writeMinimalConfig, loadConfig, mergeConfig } from "./config/load";
 import { Logger } from "./core/logger";
@@ -16,6 +15,7 @@ import { IndexPipeline } from "./indexing/pipeline";
 import { runMcpServer } from "./mcp/server";
 import { SearchEngine } from "./search/engine";
 import { reciprocalRank, mrr } from "./search/quality-metrics";
+import { testFileSchema } from "./cli/test-schemas";
 import { createUpstashStore } from "./vector";
 import { sanitizeScopeName } from "./utils/text";
 import type { IndexStats, ResolvedSearchSocketConfig, Scope, ScopeInfo, SearchResult } from "./types";
@@ -858,21 +858,6 @@ program
     process.stdout.write(`  p50: ${report.latency.p50}   p95: ${report.latency.p95}   p99: ${report.latency.p99}   (from ${report.latency.count} events)\n`);
   });
 
-const testCaseSchema = z.object({
-  query: z.string().min(1),
-  expect: z
-    .object({
-      topResult: z.string().optional(),
-      inTop5: z.array(z.string()).optional(),
-      maxResults: z.number().int().nonnegative().optional()
-    })
-    .refine(
-      (e) => e.topResult !== undefined || e.inTop5 !== undefined || e.maxResults !== undefined,
-      { message: "expect must contain at least one of topResult, inTop5, or maxResults" }
-    )
-});
-
-const testFileSchema = z.array(testCaseSchema).min(1, "test file must contain at least one test case");
 
 program
   .command("test")
@@ -923,13 +908,20 @@ program
     const mrrData: Array<{ results: SearchResult[]; relevant: string[] }> = [];
 
     for (const tc of testCases) {
-      const response = await engine.search({
-        q: tc.query,
-        topK,
-        scope: opts.scope
-      });
-
-      const results = response.results;
+      let results: SearchResult[];
+      try {
+        const response = await engine.search({
+          q: tc.query,
+          topK,
+          scope: opts.scope
+        });
+        results = response.results;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        process.stdout.write(`FAIL "${tc.query}" → search error: ${msg}\n`);
+        failed++;
+        continue;
+      }
 
       if (tc.expect.topResult !== undefined) {
         const expectedUrl = tc.expect.topResult;
