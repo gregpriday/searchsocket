@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-04-03
+
+### Fixed
+
+- Use targeted `fetch()` for chunk content hashes instead of `range()` scan to avoid namespace cross-contamination on hybrid indexes
+- Use `range()` scan for stale chunk ID detection (safe for deletion since removing non-existent IDs is idempotent)
+- Reduce Upstash batch size from 100 to 90 to stay within API limits
+
 ## [0.6.0] - 2026-04-03
 
 ### Added
@@ -168,6 +176,7 @@ Initial public release.
 - **Request validation** with Zod schemas
 - **Rate limiting** and CORS configuration for the search API
 
+[0.6.1]: https://github.com/gregpriday/searchsocket/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/gregpriday/searchsocket/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gregpriday/searchsocket/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/gregpriday/searchsocket/compare/v0.3.3...v0.4.0
