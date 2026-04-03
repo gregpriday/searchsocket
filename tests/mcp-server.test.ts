@@ -70,7 +70,7 @@ vi.mock("../src/config/load", () => {
   };
 });
 
-import { runMcpServer } from "../src/mcp/server";
+import { runMcpServer, createServer } from "../src/mcp/server";
 
 describe("runMcpServer", () => {
   const originalLog = console.log;
@@ -169,5 +169,141 @@ describe("runMcpServer", () => {
 
     expect(mocks.stdioConnect).toHaveBeenCalledTimes(1);
     expect(console.log).not.toBe(originalLog);
+  });
+});
+
+describe("find_source_file tool", () => {
+  function getHandler(mockEngine: Record<string, unknown>) {
+    const server = createServer(mockEngine as never);
+    const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
+    const call = calls.find((c: unknown[]) => c[0] === "find_source_file");
+    expect(call).toBeDefined();
+    return call![2] as (input: Record<string, unknown>) => Promise<{
+      content: Array<{ type: string; text: string }>;
+    }>;
+  }
+
+  it("registers the find_source_file tool", () => {
+    const mockEngine = { search: vi.fn() };
+    const server = createServer(mockEngine as never);
+    const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
+    const toolNames = calls.map((c: unknown[]) => c[0]);
+    expect(toolNames).toContain("find_source_file");
+  });
+
+  it("returns url, routeFile, sectionTitle, and snippet for a match", async () => {
+    const mockEngine = {
+      search: vi.fn().mockResolvedValue({
+        results: [
+          {
+            url: "/about",
+            title: "About Us",
+            sectionTitle: "Our Mission",
+            snippet: "We build great things.",
+            score: 0.95,
+            routeFile: "src/routes/about/+page.svelte",
+            chunks: [{ text: "chunk1" }]
+          }
+        ]
+      })
+    };
+
+    const handler = getHandler(mockEngine);
+    const result = await handler({ query: "about us" });
+    const parsed = JSON.parse(result.content[0]!.text);
+
+    expect(parsed).toEqual({
+      url: "/about",
+      routeFile: "src/routes/about/+page.svelte",
+      sectionTitle: "Our Mission",
+      snippet: "We build great things."
+    });
+    expect(parsed).not.toHaveProperty("score");
+    expect(parsed).not.toHaveProperty("title");
+    expect(parsed).not.toHaveProperty("chunks");
+    expect(mockEngine.search).toHaveBeenCalledWith({
+      q: "about us",
+      topK: 1,
+      scope: undefined
+    });
+  });
+
+  it("returns error message when no results found", async () => {
+    const mockEngine = {
+      search: vi.fn().mockResolvedValue({ results: [] })
+    };
+
+    const handler = getHandler(mockEngine);
+    const result = await handler({ query: "nonexistent" });
+    const parsed = JSON.parse(result.content[0]!.text);
+
+    expect(parsed).toEqual({
+      error: "No matching content found for the given query."
+    });
+  });
+
+  it("omits sectionTitle when undefined", async () => {
+    const mockEngine = {
+      search: vi.fn().mockResolvedValue({
+        results: [
+          {
+            url: "/home",
+            title: "Home",
+            sectionTitle: undefined,
+            snippet: "Welcome.",
+            score: 0.8,
+            routeFile: "src/routes/+page.svelte"
+          }
+        ]
+      })
+    };
+
+    const handler = getHandler(mockEngine);
+    const result = await handler({ query: "home" });
+    const parsed = JSON.parse(result.content[0]!.text);
+
+    expect(parsed).toEqual({
+      url: "/home",
+      routeFile: "src/routes/+page.svelte",
+      snippet: "Welcome."
+    });
+    expect(parsed).not.toHaveProperty("sectionTitle");
+  });
+
+  it("passes scope to engine.search when provided", async () => {
+    const mockEngine = {
+      search: vi.fn().mockResolvedValue({
+        results: [
+          {
+            url: "/docs",
+            title: "Docs",
+            sectionTitle: "Intro",
+            snippet: "Documentation.",
+            score: 0.9,
+            routeFile: "src/routes/docs/+page.svelte"
+          }
+        ]
+      })
+    };
+
+    const handler = getHandler(mockEngine);
+    await handler({ query: "docs", scope: "my-scope" });
+
+    expect(mockEngine.search).toHaveBeenCalledWith({
+      q: "docs",
+      topK: 1,
+      scope: "my-scope"
+    });
+  });
+
+  it("propagates engine.search errors", async () => {
+    const mockEngine = {
+      search: vi.fn().mockRejectedValue(new Error("Upstash unreachable"))
+    };
+
+    const handler = getHandler(mockEngine);
+    await expect(handler({ query: "fail" })).rejects.toThrow(
+      "Upstash unreachable"
+    );
   });
 });

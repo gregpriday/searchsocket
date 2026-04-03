@@ -16,7 +16,7 @@ export interface McpServerOptions {
   httpPath?: string;
 }
 
-function createServer(engine: SearchEngine): McpServer {
+export function createServer(engine: SearchEngine): McpServer {
   const server = new McpServer({
     name: "searchsocket-mcp",
     version: "0.1.0"
@@ -105,6 +105,49 @@ function createServer(engine: SearchEngine): McpServer {
           {
             type: "text",
             text: JSON.stringify(result, null, 2)
+          }
+        ]
+      };
+    }
+  );
+
+  server.registerTool(
+    "find_source_file",
+    {
+      description:
+        "Find the SvelteKit source file for a piece of site content. Use this when you need to locate and edit content on the site. Returns the URL, route file path, section title, and a content snippet.",
+      inputSchema: {
+        query: z.string().min(1),
+        scope: z.string().optional()
+      }
+    },
+    async (input) => {
+      const result = await engine.search({
+        q: input.query,
+        topK: 1,
+        scope: input.scope
+      });
+
+      if (result.results.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: "No matching content found for the given query."
+              })
+            }
+          ]
+        };
+      }
+
+      const match = result.results[0]!;
+      const { url, routeFile, sectionTitle, snippet } = match;
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ url, routeFile, sectionTitle, snippet })
           }
         ]
       };
