@@ -67,6 +67,9 @@ export class GeminiEmbedder {
   /**
    * Embed an array of texts using the configured model.
    * Handles batching and rate limiting internally.
+   *
+   * @deprecated The indexing pipeline now uses Upstash built-in embedding via the `data` field.
+   * This method is retained for backwards compatibility. Use `embedImage()` for multimodal embedding.
    */
   async embedTexts(texts: string[], taskType?: string, titles?: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
@@ -132,6 +135,9 @@ export class GeminiEmbedder {
 
   /**
    * Embed a single query text using RETRIEVAL_QUERY task type.
+   *
+   * @deprecated The search pipeline no longer uses client-side query embedding.
+   * This method is retained for backwards compatibility.
    */
   async embedQuery(query: string): Promise<number[]> {
     const result = await this.embedTexts([query], "RETRIEVAL_QUERY");
