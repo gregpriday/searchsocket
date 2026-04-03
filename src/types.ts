@@ -417,6 +417,7 @@ export interface SearchRequest {
   pathPrefix?: string;
   tags?: string[];
   groupBy?: "page" | "chunk";
+  maxSubResults?: number;
   debug?: boolean;
 }
 

@@ -271,6 +271,74 @@ describe("get_site_structure tool", () => {
   });
 });
 
+describe("search tool", () => {
+  function getSearchCall(mockEngine: Record<string, unknown>) {
+    const server = createServer(mockEngine as never);
+    const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
+    return calls.find((c: unknown[]) => c[0] === "search")!;
+  }
+
+  function getSearchHandler(mockEngine: Record<string, unknown>) {
+    const call = getSearchCall(mockEngine);
+    return call[2] as (input: Record<string, unknown>) => Promise<{
+      content: Array<{ type: string; text: string }>;
+      structuredContent?: Record<string, unknown>;
+    }>;
+  }
+
+  it("description mentions chunks and headingPath", () => {
+    const mockEngine = { search: vi.fn() };
+    const call = getSearchCall(mockEngine);
+    const config = call[1] as { description: string };
+    expect(config.description).toContain("chunks");
+    expect(config.description).toContain("headingPath");
+  });
+
+  it("inputSchema includes maxSubResults", () => {
+    const mockEngine = { search: vi.fn() };
+    const call = getSearchCall(mockEngine);
+    const config = call[1] as { inputSchema: Record<string, unknown> };
+    expect(config.inputSchema).toHaveProperty("maxSubResults");
+  });
+
+  it("outputSchema is defined", () => {
+    const mockEngine = { search: vi.fn() };
+    const call = getSearchCall(mockEngine);
+    const config = call[1] as { outputSchema: unknown };
+    expect(config.outputSchema).toBeDefined();
+  });
+
+  it("forwards maxSubResults to engine.search", async () => {
+    const mockResult = { q: "test", scope: "main", results: [], meta: { timingsMs: { search: 10, total: 15 } } };
+    const mockEngine = { search: vi.fn().mockResolvedValue(mockResult) };
+    const handler = getSearchHandler(mockEngine);
+
+    await handler({ query: "test", maxSubResults: 3 });
+
+    expect(mockEngine.search).toHaveBeenCalledWith(
+      expect.objectContaining({ maxSubResults: 3 })
+    );
+  });
+
+  it("returns both content and structuredContent", async () => {
+    const mockResult = {
+      q: "test",
+      scope: "main",
+      results: [{ url: "/home", title: "Home", snippet: "Welcome", score: 0.9, routeFile: "src/routes/+page.svelte" }],
+      meta: { timingsMs: { search: 10, total: 15 } }
+    };
+    const mockEngine = { search: vi.fn().mockResolvedValue(mockResult) };
+    const handler = getSearchHandler(mockEngine);
+
+    const result = await handler({ query: "test" });
+
+    expect(result.content).toBeDefined();
+    expect(result.content[0]!.type).toBe("text");
+    expect(JSON.parse(result.content[0]!.text)).toEqual(mockResult);
+    expect(result.structuredContent).toEqual(mockResult);
+  });
+});
+
 describe("find_source_file tool", () => {
   function getHandler(mockEngine: Record<string, unknown>) {
     const server = createServer(mockEngine as never);

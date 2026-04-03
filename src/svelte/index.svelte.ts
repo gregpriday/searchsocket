@@ -11,6 +11,7 @@ export interface CreateSearchOptions {
   pathPrefix?: string;
   tags?: string[];
   groupBy?: "page" | "chunk";
+  maxSubResults?: number;
 }
 
 class LruCache<K, V> {
@@ -48,6 +49,7 @@ function buildCacheKey(query: string, options: CreateSearchOptions): string {
   if (options.pathPrefix !== undefined) parts.pathPrefix = options.pathPrefix;
   if (options.tags !== undefined) parts.tags = options.tags;
   if (options.groupBy !== undefined) parts.groupBy = options.groupBy;
+  if (options.maxSubResults !== undefined) parts.maxSubResults = options.maxSubResults;
   return JSON.stringify(parts);
 }
 
@@ -106,6 +108,7 @@ export function createSearch(options: CreateSearchOptions = {}): SearchState {
         if (options.pathPrefix !== undefined) request.pathPrefix = options.pathPrefix;
         if (options.tags !== undefined) request.tags = options.tags;
         if (options.groupBy !== undefined) request.groupBy = options.groupBy;
+        if (options.maxSubResults !== undefined) request.maxSubResults = options.maxSubResults;
 
         try {
           const response = await fetchFn(endpoint, {

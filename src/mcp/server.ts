@@ -29,14 +29,39 @@ export function createServer(engine: SearchEngine): McpServer {
     "search",
     {
       description:
-        "Semantic site search powered by Upstash Search. Returns url/title/snippet/chunkText/score/routeFile for each match. chunkText contains the full raw chunk markdown. Supports optional scope, pathPrefix, tags, topK, and groupBy.",
+        "Semantic site search powered by Upstash Search. Returns url, title, snippet, chunkText, score, and routeFile per result. chunkText contains the full raw chunk markdown. When groupBy is 'page' (default), each result includes a chunks array with section-level sub-results containing sectionTitle, headingPath (breadcrumb trail), snippet, and score. Use chunks[].headingPath to navigate to specific sections.",
       inputSchema: {
         query: z.string().min(1),
         scope: z.string().optional(),
         topK: z.number().int().positive().max(100).optional(),
         pathPrefix: z.string().optional(),
         tags: z.array(z.string()).optional(),
-        groupBy: z.enum(["page", "chunk"]).optional()
+        groupBy: z.enum(["page", "chunk"]).optional(),
+        maxSubResults: z.number().int().positive().max(20).optional()
+      },
+      outputSchema: {
+        q: z.string(),
+        scope: z.string(),
+        results: z.array(z.object({
+          url: z.string(),
+          title: z.string(),
+          sectionTitle: z.string().optional(),
+          snippet: z.string(),
+          score: z.number(),
+          routeFile: z.string(),
+          chunks: z.array(z.object({
+            sectionTitle: z.string().optional(),
+            snippet: z.string(),
+            headingPath: z.array(z.string()),
+            score: z.number()
+          })).optional()
+        })),
+        meta: z.object({
+          timingsMs: z.object({
+            search: z.number(),
+            total: z.number()
+          })
+        })
       }
     },
     async (input) => {
@@ -46,7 +71,8 @@ export function createServer(engine: SearchEngine): McpServer {
         scope: input.scope,
         pathPrefix: input.pathPrefix,
         tags: input.tags,
-        groupBy: input.groupBy
+        groupBy: input.groupBy,
+        maxSubResults: input.maxSubResults
       });
 
       return {
@@ -55,7 +81,8 @@ export function createServer(engine: SearchEngine): McpServer {
             type: "text",
             text: JSON.stringify(result, null, 2)
           }
-        ]
+        ],
+        structuredContent: result as unknown as Record<string, unknown>
       };
     }
   );

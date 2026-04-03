@@ -316,9 +316,10 @@ describe("SearchEngine - adversarial cases", () => {
     expect(homeResult!.chunks).toBeDefined();
     expect(homeResult!.chunks!.length).toBe(3);
 
-    // /about should NOT have sub-chunks since it has only 1 chunk
+    // /about has 1 chunk, which is still included in chunks array
     const aboutResult = result.results.find((r) => r.url === "/about");
-    expect(aboutResult!.chunks).toBeUndefined();
+    expect(aboutResult!.chunks).toBeDefined();
+    expect(aboutResult!.chunks!.length).toBe(1);
   });
 
   it("filters sub-chunks below minChunkScoreRatio", async () => {
@@ -743,6 +744,162 @@ describe("SearchEngine - dual search", () => {
     // /boosted blended: (1-0.3)*0.6 + 0.3*1.0 = 0.42 + 0.3 = 0.72 (plus ranking boosts)
     expect(result.results[0]!.url).toBe("/top");
     expect(result.results[1]!.url).toBe("/boosted");
+  });
+});
+
+describe("SearchEngine - maxSubResults", () => {
+  it("defaults to 5 sub-results when maxSubResults is not specified", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minChunkScoreRatio = 0;
+
+    // Create 7 chunks for the same page
+    const hits: VectorHit[] = Array.from({ length: 7 }, (_, i) => ({
+      ...makeHit(`chunk-${i}`, "/docs"),
+      score: 0.9 - i * 0.05
+    }));
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
+    });
+
+    const result = await engine.search({ q: "test", topK: 10 });
+    const page = result.results[0]!;
+    expect(page.chunks).toBeDefined();
+    expect(page.chunks!.length).toBe(5);
+  });
+
+  it("respects maxSubResults cap", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minChunkScoreRatio = 0;
+
+    const hits: VectorHit[] = Array.from({ length: 7 }, (_, i) => ({
+      ...makeHit(`chunk-${i}`, "/docs"),
+      score: 0.9 - i * 0.05
+    }));
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
+    });
+
+    const result = await engine.search({ q: "test", topK: 10, maxSubResults: 3 });
+    const page = result.results[0]!;
+    expect(page.chunks).toBeDefined();
+    expect(page.chunks!.length).toBe(3);
+  });
+
+  it("returns exactly 1 chunk when maxSubResults is 1", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minChunkScoreRatio = 0;
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/page"), score: 0.9 },
+      { ...makeHit("chunk-2", "/page"), score: 0.8 },
+      { ...makeHit("chunk-3", "/page"), score: 0.7 }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
+    });
+
+    const result = await engine.search({ q: "test", topK: 10, maxSubResults: 1 });
+    const page = result.results[0]!;
+    expect(page.chunks).toBeDefined();
+    expect(page.chunks!.length).toBe(1);
+  });
+
+  it("returns all available chunks when maxSubResults exceeds actual count", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minChunkScoreRatio = 0;
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/page"), score: 0.9 },
+      { ...makeHit("chunk-2", "/page"), score: 0.8 }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
+    });
+
+    const result = await engine.search({ q: "test", topK: 10, maxSubResults: 10 });
+    const page = result.results[0]!;
+    expect(page.chunks).toBeDefined();
+    expect(page.chunks!.length).toBe(2);
+  });
+
+  it("rejects maxSubResults of 0", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(),
+      embedder: createMockEmbedder()
+    });
+
+    await expect(engine.search({ q: "test", maxSubResults: 0 })).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+      status: 400
+    });
+  });
+
+  it("rejects maxSubResults exceeding 20", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(),
+      embedder: createMockEmbedder()
+    });
+
+    await expect(engine.search({ q: "test", maxSubResults: 21 })).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+      status: 400
+    });
+  });
+
+  it("has no effect on chunk-mode results", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    config.ranking.minScore = 0;
+    config.ranking.scoreGapThreshold = 0;
+
+    const hits: VectorHit[] = [
+      { ...makeHit("chunk-1", "/home"), score: 0.9 },
+      { ...makeHit("chunk-2", "/home"), score: 0.7 },
+      { ...makeHit("chunk-3", "/about"), score: 0.85 }
+    ];
+
+    const engine = await SearchEngine.create({
+      cwd,
+      config,
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
+    });
+
+    const result = await engine.search({ q: "test", topK: 10, groupBy: "chunk", maxSubResults: 1 });
+    expect(result.results.length).toBe(3);
+    for (const r of result.results) {
+      expect(r.chunks).toBeUndefined();
+    }
   });
 });
 
