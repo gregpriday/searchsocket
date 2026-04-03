@@ -13,6 +13,8 @@ import type {
   SearchRequest,
   SearchResponse,
   SearchResult,
+  SiteStructureResult,
+  SiteTreeNode,
   VectorHit
 } from "../types";
 import type { UpstashSearchStore } from "../vector/upstash";
@@ -29,6 +31,81 @@ const requestSchema = z.object({
   tags: z.array(z.string()).optional(),
   groupBy: z.enum(["page", "chunk"]).optional()
 });
+
+const MAX_SITE_STRUCTURE_PAGES = 2000;
+
+function makeNode(url: string, depth: number): SiteTreeNode {
+  return { url, title: "", depth, routeFile: "", isIndexed: false, childCount: 0, children: [] };
+}
+
+export function buildTree(
+  pages: Array<{ url: string; title: string; routeFile: string }>,
+  pathPrefix?: string
+): SiteTreeNode {
+  const nodeMap = new Map<string, SiteTreeNode>();
+  const root = makeNode("/", 0);
+  nodeMap.set("/", root);
+
+  // Ensure all intermediate nodes exist and set data for real pages
+  for (const page of pages) {
+    const normalized = normalizeUrlPath(page.url);
+    const segments = normalized.split("/").filter(Boolean);
+
+    if (segments.length === 0) {
+      // Root page "/"
+      root.title = page.title;
+      root.routeFile = page.routeFile;
+      root.isIndexed = true;
+      continue;
+    }
+
+    // Ensure all intermediate nodes exist
+    for (let i = 1; i <= segments.length; i++) {
+      const partialUrl = "/" + segments.slice(0, i).join("/");
+      if (!nodeMap.has(partialUrl)) {
+        nodeMap.set(partialUrl, makeNode(partialUrl, i));
+      }
+    }
+
+    // Set real page data on the leaf node
+    const node = nodeMap.get(normalized)!;
+    node.title = page.title;
+    node.routeFile = page.routeFile;
+    node.isIndexed = true;
+  }
+
+  // Wire parent-child relationships
+  for (const [url, node] of nodeMap) {
+    if (url === "/") continue;
+    const segments = url.split("/").filter(Boolean);
+    const parentUrl = segments.length === 1 ? "/" : "/" + segments.slice(0, -1).join("/");
+    const parent = nodeMap.get(parentUrl) ?? root;
+    parent.children.push(node);
+  }
+
+  // Sort children alphabetically and set childCount
+  const sortAndCount = (node: SiteTreeNode): void => {
+    node.children.sort((a, b) => a.url.localeCompare(b.url));
+    node.childCount = node.children.length;
+    for (const child of node.children) {
+      sortAndCount(child);
+    }
+  };
+  sortAndCount(root);
+
+  // If pathPrefix is specified, return the subtree rooted at that path
+  if (pathPrefix) {
+    const normalizedPrefix = normalizeUrlPath(pathPrefix);
+    const subtreeRoot = nodeMap.get(normalizedPrefix);
+    if (subtreeRoot) {
+      return subtreeRoot;
+    }
+    // If the prefix node doesn't exist, return an empty placeholder
+    return makeNode(normalizedPrefix, normalizedPrefix.split("/").filter(Boolean).length);
+  }
+
+  return root;
+}
 
 export interface SearchEngineOptions {
   cwd?: string;
@@ -279,6 +356,42 @@ export class SearchEngine {
       limit: opts?.limit,
       pathPrefix
     });
+  }
+
+  async getSiteStructure(opts?: {
+    pathPrefix?: string;
+    scope?: string;
+    maxPages?: number;
+  }): Promise<SiteStructureResult> {
+    const maxPages = Math.min(opts?.maxPages ?? MAX_SITE_STRUCTURE_PAGES, MAX_SITE_STRUCTURE_PAGES);
+    const allPages: Array<{ url: string; title: string; description: string; routeFile: string }> = [];
+    let cursor: string | undefined;
+    let truncated = false;
+
+    do {
+      const result = await this.listPages({
+        pathPrefix: opts?.pathPrefix,
+        scope: opts?.scope,
+        cursor,
+        limit: 200
+      });
+      allPages.push(...result.pages);
+      cursor = result.nextCursor;
+
+      if (allPages.length >= maxPages) {
+        truncated = allPages.length > maxPages;
+        allPages.length = maxPages;
+        break;
+      }
+    } while (cursor);
+
+    const root = buildTree(allPages, opts?.pathPrefix);
+
+    return {
+      root,
+      totalPages: allPages.length,
+      truncated
+    };
   }
 
   async health(): Promise<{ ok: boolean; details?: string }> {

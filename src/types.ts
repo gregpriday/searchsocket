@@ -490,3 +490,19 @@ export interface AnalyticsReport {
   dailyVolume: Array<{ date: string; count: number }>;
   latency: { p50: number; p95: number; p99: number; count: number };
 }
+
+export interface SiteTreeNode {
+  url: string;
+  title: string;
+  depth: number;
+  routeFile: string;
+  isIndexed: boolean;
+  childCount: number;
+  children: SiteTreeNode[];
+}
+
+export interface SiteStructureResult {
+  root: SiteTreeNode;
+  totalPages: number;
+  truncated: boolean;
+}
