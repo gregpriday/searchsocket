@@ -381,17 +381,22 @@ export class IndexPipeline {
     }
 
     for (const page of indexablePages) {
-      const seenTargets = new Set<string>();
+      const seenForCount = new Set<string>();
+      const seenForAnchor = new Set<string>();
       for (const { url: outgoing, anchorText } of page.outgoingLinks) {
         if (!pageSet.has(outgoing)) {
           continue;
         }
 
-        incomingLinkCount.set(outgoing, (incomingLinkCount.get(outgoing) ?? 0) + 1);
+        // Count each target URL only once per source page
+        if (!seenForCount.has(outgoing)) {
+          seenForCount.add(outgoing);
+          incomingLinkCount.set(outgoing, (incomingLinkCount.get(outgoing) ?? 0) + 1);
+        }
 
         // Collect anchor text: one phrase per source-page/target pair
-        if (anchorText && !seenTargets.has(outgoing)) {
-          seenTargets.add(outgoing);
+        if (anchorText && !seenForAnchor.has(outgoing)) {
+          seenForAnchor.add(outgoing);
           if (!incomingAnchorTexts.has(outgoing)) {
             incomingAnchorTexts.set(outgoing, new Set());
           }
