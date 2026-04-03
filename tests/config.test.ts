@@ -23,7 +23,7 @@ describe("createDefaultConfig", () => {
     expect(config.project.id).toBe("my-project");
     expect(config.scope.mode).toBe("fixed");
     expect(config.scope.fixed).toBe("main");
-    expect(config.chunking.maxChars).toBe(2200);
+    expect(config.chunking.maxChars).toBe(1500);
     expect(config.chunking.overlapChars).toBe(200);
     expect(config.chunking.minChars).toBe(250);
     expect(config.api.path).toBe("/api/search");
