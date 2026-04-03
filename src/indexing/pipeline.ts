@@ -16,6 +16,7 @@ import { loadStaticOutputPages } from "./sources/static-output";
 import { loadRobotsTxtFromDir, fetchRobotsTxt, isBlockedByRobots } from "./robots";
 import { findPageWeight } from "../search/ranking";
 import { matchUrlPatterns } from "../utils/pattern";
+import { normalizeMarkdown } from "../utils/text";
 import { hrTimeMs, nowIso } from "../utils/time";
 import { getUrlDepth, normalizeUrlPath } from "../utils/path";
 import { Logger } from "../core/logger";
@@ -23,6 +24,7 @@ import { sha256 } from "../utils/hash";
 import { writeLlmsTxt } from "./llms-txt";
 import type {
   Chunk,
+  CustomRecord,
   ExtractedPage,
   IndexedPage,
   IndexingHooks,
@@ -286,6 +288,53 @@ export class IndexPipeline {
       });
     }
 
+    // --- Inject custom records as ExtractedPage objects ---
+    // Custom records bypass extractFromMarkdown() to avoid frontmatter parsing —
+    // the caller controls title, weight, and tags via the CustomRecord interface.
+    const customRecords = options.customRecords ?? [];
+    if (customRecords.length > 0) {
+      this.logger.info(`Processing ${customRecords.length} custom record${customRecords.length === 1 ? "" : "s"}...`);
+      for (const record of customRecords) {
+        const normalizedUrl = normalizeUrlPath(record.url);
+        const normalized = normalizeMarkdown(record.content);
+        if (!normalized.trim()) {
+          this.logger.warn(`Custom record ${normalizedUrl} has empty content and was skipped.`);
+          continue;
+        }
+
+        const urlTags = normalizedUrl.split("/").filter(Boolean).slice(0, 1);
+        const tags = record.tags
+          ? [...new Set([...urlTags, ...record.tags])]
+          : urlTags;
+
+        const extracted: ExtractedPage = {
+          url: normalizedUrl,
+          title: record.title,
+          markdown: normalized,
+          outgoingLinks: [],
+          noindex: false,
+          tags,
+          weight: record.weight
+        };
+
+        // Apply transformPage hook to custom records too
+        let accepted: ExtractedPage;
+        if (this.hooks.transformPage) {
+          const transformed = await this.hooks.transformPage(extracted);
+          if (transformed === null) {
+            this.logger.debug(`Custom record ${normalizedUrl} skipped by transformPage hook`);
+            continue;
+          }
+          accepted = transformed;
+        } else {
+          accepted = extracted;
+        }
+
+        extractedPages.push(accepted);
+        this.logger.event("page_extracted", { url: accepted.url, custom: true });
+      }
+    }
+
     extractedPages.sort((a, b) => a.url.localeCompare(b.url));
     const uniquePages: ExtractedPage[] = [];
     const seenUrls = new Set<string>();
@@ -352,6 +401,17 @@ export class IndexPipeline {
         precomputedRoutes.set(normalizeUrlPath(sp.url), {
           routeFile: sp.routeFile,
           routeResolution: sp.routeResolution ?? "exact"
+        });
+      }
+    }
+
+    // Pre-register custom record URLs to bypass strict route mapping
+    for (const record of customRecords) {
+      const normalizedUrl = normalizeUrlPath(record.url);
+      if (!precomputedRoutes.has(normalizedUrl)) {
+        precomputedRoutes.set(normalizedUrl, {
+          routeFile: "",
+          routeResolution: "exact"
         });
       }
     }

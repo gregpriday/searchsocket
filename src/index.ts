@@ -1,6 +1,7 @@
 export type {
   Awaitable,
   Chunk,
+  CustomRecord,
   IndexingHooks,
   IndexOptions,
   IndexStats,

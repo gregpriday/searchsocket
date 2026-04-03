@@ -477,6 +477,15 @@ export interface IndexingHooks {
   afterIndex?: (stats: IndexStats) => Awaitable<void>;
 }
 
+export interface CustomRecord {
+  url: string;
+  title: string;
+  content: string;
+  metadata?: Record<string, string>;
+  tags?: string[];
+  weight?: number;
+}
+
 export interface IndexOptions {
   scopeOverride?: string;
   changedOnly?: boolean;
@@ -486,6 +495,7 @@ export interface IndexOptions {
   maxPages?: number;
   maxChunks?: number;
   verbose?: boolean;
+  customRecords?: CustomRecord[];
 }
 
 export interface SearchRuntimeOptions {
