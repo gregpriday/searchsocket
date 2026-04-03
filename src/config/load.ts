@@ -124,7 +124,11 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
     },
     upstash: {
       ...defaults.upstash,
-      ...parsed.upstash
+      ...parsed.upstash,
+      namespaces: {
+        ...defaults.upstash.namespaces,
+        ...parsed.upstash?.namespaces
+      }
     },
     embedding: {
       ...defaults.embedding,

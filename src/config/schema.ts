@@ -85,7 +85,13 @@ export const searchSocketConfigSchema = z.object({
       url: z.string().url().optional(),
       token: z.string().min(1).optional(),
       urlEnv: z.string().min(1).optional(),
-      tokenEnv: z.string().min(1).optional()
+      tokenEnv: z.string().min(1).optional(),
+      namespaces: z
+        .object({
+          pages: z.string().min(1).optional(),
+          chunks: z.string().min(1).optional()
+        })
+        .optional()
     })
     .optional(),
   embedding: z

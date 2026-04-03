@@ -34,6 +34,8 @@ describe("createDefaultConfig", () => {
     const config = createDefaultConfig("example");
     expect(config.upstash.urlEnv).toBe("UPSTASH_VECTOR_REST_URL");
     expect(config.upstash.tokenEnv).toBe("UPSTASH_VECTOR_REST_TOKEN");
+    expect(config.upstash.namespaces.pages).toBe("pages");
+    expect(config.upstash.namespaces.chunks).toBe("chunks");
   });
 
   it("has embedding defaults", () => {
@@ -237,6 +239,20 @@ describe("mergeConfig", () => {
 
     expect(merged.upstash.urlEnv).toBe("CUSTOM_UPSTASH_URL");
     expect(merged.upstash.tokenEnv).toBe("UPSTASH_VECTOR_REST_TOKEN");
+    expect(merged.upstash.namespaces.pages).toBe("pages");
+    expect(merged.upstash.namespaces.chunks).toBe("chunks");
+  });
+
+  it("deep-merges upstash.namespaces preserving defaults for unset fields", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    const merged = mergeConfig(dir, {
+      upstash: { namespaces: { chunks: "custom-chunks" } }
+    });
+
+    expect(merged.upstash.namespaces.chunks).toBe("custom-chunks");
+    expect(merged.upstash.namespaces.pages).toBe("pages");
   });
 
   it("merges search overrides", async () => {

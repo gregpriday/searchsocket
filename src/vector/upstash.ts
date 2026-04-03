@@ -58,13 +58,19 @@ interface PageVectorMetadata {
 
 export interface UpstashSearchStoreOptions {
   index: Index;
+  pagesNamespace: string;
+  chunksNamespace: string;
 }
 
 export class UpstashSearchStore {
   private readonly index: Index;
+  private readonly pagesNs: ReturnType<Index["namespace"]>;
+  private readonly chunksNs: ReturnType<Index["namespace"]>;
 
   constructor(opts: UpstashSearchStoreOptions) {
     this.index = opts.index;
+    this.pagesNs = opts.index.namespace(opts.pagesNamespace);
+    this.chunksNs = opts.index.namespace(opts.chunksNamespace);
   }
 
   async upsertChunks(
@@ -80,7 +86,7 @@ export class UpstashSearchStore {
     const BATCH_SIZE = 100;
     for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
       const batch = chunks.slice(i, i + BATCH_SIZE);
-      await this.index.upsert(
+      await this.chunksNs.upsert(
         batch.map((c) => ({
           id: c.id,
           vector: c.vector,
@@ -105,14 +111,13 @@ export class UpstashSearchStore {
   ): Promise<VectorHit[]> {
     const filterParts = [
       `projectId = '${scope.projectId}'`,
-      `scopeName = '${scope.scopeName}'`,
-      `type = 'chunk'`
+      `scopeName = '${scope.scopeName}'`
     ];
     if (opts.filter) {
       filterParts.push(opts.filter);
     }
 
-    const results = await this.index.query<ChunkVectorMetadata>({
+    const results = await this.chunksNs.query<ChunkVectorMetadata>({
       vector,
       topK: opts.limit,
       includeMetadata: true,
@@ -162,14 +167,13 @@ export class UpstashSearchStore {
     const filterParts = [
       `projectId = '${scope.projectId}'`,
       `scopeName = '${scope.scopeName}'`,
-      `type = 'chunk'`,
       `url = '${url}'`
     ];
     if (opts.filter) {
       filterParts.push(opts.filter);
     }
 
-    const results = await this.index.query<ChunkVectorMetadata>({
+    const results = await this.chunksNs.query<ChunkVectorMetadata>({
       vector,
       topK: opts.limit,
       includeMetadata: true,
@@ -217,8 +221,7 @@ export class UpstashSearchStore {
   ): Promise<PageHit[]> {
     const filterParts = [
       `projectId = '${scope.projectId}'`,
-      `scopeName = '${scope.scopeName}'`,
-      `type = 'page'`
+      `scopeName = '${scope.scopeName}'`
     ];
     if (opts.filter) {
       filterParts.push(opts.filter);
@@ -226,7 +229,7 @@ export class UpstashSearchStore {
 
     let results;
     try {
-      results = await this.index.query<PageVectorMetadata>({
+      results = await this.pagesNs.query<PageVectorMetadata>({
         vector,
         topK: opts.limit,
         includeMetadata: true,
@@ -256,63 +259,71 @@ export class UpstashSearchStore {
     const BATCH_SIZE = 100;
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const batch = ids.slice(i, i + BATCH_SIZE);
-      await this.index.delete(batch);
+      await this.chunksNs.delete(batch);
     }
   }
 
   async deleteScope(scope: Scope): Promise<void> {
-    // Range scan to find all vectors for this scope, then delete them
-    const ids: string[] = [];
-    let cursor = "0";
-    try {
-      for (;;) {
-        const result = await this.index.range<ChunkVectorMetadata>({
-          cursor,
-          limit: 100,
-          includeMetadata: true
-        });
-        for (const doc of result.vectors) {
-          if (
-            doc.metadata?.projectId === scope.projectId &&
-            doc.metadata?.scopeName === scope.scopeName
-          ) {
-            ids.push(String(doc.id));
+    // Scan both namespaces for vectors matching this scope, then delete
+    for (const ns of [this.chunksNs, this.pagesNs]) {
+      const ids: string[] = [];
+      let cursor = "0";
+      try {
+        for (;;) {
+          const result = await ns.range<ChunkVectorMetadata>({
+            cursor,
+            limit: 100,
+            includeMetadata: true
+          });
+          for (const doc of result.vectors) {
+            if (
+              doc.metadata?.projectId === scope.projectId &&
+              doc.metadata?.scopeName === scope.scopeName
+            ) {
+              ids.push(String(doc.id));
+            }
           }
+          if (!result.nextCursor || result.nextCursor === "0") break;
+          cursor = result.nextCursor;
         }
-        if (!result.nextCursor || result.nextCursor === "0") break;
-        cursor = result.nextCursor;
+      } catch {
+        // Namespace may not exist yet
       }
-    } catch {
-      // Index may not exist
-    }
 
-    if (ids.length > 0) {
-      await this.deleteByIds(ids, scope);
+      if (ids.length > 0) {
+        const BATCH_SIZE = 100;
+        for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+          const batch = ids.slice(i, i + BATCH_SIZE);
+          await ns.delete(batch);
+        }
+      }
     }
   }
 
   async listScopes(projectId: string): Promise<ScopeInfo[]> {
     const scopeMap = new Map<string, number>();
-    let cursor = "0";
 
-    try {
-      for (;;) {
-        const result = await this.index.range<ChunkVectorMetadata>({
-          cursor,
-          limit: 100,
-          includeMetadata: true
-        });
-        for (const doc of result.vectors) {
-          if (doc.metadata?.projectId === projectId) {
-            const scopeName = doc.metadata.scopeName ?? "";
-            scopeMap.set(scopeName, (scopeMap.get(scopeName) ?? 0) + 1);
+    for (const ns of [this.chunksNs, this.pagesNs]) {
+      let cursor = "0";
+      try {
+        for (;;) {
+          const result = await ns.range<ChunkVectorMetadata>({
+            cursor,
+            limit: 100,
+            includeMetadata: true
+          });
+          for (const doc of result.vectors) {
+            if (doc.metadata?.projectId === projectId) {
+              const scopeName = doc.metadata.scopeName ?? "";
+              scopeMap.set(scopeName, (scopeMap.get(scopeName) ?? 0) + 1);
+            }
           }
+          if (!result.nextCursor || result.nextCursor === "0") break;
+          cursor = result.nextCursor;
         }
-        if (!result.nextCursor || result.nextCursor === "0") break;
-        cursor = result.nextCursor;
+      } catch {
+        // Namespace may not exist yet
       }
-    } catch {
-      // Index may not exist
     }
 
     return [...scopeMap.entries()].map(([scopeName, count]) => ({
@@ -329,7 +340,7 @@ export class UpstashSearchStore {
 
     try {
       for (;;) {
-        const result = await this.index.range<ChunkVectorMetadata>({
+        const result = await this.chunksNs.range<ChunkVectorMetadata>({
           cursor,
           limit: 100,
           includeMetadata: true
@@ -338,7 +349,6 @@ export class UpstashSearchStore {
           if (
             doc.metadata?.projectId === scope.projectId &&
             doc.metadata?.scopeName === scope.scopeName &&
-            doc.metadata?.type === "chunk" &&
             doc.metadata?.contentHash
           ) {
             map.set(String(doc.id), doc.metadata.contentHash);
@@ -348,7 +358,7 @@ export class UpstashSearchStore {
         cursor = result.nextCursor;
       }
     } catch {
-      // Index may not exist yet
+      // Namespace may not exist yet
     }
 
     return map;
@@ -365,7 +375,7 @@ export class UpstashSearchStore {
     const limit = opts?.limit ?? 50;
 
     try {
-      const result = await this.index.range<PageVectorMetadata>({
+      const result = await this.pagesNs.range<PageVectorMetadata>({
         cursor,
         limit,
         includeMetadata: true
@@ -376,7 +386,6 @@ export class UpstashSearchStore {
           (doc) =>
             doc.metadata?.projectId === scope.projectId &&
             doc.metadata?.scopeName === scope.scopeName &&
-            doc.metadata?.type === "page" &&
             (!opts?.pathPrefix || (doc.metadata?.url ?? "").startsWith(opts.pathPrefix))
         )
         .map((doc) => ({
@@ -407,7 +416,7 @@ export class UpstashSearchStore {
 
     try {
       for (;;) {
-        const result = await this.index.range<PageVectorMetadata>({
+        const result = await this.pagesNs.range<PageVectorMetadata>({
           cursor,
           limit: 100,
           includeMetadata: true
@@ -416,7 +425,6 @@ export class UpstashSearchStore {
           if (
             doc.metadata?.projectId === scope.projectId &&
             doc.metadata?.scopeName === scope.scopeName &&
-            doc.metadata?.type === "page" &&
             doc.metadata?.contentHash
           ) {
             map.set(String(doc.id), doc.metadata.contentHash);
@@ -426,7 +434,7 @@ export class UpstashSearchStore {
         cursor = result.nextCursor;
       }
     } catch {
-      // Index may not exist yet
+      // Namespace may not exist yet
     }
 
     return map;
@@ -438,7 +446,7 @@ export class UpstashSearchStore {
     const BATCH_SIZE = 50;
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const batch = ids.slice(i, i + BATCH_SIZE);
-      await this.index.delete(batch);
+      await this.pagesNs.delete(batch);
     }
   }
 
@@ -455,7 +463,7 @@ export class UpstashSearchStore {
     const BATCH_SIZE = 50;
     for (let i = 0; i < pages.length; i += BATCH_SIZE) {
       const batch = pages.slice(i, i + BATCH_SIZE);
-      await this.index.upsert(
+      await this.pagesNs.upsert(
         batch.map((p) => ({
           id: p.id,
           vector: p.vector,
@@ -472,7 +480,7 @@ export class UpstashSearchStore {
 
   async getPage(url: string, scope: Scope): Promise<PageRecord | null> {
     try {
-      const results = await this.index.fetch<PageVectorMetadata>([url], {
+      const results = await this.pagesNs.fetch<PageVectorMetadata>([url], {
         includeMetadata: true
       });
       const doc = results[0];
@@ -507,7 +515,7 @@ export class UpstashSearchStore {
     scope: Scope
   ): Promise<{ metadata: PageVectorMetadata; vector: number[] } | null> {
     try {
-      const results = await this.index.fetch<PageVectorMetadata>([url], {
+      const results = await this.pagesNs.fetch<PageVectorMetadata>([url], {
         includeMetadata: true,
         includeVectors: true
       });
@@ -534,7 +542,7 @@ export class UpstashSearchStore {
     if (urls.length === 0) return [];
 
     try {
-      const results = await this.index.fetch<PageVectorMetadata>(urls, {
+      const results = await this.pagesNs.fetch<PageVectorMetadata>(urls, {
         includeMetadata: true
       });
 
@@ -566,7 +574,7 @@ export class UpstashSearchStore {
     let cursor = "0";
     try {
       for (;;) {
-        const result = await this.index.range<PageVectorMetadata>({
+        const result = await this.pagesNs.range<PageVectorMetadata>({
           cursor,
           limit: 100,
           includeMetadata: true
@@ -574,8 +582,7 @@ export class UpstashSearchStore {
         for (const doc of result.vectors) {
           if (
             doc.metadata?.projectId === scope.projectId &&
-            doc.metadata?.scopeName === scope.scopeName &&
-            doc.metadata?.type === "page"
+            doc.metadata?.scopeName === scope.scopeName
           ) {
             ids.push(String(doc.id));
           }
@@ -584,11 +591,11 @@ export class UpstashSearchStore {
         cursor = result.nextCursor;
       }
     } catch {
-      // Index may not exist
+      // Namespace may not exist
     }
 
     if (ids.length > 0) {
-      await this.deleteByIds(ids, scope);
+      await this.deletePagesByIds(ids, scope);
     }
   }
 
@@ -605,33 +612,35 @@ export class UpstashSearchStore {
   }
 
   async dropAllIndexes(projectId: string): Promise<void> {
-    // Range scan to find all vectors with this projectId, then delete
-    const ids: string[] = [];
-    let cursor = "0";
-    try {
-      for (;;) {
-        const result = await this.index.range<ChunkVectorMetadata>({
-          cursor,
-          limit: 100,
-          includeMetadata: true
-        });
-        for (const doc of result.vectors) {
-          if (doc.metadata?.projectId === projectId) {
-            ids.push(String(doc.id));
+    // Scan both namespaces for vectors with this projectId, then delete
+    for (const ns of [this.chunksNs, this.pagesNs]) {
+      const ids: string[] = [];
+      let cursor = "0";
+      try {
+        for (;;) {
+          const result = await ns.range<ChunkVectorMetadata>({
+            cursor,
+            limit: 100,
+            includeMetadata: true
+          });
+          for (const doc of result.vectors) {
+            if (doc.metadata?.projectId === projectId) {
+              ids.push(String(doc.id));
+            }
           }
+          if (!result.nextCursor || result.nextCursor === "0") break;
+          cursor = result.nextCursor;
         }
-        if (!result.nextCursor || result.nextCursor === "0") break;
-        cursor = result.nextCursor;
+      } catch {
+        // Namespace may not exist yet
       }
-    } catch {
-      // Ignore errors
-    }
 
-    if (ids.length > 0) {
-      const BATCH_SIZE = 100;
-      for (let i = 0; i < ids.length; i += BATCH_SIZE) {
-        const batch = ids.slice(i, i + BATCH_SIZE);
-        await this.index.delete(batch);
+      if (ids.length > 0) {
+        const BATCH_SIZE = 100;
+        for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+          const batch = ids.slice(i, i + BATCH_SIZE);
+          await ns.delete(batch);
+        }
       }
     }
   }

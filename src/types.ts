@@ -75,6 +75,10 @@ export interface SearchSocketConfig {
     token?: string;
     urlEnv?: string;
     tokenEnv?: string;
+    namespaces?: {
+      pages?: string;
+      chunks?: string;
+    };
   };
   embedding?: {
     model?: string;
@@ -217,6 +221,10 @@ export interface ResolvedSearchSocketConfig {
     token?: string;
     urlEnv: string;
     tokenEnv: string;
+    namespaces: {
+      pages: string;
+      chunks: string;
+    };
   };
   embedding: {
     model: string;
