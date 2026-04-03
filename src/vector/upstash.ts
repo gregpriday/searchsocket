@@ -48,6 +48,7 @@ interface PageVectorMetadata {
   routeResolution: string;
   incomingLinks: number;
   outgoingLinks: number;
+  outgoingLinkUrls?: string[];
   depth: number;
   indexedAt: string;
   contentHash: string;
@@ -430,6 +431,7 @@ export class UpstashSearchStore {
         routeResolution: doc.metadata.routeResolution as "exact" | "best-effort",
         incomingLinks: doc.metadata.incomingLinks,
         outgoingLinks: doc.metadata.outgoingLinks,
+        outgoingLinkUrls: doc.metadata.outgoingLinkUrls ?? undefined,
         depth: doc.metadata.depth,
         tags: doc.metadata.tags ?? [],
         indexedAt: doc.metadata.indexedAt,
@@ -440,6 +442,64 @@ export class UpstashSearchStore {
       };
     } catch {
       return null;
+    }
+  }
+
+  async fetchPageWithVector(
+    url: string,
+    scope: Scope
+  ): Promise<{ metadata: PageVectorMetadata; vector: number[] } | null> {
+    try {
+      const results = await this.index.fetch<PageVectorMetadata>([url], {
+        includeMetadata: true,
+        includeVectors: true
+      });
+      const doc = results[0];
+      if (!doc || !doc.metadata || !doc.vector) return null;
+
+      if (
+        doc.metadata.projectId !== scope.projectId ||
+        doc.metadata.scopeName !== scope.scopeName
+      ) {
+        return null;
+      }
+
+      return { metadata: doc.metadata, vector: doc.vector as number[] };
+    } catch {
+      return null;
+    }
+  }
+
+  async fetchPagesBatch(
+    urls: string[],
+    scope: Scope
+  ): Promise<Array<{ url: string; title: string; routeFile: string; outgoingLinkUrls: string[] }>> {
+    if (urls.length === 0) return [];
+
+    try {
+      const results = await this.index.fetch<PageVectorMetadata>(urls, {
+        includeMetadata: true
+      });
+
+      const out: Array<{ url: string; title: string; routeFile: string; outgoingLinkUrls: string[] }> = [];
+      for (const doc of results) {
+        if (!doc || !doc.metadata) continue;
+        if (
+          doc.metadata.projectId !== scope.projectId ||
+          doc.metadata.scopeName !== scope.scopeName
+        ) {
+          continue;
+        }
+        out.push({
+          url: doc.metadata.url,
+          title: doc.metadata.title,
+          routeFile: doc.metadata.routeFile,
+          outgoingLinkUrls: doc.metadata.outgoingLinkUrls ?? []
+        });
+      }
+      return out;
+    } catch {
+      return [];
     }
   }
 

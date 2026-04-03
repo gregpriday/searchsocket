@@ -212,6 +212,33 @@ export function createServer(engine: SearchEngine): McpServer {
     }
   );
 
+  server.registerTool(
+    "get_related_pages",
+    {
+      description:
+        "Find pages related to a given URL using link graph, semantic similarity, and structural proximity. Returns related pages ranked by a composite relatedness score. Use this to discover content connected to a known page.",
+      inputSchema: {
+        pathOrUrl: z.string().min(1),
+        scope: z.string().optional(),
+        topK: z.number().int().positive().max(25).optional()
+      }
+    },
+    async (input) => {
+      const result = await engine.getRelatedPages(input.pathOrUrl, {
+        topK: input.topK,
+        scope: input.scope
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }
+        ]
+      };
+    }
+  );
+
   return server;
 }
 

@@ -10,6 +10,8 @@ import { GeminiEmbedder } from "../vector/gemini";
 import { rankHits, aggregateByPage, trimByScoreGap, mergePageAndChunkResults } from "./ranking";
 import type {
   PageHit,
+  RelatedPage,
+  RelatedPagesResult,
   ResolvedSearchSocketConfig,
   SearchRequest,
   SearchResponse,
@@ -20,6 +22,7 @@ import type {
 } from "../types";
 import type { UpstashSearchStore } from "../vector/upstash";
 import type { RankedHit, PageResult } from "./ranking";
+import { diceScore, compositeScore, dominantRelationshipType } from "./related-pages";
 import { toSnippet, queryAwareExcerpt } from "../utils/text";
 
 const requestSchema = z.object({
@@ -417,6 +420,110 @@ export class SearchEngine {
       root,
       totalPages: allPages.length,
       truncated
+    };
+  }
+
+  async getRelatedPages(
+    pathOrUrl: string,
+    opts?: { topK?: number; scope?: string }
+  ): Promise<RelatedPagesResult> {
+    const resolvedScope = resolveScope(this.config, opts?.scope);
+    const urlPath = this.resolveInputPath(pathOrUrl);
+    const topK = Math.min(opts?.topK ?? 10, 25);
+
+    // Fetch source page with its vector
+    const source = await this.store.fetchPageWithVector(urlPath, resolvedScope);
+    if (!source) {
+      throw new SearchSocketError("INVALID_REQUEST", `Indexed page not found for ${urlPath}`, 404);
+    }
+
+    const sourceOutgoing = new Set(source.metadata.outgoingLinkUrls ?? []);
+
+    // ANN query for semantically similar pages
+    const semanticHits = await this.store.searchPages(
+      source.vector,
+      { limit: 50 },
+      resolvedScope
+    );
+    const filteredHits = semanticHits.filter((h) => h.url !== urlPath);
+
+    // Build semantic score map
+    const semanticScoreMap = new Map<string, number>();
+    for (const hit of filteredHits) {
+      semanticScoreMap.set(hit.url, hit.score);
+    }
+
+    // Collect candidate URLs: semantic hits + outgoing link targets
+    const candidateUrls = new Set<string>();
+    for (const hit of filteredHits) {
+      candidateUrls.add(hit.url);
+    }
+    for (const url of sourceOutgoing) {
+      if (url !== urlPath) candidateUrls.add(url);
+    }
+
+    // Fetch outgoing link targets that weren't in semantic results (for metadata)
+    const missingUrls = [...sourceOutgoing].filter(
+      (u) => u !== urlPath && !semanticScoreMap.has(u)
+    );
+    const fetchedPages = missingUrls.length > 0
+      ? await this.store.fetchPagesBatch(missingUrls, resolvedScope)
+      : [];
+
+    // Build metadata map from semantic hits + fetched pages
+    const metaMap = new Map<string, { title: string; routeFile: string; outgoingLinkUrls: string[] }>();
+    for (const hit of filteredHits) {
+      metaMap.set(hit.url, { title: hit.title, routeFile: hit.routeFile, outgoingLinkUrls: [] });
+    }
+    for (const p of fetchedPages) {
+      metaMap.set(p.url, { title: p.title, routeFile: p.routeFile, outgoingLinkUrls: p.outgoingLinkUrls });
+    }
+
+    // We need outgoingLinkUrls for semantic hits too (for incoming link detection)
+    // Batch-fetch semantic hits to get their outgoingLinkUrls
+    const semanticUrls = filteredHits.map((h) => h.url);
+    if (semanticUrls.length > 0) {
+      const semanticPageData = await this.store.fetchPagesBatch(semanticUrls, resolvedScope);
+      for (const p of semanticPageData) {
+        const existing = metaMap.get(p.url);
+        if (existing) {
+          existing.outgoingLinkUrls = p.outgoingLinkUrls;
+        }
+      }
+    }
+
+    // Score each candidate
+    const candidates: RelatedPage[] = [];
+    for (const url of candidateUrls) {
+      const meta = metaMap.get(url);
+      if (!meta) continue;
+
+      const isOutgoing = sourceOutgoing.has(url);
+      const isIncoming = meta.outgoingLinkUrls.includes(urlPath);
+      const isLinked = isOutgoing || isIncoming;
+      const dice = diceScore(urlPath, url);
+      const semantic = semanticScoreMap.get(url) ?? 0;
+
+      const score = compositeScore(isLinked, dice, semantic);
+      const relationshipType = dominantRelationshipType(isOutgoing, isIncoming, dice);
+
+      candidates.push({
+        url,
+        title: meta.title,
+        score: Number(score.toFixed(6)),
+        relationshipType,
+        routeFile: meta.routeFile
+      });
+    }
+
+    // Sort by score descending and cap at topK
+    candidates.sort((a, b) => b.score - a.score);
+    const results = candidates.slice(0, topK);
+
+    return {
+      sourceUrl: urlPath,
+      scope: resolvedScope.scopeName,
+      relatedPages: results
     };
   }
 

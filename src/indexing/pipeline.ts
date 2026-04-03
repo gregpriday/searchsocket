@@ -83,7 +83,8 @@ export function buildPageContentHash(page: IndexedPage): string {
     page.markdown,
     String(page.outgoingLinks),
     String(page.publishedAt ?? ""),
-    page.incomingAnchorText ?? ""
+    page.incomingAnchorText ?? "",
+    (page.outgoingLinkUrls ?? []).slice().sort().join(",")
   ];
   return sha256(parts.join("|"));
 }
@@ -477,6 +478,7 @@ export class IndexPipeline {
         generatedAt: nowIso(),
         incomingLinks: incomingLinkCount.get(page.url) ?? 0,
         outgoingLinks: page.outgoingLinks.length,
+        outgoingLinkUrls: page.outgoingLinks,
         depth: getUrlDepth(page.url),
         tags: page.tags,
         markdown: page.markdown,
@@ -503,6 +505,7 @@ export class IndexPipeline {
         routeResolution: p.routeResolution,
         incomingLinks: p.incomingLinks,
         outgoingLinks: p.outgoingLinks,
+        outgoingLinkUrls: p.outgoingLinkUrls,
         depth: p.depth,
         tags: p.tags,
         indexedAt: p.generatedAt,
@@ -543,6 +546,7 @@ export class IndexPipeline {
             routeResolution: r.routeResolution,
             incomingLinks: r.incomingLinks,
             outgoingLinks: r.outgoingLinks,
+            outgoingLinkUrls: r.outgoingLinkUrls ?? [],
             depth: r.depth,
             indexedAt: r.indexedAt,
             contentHash: r.contentHash ?? "",
@@ -570,6 +574,7 @@ export class IndexPipeline {
               routeResolution: r.routeResolution,
               incomingLinks: r.incomingLinks,
               outgoingLinks: r.outgoingLinks,
+              outgoingLinkUrls: r.outgoingLinkUrls ?? [],
               depth: r.depth,
               indexedAt: r.indexedAt,
               contentHash: r.contentHash ?? "",
