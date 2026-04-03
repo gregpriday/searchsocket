@@ -17,6 +17,15 @@ function createMockStore(existingHashes = new Map<string, string>()): UpstashSea
     deleteScope: vi.fn().mockResolvedValue(undefined),
     listScopes: vi.fn().mockResolvedValue([]),
     getContentHashes: vi.fn().mockResolvedValue(existingHashes),
+    fetchContentHashesForKeys: vi.fn().mockImplementation(async (keys: string[]) => {
+      const filtered = new Map<string, string>();
+      for (const k of keys) {
+        const v = existingHashes.get(k);
+        if (v) filtered.set(k, v);
+      }
+      return filtered;
+    }),
+    scanChunkIds: vi.fn().mockResolvedValue(new Set(existingHashes.keys())),
     upsertPages: vi.fn().mockResolvedValue(undefined),
     getPage: vi.fn().mockResolvedValue(null),
     deletePages: vi.fn().mockResolvedValue(undefined),

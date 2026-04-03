@@ -36,6 +36,15 @@ function createStatefulMockStore(): {
     deleteScope: vi.fn().mockResolvedValue(undefined),
     listScopes: vi.fn().mockResolvedValue([]),
     getContentHashes: vi.fn().mockImplementation(async () => new Map(chunkHashes)),
+    fetchContentHashesForKeys: vi.fn().mockImplementation(async (keys: string[]) => {
+      const filtered = new Map<string, string>();
+      for (const k of keys) {
+        const v = chunkHashes.get(k);
+        if (v) filtered.set(k, v);
+      }
+      return filtered;
+    }),
+    scanChunkIds: vi.fn().mockImplementation(async () => new Set(chunkHashes.keys())),
     upsertPages: vi.fn().mockImplementation(async (pages: Array<{ id: string; data: string; metadata: Record<string, unknown> }>) => {
       for (const page of pages) {
         const contentHash = page.metadata.contentHash as string;

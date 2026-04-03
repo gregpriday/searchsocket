@@ -57,6 +57,8 @@ function createMockStore(hits: VectorHit[] = [], pageHits?: PageHit[]): UpstashS
     listScopes: vi.fn(async () => []),
     health: vi.fn(async () => ({ ok: true })),
     getContentHashes: vi.fn(async () => new Map<string, string>()),
+    fetchContentHashesForKeys: vi.fn(async () => new Map<string, string>()),
+    scanChunkIds: vi.fn(async () => new Set<string>()),
     upsertPages: vi.fn(async () => undefined),
     getPage: vi.fn(async (url: string, scope: { projectId: string; scopeName: string }) => {
       return pages.get(`${scope.projectId}:${scope.scopeName}:${url}`) ?? null;

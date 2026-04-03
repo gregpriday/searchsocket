@@ -99,6 +99,8 @@ function createMockStore(): {
     listScopes: vi.fn(async () => []),
     health: vi.fn(async () => ({ ok: true })),
     getContentHashes: vi.fn(async () => new Map<string, string>()),
+    fetchContentHashesForKeys: vi.fn(async () => new Map<string, string>()),
+    scanChunkIds: vi.fn(async () => new Set<string>()),
     upsertPages: vi.fn(async (pages: Array<{ id: string; data: string; metadata: Record<string, unknown> }>) => {
       upsertedPages.push(...pages);
     }),

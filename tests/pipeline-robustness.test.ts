@@ -17,6 +17,8 @@ function createMockStore(overrides: Partial<Record<keyof UpstashSearchStore, unk
     deleteScope: vi.fn().mockResolvedValue(undefined),
     listScopes: vi.fn().mockResolvedValue([]),
     getContentHashes: vi.fn().mockResolvedValue(new Map()),
+    fetchContentHashesForKeys: vi.fn().mockResolvedValue(new Map()),
+    scanChunkIds: vi.fn().mockResolvedValue(new Set()),
     upsertPages: vi.fn().mockResolvedValue(undefined),
     getPage: vi.fn().mockResolvedValue(null),
     deletePages: vi.fn().mockResolvedValue(undefined),
@@ -74,11 +76,11 @@ describe("IndexPipeline robustness", () => {
     await expect(pipeline.run({ changedOnly: true })).rejects.toThrow(/upsert failed/i);
   });
 
-  it("throws when getContentHashes fails", async () => {
+  it("throws when fetchContentHashesForKeys fails", async () => {
     const { cwd, config } = await createProjectFixture();
 
     const store = createMockStore({
-      getContentHashes: vi.fn().mockRejectedValue(new Error("Upstash connection refused"))
+      fetchContentHashesForKeys: vi.fn().mockRejectedValue(new Error("Upstash connection refused"))
     });
 
     const pipeline = await IndexPipeline.create({
