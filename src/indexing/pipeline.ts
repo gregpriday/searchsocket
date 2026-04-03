@@ -16,6 +16,7 @@ import { loadStaticOutputPages } from "./sources/static-output";
 import { loadRobotsTxtFromDir, fetchRobotsTxt, isBlockedByRobots } from "./robots";
 import { findPageWeight } from "../search/ranking";
 import { matchUrlPatterns } from "../utils/pattern";
+import { normalizeMarkdown } from "../utils/text";
 import { hrTimeMs, nowIso } from "../utils/time";
 import { getUrlDepth, normalizeUrlPath } from "../utils/path";
 import { Logger } from "../core/logger";
@@ -288,26 +289,33 @@ export class IndexPipeline {
     }
 
     // --- Inject custom records as ExtractedPage objects ---
+    // Custom records bypass extractFromMarkdown() to avoid frontmatter parsing —
+    // the caller controls title, weight, and tags via the CustomRecord interface.
     const customRecords = options.customRecords ?? [];
     if (customRecords.length > 0) {
       this.logger.info(`Processing ${customRecords.length} custom record${customRecords.length === 1 ? "" : "s"}...`);
       for (const record of customRecords) {
         const normalizedUrl = normalizeUrlPath(record.url);
-        const extracted = extractFromMarkdown(normalizedUrl, record.content, record.title);
-        if (!extracted) {
-          this.logger.warn(`Custom record ${normalizedUrl} produced no extractable content and was skipped.`);
+        const normalized = normalizeMarkdown(record.content);
+        if (!normalized.trim()) {
+          this.logger.warn(`Custom record ${normalizedUrl} has empty content and was skipped.`);
           continue;
         }
 
-        // Override tags: merge caller-supplied tags into URL-derived tags
-        if (record.tags && record.tags.length > 0) {
-          extracted.tags = [...new Set([...extracted.tags, ...record.tags])];
-        }
+        const urlTags = normalizedUrl.split("/").filter(Boolean).slice(0, 1);
+        const tags = record.tags
+          ? [...new Set([...urlTags, ...record.tags])]
+          : urlTags;
 
-        // Override weight if caller specified one
-        if (record.weight !== undefined) {
-          extracted.weight = record.weight;
-        }
+        const extracted: ExtractedPage = {
+          url: normalizedUrl,
+          title: record.title,
+          markdown: normalized,
+          outgoingLinks: [],
+          noindex: false,
+          tags,
+          weight: record.weight
+        };
 
         // Apply transformPage hook to custom records too
         let accepted: ExtractedPage;

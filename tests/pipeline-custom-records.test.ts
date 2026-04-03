@@ -152,13 +152,66 @@ describe("IndexPipeline custom records", () => {
       embedder: createMockEmbedder()
     });
 
-    await expect(
-      pipeline.run({
-        customRecords: [
-          { url: "/api/virtual-endpoint", title: "Virtual", content: "Virtual page content." }
-        ]
-      })
-    ).resolves.toBeDefined();
+    const stats = await pipeline.run({
+      customRecords: [
+        { url: "/api/virtual-endpoint", title: "Virtual", content: "Virtual page content." }
+      ]
+    });
+
+    expect(stats.pagesProcessed).toBe(1);
+    expect(store.upsertPages).toHaveBeenCalled();
+    const upsertPagesCall = (store.upsertPages as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(upsertPagesCall[0][0].id).toBe("/api/virtual-endpoint");
+  });
+
+  it("treats content as literal markdown without frontmatter parsing", async () => {
+    const { cwd, config } = await createFixture();
+    const store = createMockStore();
+    const pipeline = await IndexPipeline.create({
+      cwd,
+      config,
+      store,
+      embedder: createMockEmbedder()
+    });
+
+    // Content with frontmatter that would cause extractFromMarkdown to drop the record
+    const stats = await pipeline.run({
+      customRecords: [
+        {
+          url: "/frontmatter-test",
+          title: "Frontmatter Test",
+          content: "---\nsearchsocket:\n  noindex: true\n---\n\nActual content that should be indexed."
+        }
+      ]
+    });
+
+    // Record should still be indexed — frontmatter is treated as literal content
+    expect(stats.pagesProcessed).toBe(1);
+  });
+
+  it("caller weight takes precedence over content with frontmatter weight", async () => {
+    const { cwd, config } = await createFixture();
+    const store = createMockStore();
+    const pipeline = await IndexPipeline.create({
+      cwd,
+      config,
+      store,
+      embedder: createMockEmbedder()
+    });
+
+    // Content that would set weight=0 via frontmatter, but caller sets weight=2
+    const stats = await pipeline.run({
+      customRecords: [
+        {
+          url: "/weight-override",
+          title: "Weight Override",
+          content: "---\nsearchsocket:\n  weight: 0\n---\n\nContent.",
+          weight: 2
+        }
+      ]
+    });
+
+    expect(stats.pagesProcessed).toBe(1);
   });
 
   it("coexists with source pages", async () => {
