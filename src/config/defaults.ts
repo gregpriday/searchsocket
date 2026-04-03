@@ -52,13 +52,20 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       pageSummaryChunk: true
     },
     upstash: {
-      urlEnv: "UPSTASH_SEARCH_REST_URL",
-      tokenEnv: "UPSTASH_SEARCH_REST_TOKEN"
+      urlEnv: "UPSTASH_VECTOR_REST_URL",
+      tokenEnv: "UPSTASH_VECTOR_REST_TOKEN"
+    },
+    embedding: {
+      model: "gemini-embedding-001",
+      dimensions: 1024,
+      taskType: "RETRIEVAL_DOCUMENT",
+      apiKeyEnv: "GEMINI_API_KEY",
+      images: {
+        enable: false
+      },
+      batchSize: 100
     },
     search: {
-      semanticWeight: 0.75,
-      inputEnrichment: true,
-      reranking: true,
       dualSearch: true,
       pageSearchWeight: 0.3
     },

@@ -6,6 +6,7 @@ import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { UpstashSearchStore } from "../src/vector/upstash";
 import type { ResolvedSearchSocketConfig } from "../src/types";
+import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
@@ -68,7 +69,8 @@ describe("IndexPipeline robustness", () => {
     const pipeline = await IndexPipeline.create({
       cwd,
       config,
-      store
+      store,
+      embedder: createMockEmbedder()
     });
 
     await expect(pipeline.run({ changedOnly: true })).rejects.toThrow(/upsert failed/i);
@@ -84,7 +86,8 @@ describe("IndexPipeline robustness", () => {
     const pipeline = await IndexPipeline.create({
       cwd,
       config,
-      store
+      store,
+      embedder: createMockEmbedder()
     });
 
     await expect(pipeline.run({ changedOnly: true })).rejects.toThrow(/connection refused/i);
@@ -97,7 +100,8 @@ describe("IndexPipeline robustness", () => {
     const pipeline = await IndexPipeline.create({
       cwd,
       config,
-      store
+      store,
+      embedder: createMockEmbedder()
     });
 
     const stats = await pipeline.run({ changedOnly: true });

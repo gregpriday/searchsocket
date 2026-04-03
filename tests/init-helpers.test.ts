@@ -258,8 +258,8 @@ describe("writeEnvFile", () => {
     writeEnvFile(dir, "https://example.upstash.io", "token123");
 
     const content = fs.readFileSync(path.join(dir, ".env"), "utf8");
-    expect(content).toContain("UPSTASH_SEARCH_REST_URL=https://example.upstash.io");
-    expect(content).toContain("UPSTASH_SEARCH_REST_TOKEN=token123");
+    expect(content).toContain("UPSTASH_VECTOR_REST_URL=https://example.upstash.io");
+    expect(content).toContain("UPSTASH_VECTOR_REST_TOKEN=token123");
   });
 
   it("appends to existing .env without duplicating", async () => {
@@ -270,21 +270,21 @@ describe("writeEnvFile", () => {
 
     const content = fs.readFileSync(path.join(dir, ".env"), "utf8");
     expect(content).toContain("OTHER_VAR=hello");
-    expect(content).toContain("UPSTASH_SEARCH_REST_URL=https://example.upstash.io");
+    expect(content).toContain("UPSTASH_VECTOR_REST_URL=https://example.upstash.io");
   });
 
   it("does not duplicate keys that already exist", async () => {
     const dir = await makeTempDir();
     fs.writeFileSync(
       path.join(dir, ".env"),
-      "UPSTASH_SEARCH_REST_URL=existing\nUPSTASH_SEARCH_REST_TOKEN=existing\n",
+      "UPSTASH_VECTOR_REST_URL=existing\nUPSTASH_VECTOR_REST_TOKEN=existing\n",
       "utf8",
     );
 
     writeEnvFile(dir, "https://new.upstash.io", "newtoken");
 
     const content = fs.readFileSync(path.join(dir, ".env"), "utf8");
-    expect(content).toBe("UPSTASH_SEARCH_REST_URL=existing\nUPSTASH_SEARCH_REST_TOKEN=existing\n");
+    expect(content).toBe("UPSTASH_VECTOR_REST_URL=existing\nUPSTASH_VECTOR_REST_TOKEN=existing\n");
   });
 
   it("adds .env to .gitignore", async () => {

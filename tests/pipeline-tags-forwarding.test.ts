@@ -6,6 +6,7 @@ import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { UpstashSearchStore } from "../src/vector/upstash";
 import type { ResolvedSearchSocketConfig } from "../src/types";
+import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
@@ -73,16 +74,16 @@ describe("Pipeline tags forwarding", () => {
     const upsertChunks = vi.fn().mockResolvedValue(undefined);
     const store = createMockStore({ upsertChunks });
 
-    const pipeline = await IndexPipeline.create({ cwd, config, store });
+    const pipeline = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
     await pipeline.run({ force: true });
 
     expect(upsertChunks).toHaveBeenCalled();
-    const docs = upsertChunks.mock.calls[0]![0] as Array<{ content: { tags: string } }>;
+    const docs = upsertChunks.mock.calls[0]![0] as Array<{ metadata: { tags: string[] } }>;
     expect(docs.length).toBeGreaterThan(0);
 
-    // Tags are stored as comma-separated string in chunk content
+    // Tags are stored as string[] in chunk metadata
     for (const doc of docs) {
-      expect(doc.content.tags).toContain("component");
+      expect(doc.metadata.tags).toContain("component");
     }
   });
 
@@ -91,15 +92,15 @@ describe("Pipeline tags forwarding", () => {
     const upsertPages = vi.fn().mockResolvedValue(undefined);
     const store = createMockStore({ upsertPages });
 
-    const pipeline = await IndexPipeline.create({ cwd, config, store });
+    const pipeline = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
     await pipeline.run({ force: true });
 
     expect(upsertPages).toHaveBeenCalled();
-    const pages = upsertPages.mock.calls[0]![0] as Array<{ tags: string[] }>;
+    const pages = upsertPages.mock.calls[0]![0] as Array<{ metadata: { tags: string[] } }>;
     expect(pages.length).toBeGreaterThan(0);
 
     for (const page of pages) {
-      expect(page.tags).toContain("component");
+      expect(page.metadata.tags).toContain("component");
     }
   });
 });

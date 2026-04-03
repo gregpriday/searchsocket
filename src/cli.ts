@@ -262,8 +262,8 @@ async function runInteractiveInit(cwd: string): Promise<void> {
   s.stop("Config files created");
 
   // Step 2: Check for Upstash credentials
-  const hasUrl = Boolean(process.env.UPSTASH_SEARCH_REST_URL);
-  const hasToken = Boolean(process.env.UPSTASH_SEARCH_REST_TOKEN);
+  const hasUrl = Boolean(process.env.UPSTASH_VECTOR_REST_URL);
+  const hasToken = Boolean(process.env.UPSTASH_VECTOR_REST_TOKEN);
 
   if (!hasUrl || !hasToken) {
     clack.log.warn("Upstash Search credentials not found in environment.");
@@ -280,7 +280,7 @@ async function runInteractiveInit(cwd: string): Promise<void> {
 
     if (shouldConfigure) {
       const url = hasUrl
-        ? process.env.UPSTASH_SEARCH_REST_URL!
+        ? process.env.UPSTASH_VECTOR_REST_URL!
         : await clack.text({
             message: "Upstash Search REST URL:",
             placeholder: "https://your-index.upstash.io",
@@ -293,7 +293,7 @@ async function runInteractiveInit(cwd: string): Promise<void> {
       }
 
       const token = hasToken
-        ? process.env.UPSTASH_SEARCH_REST_TOKEN!
+        ? process.env.UPSTASH_VECTOR_REST_TOKEN!
         : await clack.text({
             message: "Upstash Search REST Token:",
             placeholder: "AX...",
@@ -514,7 +514,7 @@ program
 
     process.stdout.write(`project: ${config.project.id}\n`);
     process.stdout.write(`resolved scope: ${scope.scopeName}\n`);
-    process.stdout.write(`backend: upstash-search\n`);
+    process.stdout.write(`backend: upstash-vector\n`);
     process.stdout.write(`backend health: ${health.ok ? "ok" : `error (${health.details ?? "n/a"})`}\n`);
 
     if (scopeInfo) {
@@ -703,13 +703,13 @@ program
       scopes = await store.listScopes(config.project.id);
     } catch (error) {
       process.stderr.write(
-        `error: failed to access Upstash Search: ${error instanceof Error ? error.message : String(error)}\n`
+        `error: failed to access Upstash Vector: ${error instanceof Error ? error.message : String(error)}\n`
       );
       process.exitCode = 1;
       return;
     }
 
-    process.stdout.write(`using Upstash Search\n`);
+    process.stdout.write(`using Upstash Vector\n`);
 
     let keepScopes = new Set<string>();
     if (opts.scopesFile) {

@@ -6,6 +6,7 @@ import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { UpstashSearchStore } from "../src/vector/upstash";
 import type { PageRecord, ResolvedSearchSocketConfig } from "../src/types";
+import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
@@ -36,10 +37,11 @@ function createStatefulMockStore(): {
     deleteScope: vi.fn().mockResolvedValue(undefined),
     listScopes: vi.fn().mockResolvedValue([]),
     getContentHashes: vi.fn().mockImplementation(async () => new Map(chunkHashes)),
-    upsertPages: vi.fn().mockImplementation(async (pages: PageRecord[]) => {
+    upsertPages: vi.fn().mockImplementation(async (pages: Array<{ id: string; vector: number[]; metadata: Record<string, unknown> }>) => {
       for (const page of pages) {
-        if (page.contentHash) {
-          pageHashes.set(page.url, page.contentHash);
+        const contentHash = page.metadata.contentHash as string;
+        if (contentHash) {
+          pageHashes.set(page.id, contentHash);
         }
       }
     }),
@@ -98,7 +100,7 @@ describe("IndexPipeline incremental pages", () => {
     });
     const { store, getPageHashes } = createStatefulMockStore();
 
-    const pipeline = await IndexPipeline.create({ cwd, config, store });
+    const pipeline = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
     const stats = await pipeline.run({ changedOnly: true });
 
     expect(stats.pagesProcessed).toBe(2);
@@ -118,7 +120,7 @@ describe("IndexPipeline incremental pages", () => {
     const { store } = createStatefulMockStore();
 
     // First run — all pages upserted
-    const pipeline1 = await IndexPipeline.create({ cwd, config, store });
+    const pipeline1 = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
     await pipeline1.run({ changedOnly: true });
 
     // Clear call history
@@ -126,7 +128,7 @@ describe("IndexPipeline incremental pages", () => {
     vi.mocked(store.deletePagesByIds).mockClear();
 
     // Second run — nothing changed
-    const pipeline2 = await IndexPipeline.create({ cwd, config, store });
+    const pipeline2 = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
     const stats2 = await pipeline2.run({ changedOnly: true });
 
     expect(stats2.pagesChanged).toBe(0);
@@ -143,7 +145,7 @@ describe("IndexPipeline incremental pages", () => {
     const { store } = createStatefulMockStore();
 
     // First run
-    const pipeline1 = await IndexPipeline.create({ cwd, config, store });
+    const pipeline1 = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
     await pipeline1.run({ changedOnly: true });
 
     // Modify one page
@@ -156,7 +158,7 @@ describe("IndexPipeline incremental pages", () => {
     vi.mocked(store.upsertPages).mockClear();
 
     // Second run
-    const pipeline2 = await IndexPipeline.create({ cwd, config, store });
+    const pipeline2 = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
     const stats2 = await pipeline2.run({ changedOnly: true });
 
     expect(stats2.pagesChanged).toBe(1);
@@ -164,9 +166,9 @@ describe("IndexPipeline incremental pages", () => {
     expect(store.upsertPages).toHaveBeenCalledTimes(1);
 
     // Verify only the changed page was upserted
-    const upsertedPages = vi.mocked(store.upsertPages).mock.calls[0]![0] as PageRecord[];
+    const upsertedPages = vi.mocked(store.upsertPages).mock.calls[0]![0] as Array<{ id: string }>;
     expect(upsertedPages).toHaveLength(1);
-    expect(upsertedPages[0]!.url).toBe("/docs/alpha");
+    expect(upsertedPages[0]!.id).toBe("/docs/alpha");
   });
 
   it("deletes stale pages when a page is removed", async () => {
@@ -177,7 +179,7 @@ describe("IndexPipeline incremental pages", () => {
     const { store, getPageHashes } = createStatefulMockStore();
 
     // First run
-    const pipeline1 = await IndexPipeline.create({ cwd, config, store });
+    const pipeline1 = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
     await pipeline1.run({ changedOnly: true });
     expect(getPageHashes().size).toBe(2);
 
@@ -188,7 +190,7 @@ describe("IndexPipeline incremental pages", () => {
     vi.mocked(store.deletePages).mockClear();
 
     // Second run
-    const pipeline2 = await IndexPipeline.create({ cwd, config, store });
+    const pipeline2 = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
     const stats2 = await pipeline2.run({ changedOnly: true });
 
     expect(stats2.pagesDeleted).toBe(1);
@@ -206,14 +208,14 @@ describe("IndexPipeline incremental pages", () => {
     const { store } = createStatefulMockStore();
 
     // First incremental run
-    const pipeline1 = await IndexPipeline.create({ cwd, config, store });
+    const pipeline1 = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
     await pipeline1.run({ changedOnly: true });
 
     vi.mocked(store.deletePages).mockClear();
     vi.mocked(store.upsertPages).mockClear();
 
     // Force run
-    const pipeline2 = await IndexPipeline.create({ cwd, config, store });
+    const pipeline2 = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
     const stats2 = await pipeline2.run({ force: true });
 
     expect(store.deletePages).toHaveBeenCalledTimes(1);
@@ -227,7 +229,7 @@ describe("IndexPipeline incremental pages", () => {
     });
     const { store } = createStatefulMockStore();
 
-    const pipeline = await IndexPipeline.create({ cwd, config, store });
+    const pipeline = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
     const stats = await pipeline.run({ dryRun: true });
 
     expect(stats.pagesProcessed).toBe(1);
@@ -245,7 +247,7 @@ describe("IndexPipeline incremental pages", () => {
     const { store } = createStatefulMockStore();
 
     // First run — all 3 pages are new
-    const pipeline1 = await IndexPipeline.create({ cwd, config, store });
+    const pipeline1 = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
     const stats1 = await pipeline1.run({ changedOnly: true });
     expect(stats1.pagesChanged).toBe(3);
     expect(stats1.pagesDeleted).toBe(0);
@@ -259,7 +261,7 @@ describe("IndexPipeline incremental pages", () => {
     await fs.rm(path.join(cwd, "build", "docs", "gamma"), { recursive: true, force: true });
 
     // Second run
-    const pipeline2 = await IndexPipeline.create({ cwd, config, store });
+    const pipeline2 = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
     const stats2 = await pipeline2.run({ changedOnly: true });
 
     expect(stats2.pagesProcessed).toBe(2);

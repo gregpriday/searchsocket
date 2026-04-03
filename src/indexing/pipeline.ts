@@ -5,6 +5,7 @@ import { ensureStateDirs } from "../core/state";
 import { SearchSocketError } from "../errors";
 import { createUpstashStore } from "../vector";
 import { UpstashSearchStore } from "../vector/upstash";
+import { GeminiEmbedder } from "../vector/gemini";
 import { buildEmbeddingText, chunkPage } from "./chunker";
 import { extractFromHtml, extractFromMarkdown } from "./extractor";
 import { buildRoutePatterns, mapUrlToRoute } from "./route-mapper";
@@ -88,6 +89,7 @@ interface IndexPipelineOptions {
   configPath?: string;
   config?: ResolvedSearchSocketConfig;
   store?: UpstashSearchStore;
+  embedder?: GeminiEmbedder;
   logger?: Logger;
   hooks?: IndexingHooks;
 }
@@ -96,6 +98,7 @@ export class IndexPipeline {
   private readonly cwd: string;
   private readonly config: ResolvedSearchSocketConfig;
   private readonly store: UpstashSearchStore;
+  private readonly embedder: GeminiEmbedder;
   private readonly logger: Logger;
   private readonly hooks: IndexingHooks;
 
@@ -103,12 +106,14 @@ export class IndexPipeline {
     cwd: string;
     config: ResolvedSearchSocketConfig;
     store: UpstashSearchStore;
+    embedder: GeminiEmbedder;
     logger: Logger;
     hooks: IndexingHooks;
   }) {
     this.cwd = options.cwd;
     this.config = options.config;
     this.store = options.store;
+    this.embedder = options.embedder;
     this.logger = options.logger;
     this.hooks = options.hooks;
   }
@@ -117,11 +122,13 @@ export class IndexPipeline {
     const cwd = path.resolve(options.cwd ?? process.cwd());
     const config = options.config ?? (await loadConfig({ cwd, configPath: options.configPath }));
     const store = options.store ?? await createUpstashStore(config);
+    const embedder = options.embedder ?? GeminiEmbedder.fromConfig(config);
 
     return new IndexPipeline({
       cwd,
       config,
       store,
+      embedder,
       logger: options.logger ?? new Logger(),
       hooks: options.hooks ?? {}
     });
@@ -149,7 +156,7 @@ export class IndexPipeline {
     ensureStateDirs(this.cwd, this.config.state.dir, scope);
 
     const sourceMode = options.sourceOverride ?? this.config.source.mode;
-    this.logger.info(`Indexing scope "${scope.scopeName}" (source: ${sourceMode}, backend: upstash-search)`);
+    this.logger.info(`Indexing scope "${scope.scopeName}" (source: ${sourceMode}, backend: upstash-vector)`);
 
     if (options.force) {
       this.logger.info("Force mode enabled — full rebuild");
@@ -423,10 +430,57 @@ export class IndexPipeline {
     if (!options.dryRun) {
       if (options.force) {
         await this.store.deletePages(scope);
-        await this.store.upsertPages(pageRecords, scope);
+        // Embed all page summaries
+        const pageSummaries = pageRecords.map((r) => r.summary ?? r.title);
+        this.logger.info(`Embedding ${pageSummaries.length} page summaries...`);
+        const pageVectors = await this.embedder.embedTexts(pageSummaries, this.config.embedding.taskType);
+        const pageDocs = pageRecords.map((r, i) => ({
+          id: r.url,
+          vector: pageVectors[i]!,
+          metadata: {
+            title: r.title,
+            url: r.url,
+            description: r.description ?? "",
+            keywords: r.keywords ?? [],
+            summary: r.summary ?? "",
+            tags: r.tags,
+            markdown: r.markdown,
+            routeFile: r.routeFile,
+            routeResolution: r.routeResolution,
+            incomingLinks: r.incomingLinks,
+            outgoingLinks: r.outgoingLinks,
+            depth: r.depth,
+            indexedAt: r.indexedAt,
+            contentHash: r.contentHash ?? ""
+          }
+        }));
+        await this.store.upsertPages(pageDocs, scope);
       } else {
         if (changedPages.length > 0) {
-          await this.store.upsertPages(changedPages, scope);
+          const pageSummaries = changedPages.map((r) => r.summary ?? r.title);
+          this.logger.info(`Embedding ${pageSummaries.length} changed page summaries...`);
+          const pageVectors = await this.embedder.embedTexts(pageSummaries, this.config.embedding.taskType);
+          const pageDocs = changedPages.map((r, i) => ({
+            id: r.url,
+            vector: pageVectors[i]!,
+            metadata: {
+              title: r.title,
+              url: r.url,
+              description: r.description ?? "",
+              keywords: r.keywords ?? [],
+              summary: r.summary ?? "",
+              tags: r.tags,
+              markdown: r.markdown,
+              routeFile: r.routeFile,
+              routeResolution: r.routeResolution,
+              incomingLinks: r.incomingLinks,
+              outgoingLinks: r.outgoingLinks,
+              depth: r.depth,
+              indexedAt: r.indexedAt,
+              contentHash: r.contentHash ?? ""
+            }
+          }));
+          await this.store.upsertPages(pageDocs, scope);
         }
         if (deletedPageUrls.length > 0) {
           await this.store.deletePagesByIds(deletedPageUrls, scope);
@@ -503,47 +557,41 @@ export class IndexPipeline {
 
     this.logger.info(`Changes detected: ${changedChunks.length} changed, ${deletes.length} deleted, ${chunks.length - changedChunks.length} unchanged`);
 
-    // Upsert changed chunks directly to Upstash Search (no embedding step needed)
+    // Embed changed chunks via Gemini, then upsert to Upstash Vector
     const upsertStart = stageStart();
     let documentsUpserted = 0;
 
     if (!options.dryRun && changedChunks.length > 0) {
-      this.logger.info(`Upserting ${changedChunks.length} chunk${changedChunks.length === 1 ? "" : "s"} to Upstash Search...`);
+      this.logger.info(`Embedding ${changedChunks.length} chunk${changedChunks.length === 1 ? "" : "s"}...`);
 
-      // Upstash Search has a 4096-char limit on total content across all fields.
-      // Reserve space for non-text fields, then truncate text to fit.
-      const UPSTASH_CONTENT_LIMIT = 4096;
-      const FIELD_OVERHEAD = 200; // buffer for title, sectionTitle, url, tags, headingPath
-      const MAX_TEXT_CHARS = UPSTASH_CONTENT_LIMIT - FIELD_OVERHEAD;
+      const embeddingTexts = changedChunks.map((chunk) =>
+        buildEmbeddingText(chunk, this.config.chunking.prependTitle)
+      );
+      const vectors = await this.embedder.embedTexts(embeddingTexts, this.config.embedding.taskType);
 
-      const docs = changedChunks.map((chunk) => {
-        const title = chunk.title;
-        const sectionTitle = chunk.sectionTitle ?? "";
-        const url = chunk.url;
-        const tags = chunk.tags.join(",");
-        const headingPath = chunk.headingPath.join(" > ");
-        const otherFieldsLen = title.length + sectionTitle.length + url.length + tags.length + headingPath.length;
-        const textBudget = Math.max(500, UPSTASH_CONTENT_LIMIT - otherFieldsLen - 50);
-        const text = buildEmbeddingText(chunk, this.config.chunking.prependTitle).slice(0, textBudget);
+      this.logger.info(`Upserting ${changedChunks.length} chunk${changedChunks.length === 1 ? "" : "s"} to Upstash Vector...`);
 
-        return {
-          id: chunk.chunkKey,
-          content: { title, sectionTitle, text, url, tags, headingPath },
-          metadata: {
-            projectId: scope.projectId,
-            scopeName: scope.scopeName,
-            path: chunk.path,
-            snippet: chunk.snippet,
-            ordinal: chunk.ordinal,
-            contentHash: chunk.contentHash,
-            depth: chunk.depth,
-            incomingLinks: chunk.incomingLinks,
-            routeFile: chunk.routeFile,
-            description: chunk.description ?? "",
-            keywords: (chunk.keywords ?? []).join(",")
-          }
-        };
-      });
+      const docs = changedChunks.map((chunk, i) => ({
+        id: chunk.chunkKey,
+        vector: vectors[i]!,
+        metadata: {
+          url: chunk.url,
+          path: chunk.path,
+          title: chunk.title,
+          sectionTitle: chunk.sectionTitle ?? "",
+          headingPath: chunk.headingPath.join(" > "),
+          snippet: chunk.snippet,
+          chunkText: buildEmbeddingText(chunk, this.config.chunking.prependTitle),
+          tags: chunk.tags,
+          ordinal: chunk.ordinal,
+          contentHash: chunk.contentHash,
+          depth: chunk.depth,
+          incomingLinks: chunk.incomingLinks,
+          routeFile: chunk.routeFile,
+          description: chunk.description ?? "",
+          keywords: chunk.keywords ?? []
+        }
+      }));
 
       await this.store.upsertChunks(docs, scope);
       documentsUpserted = docs.length;

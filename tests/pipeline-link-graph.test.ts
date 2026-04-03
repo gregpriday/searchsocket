@@ -6,14 +6,21 @@ import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { UpstashSearchStore } from "../src/vector/upstash";
 import type { PageRecord, ResolvedSearchSocketConfig } from "../src/types";
+import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
+interface PageVectorDoc {
+  id: string;
+  vector: number[];
+  metadata: Record<string, unknown>;
+}
+
 function createMockStoreWithPages(): {
   store: UpstashSearchStore;
-  getPages: () => PageRecord[];
+  getPages: () => Array<{ url: string; incomingLinks: number }>;
 } {
-  const pages: PageRecord[] = [];
+  const pages: PageVectorDoc[] = [];
 
   const store = {
     upsertChunks: vi.fn().mockResolvedValue(undefined),
@@ -22,13 +29,11 @@ function createMockStoreWithPages(): {
     deleteScope: vi.fn().mockResolvedValue(undefined),
     listScopes: vi.fn().mockResolvedValue([]),
     getContentHashes: vi.fn().mockResolvedValue(new Map()),
-    upsertPages: vi.fn().mockImplementation(async (records: PageRecord[]) => {
+    upsertPages: vi.fn().mockImplementation(async (records: PageVectorDoc[]) => {
       pages.length = 0;
       pages.push(...records);
     }),
-    getPage: vi.fn().mockImplementation(async (url: string) => {
-      return pages.find((p) => p.url === url) ?? null;
-    }),
+    getPage: vi.fn().mockResolvedValue(null),
     deletePages: vi.fn().mockResolvedValue(undefined),
     getPageHashes: vi.fn().mockResolvedValue(new Map()),
     deletePagesByIds: vi.fn().mockResolvedValue(undefined),
@@ -36,7 +41,14 @@ function createMockStoreWithPages(): {
     dropAllIndexes: vi.fn().mockResolvedValue(undefined)
   } as unknown as UpstashSearchStore;
 
-  return { store, getPages: () => [...pages] };
+  return {
+    store,
+    getPages: () =>
+      pages.map((p) => ({
+        url: p.metadata.url as string,
+        incomingLinks: p.metadata.incomingLinks as number
+      }))
+  };
 }
 
 async function createProjectFixture(): Promise<{ cwd: string; config: ResolvedSearchSocketConfig }> {
@@ -108,7 +120,8 @@ describe("IndexPipeline link graph", () => {
     const pipeline = await IndexPipeline.create({
       cwd,
       config,
-      store
+      store,
+      embedder: createMockEmbedder()
     });
 
     await pipeline.run({ changedOnly: true });

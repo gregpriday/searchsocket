@@ -70,10 +70,17 @@ export interface SearchSocketConfig {
     urlEnv?: string;
     tokenEnv?: string;
   };
+  embedding?: {
+    model?: string;
+    dimensions?: number;
+    taskType?: string;
+    apiKeyEnv?: string;
+    images?: {
+      enable?: boolean;
+    };
+    batchSize?: number;
+  };
   search?: {
-    semanticWeight?: number;
-    inputEnrichment?: boolean;
-    reranking?: boolean;
     dualSearch?: boolean;
     pageSearchWeight?: number;
   };
@@ -201,10 +208,17 @@ export interface ResolvedSearchSocketConfig {
     urlEnv: string;
     tokenEnv: string;
   };
+  embedding: {
+    model: string;
+    dimensions: number;
+    taskType: string;
+    apiKeyEnv: string;
+    images: {
+      enable: boolean;
+    };
+    batchSize: number;
+  };
   search: {
-    semanticWeight: number;
-    inputEnrichment: boolean;
-    reranking: boolean;
     dualSearch: boolean;
     pageSearchWeight: number;
   };
@@ -354,8 +368,11 @@ export interface VectorHit {
     incomingLinks: number;
     routeFile: string;
     tags: string[];
+    type?: "chunk" | "page" | "image";
     description?: string;
     keywords?: string[];
+    imageSrc?: string;
+    imageAlt?: string;
   };
 }
 

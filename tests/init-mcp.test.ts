@@ -21,8 +21,9 @@ const expectedEntry = {
   command: "npx",
   args: ["searchsocket", "mcp"],
   env: {
-    UPSTASH_SEARCH_REST_URL: "${UPSTASH_SEARCH_REST_URL}",
-    UPSTASH_SEARCH_REST_TOKEN: "${UPSTASH_SEARCH_REST_TOKEN}",
+    UPSTASH_VECTOR_REST_URL: "${UPSTASH_VECTOR_REST_URL}",
+    UPSTASH_VECTOR_REST_TOKEN: "${UPSTASH_VECTOR_REST_TOKEN}",
+    GEMINI_API_KEY: "${GEMINI_API_KEY}",
   },
 };
 
