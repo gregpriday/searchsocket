@@ -87,11 +87,22 @@ export const searchSocketConfigSchema = z.object({
       tokenEnv: z.string().min(1).optional()
     })
     .optional(),
+  embedding: z
+    .object({
+      model: z.string().optional(),
+      dimensions: z.number().int().positive().optional(),
+      taskType: z.string().optional(),
+      apiKeyEnv: z.string().min(1).optional(),
+      images: z
+        .object({
+          enable: z.boolean().optional()
+        })
+        .optional(),
+      batchSize: z.number().int().positive().optional()
+    })
+    .optional(),
   search: z
     .object({
-      semanticWeight: z.number().min(0).max(1).optional(),
-      inputEnrichment: z.boolean().optional(),
-      reranking: z.boolean().optional(),
       dualSearch: z.boolean().optional(),
       pageSearchWeight: z.number().min(0).max(1).optional()
     })

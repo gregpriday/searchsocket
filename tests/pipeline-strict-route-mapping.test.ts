@@ -6,6 +6,7 @@ import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { UpstashSearchStore } from "../src/vector/upstash";
 import type { ResolvedSearchSocketConfig } from "../src/types";
+import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
@@ -67,7 +68,8 @@ describe("IndexPipeline strict route mapping", () => {
     const pipeline = await IndexPipeline.create({
       cwd,
       config,
-      store: createMockStore()
+      store: createMockStore(),
+      embedder: createMockEmbedder()
     });
 
     await expect(pipeline.run({ changedOnly: true })).rejects.toMatchObject({

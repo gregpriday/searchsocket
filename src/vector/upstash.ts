@@ -1,4 +1,4 @@
-import type { Search } from "@upstash/search";
+import type { Index } from "@upstash/vector";
 import type {
   PageHit,
   PageRecord,
@@ -7,50 +7,41 @@ import type {
   VectorHit
 } from "../types";
 
-/** Content fields stored in Upstash Search (indexed and searchable) */
-interface ChunkContent {
-  title: string;
-  sectionTitle: string;
-  text: string;
-  url: string;
-  tags: string;
-  headingPath: string;
-  [key: string]: unknown;
-}
-
-/** Metadata fields stored in Upstash Search (returned but not searchable) */
-interface ChunkMetadata {
+/** Flat metadata stored alongside each chunk vector in Upstash Vector */
+interface ChunkVectorMetadata {
   projectId: string;
   scopeName: string;
+  type: string;
+  url: string;
   path: string;
+  title: string;
+  sectionTitle: string;
+  headingPath: string;
   snippet: string;
+  chunkText: string;
+  tags: string[];
   ordinal: number;
   contentHash: string;
   depth: number;
   incomingLinks: number;
   routeFile: string;
   description: string;
-  keywords: string;
+  keywords: string[];
   [key: string]: unknown;
 }
 
-/** Content fields for full page documents in Upstash Search (indexed and searchable) */
-interface PageContent {
-  title: string;
-  url: string;
-  type: string;
-  description: string;
-  keywords: string;
-  summary: string;
-  tags: string;
-  [key: string]: unknown;
-}
-
-/** Metadata fields for full page documents in Upstash Search (returned but not searchable) */
-interface PageMetadata {
-  markdown: string;
+/** Flat metadata stored alongside each page vector in Upstash Vector */
+interface PageVectorMetadata {
   projectId: string;
   scopeName: string;
+  type: string;
+  title: string;
+  url: string;
+  description: string;
+  keywords: string[];
+  summary: string;
+  tags: string[];
+  markdown: string;
   routeFile: string;
   routeResolution: string;
   incomingLinks: number;
@@ -62,220 +53,231 @@ interface PageMetadata {
 }
 
 export interface UpstashSearchStoreOptions {
-  client: Search;
-}
-
-/**
- * Derives the Upstash Search index name for a given scope.
- * Each scope gets its own index for isolation (multi-branch support).
- */
-function chunkIndexName(scope: Scope): string {
-  return `${scope.projectId}--${scope.scopeName}`;
-}
-
-function pageIndexName(scope: Scope): string {
-  return `${scope.projectId}--${scope.scopeName}--pages`;
+  index: Index;
 }
 
 export class UpstashSearchStore {
-  private readonly client: Search;
+  private readonly index: Index;
 
   constructor(opts: UpstashSearchStoreOptions) {
-    this.client = opts.client;
-  }
-
-  private chunkIndex(scope: Scope) {
-    return this.client.index<ChunkContent, ChunkMetadata>(chunkIndexName(scope));
-  }
-
-  private pageIndex(scope: Scope) {
-    return this.client.index<PageContent, PageMetadata>(pageIndexName(scope));
+    this.index = opts.index;
   }
 
   async upsertChunks(
     chunks: Array<{
       id: string;
-      content: ChunkContent;
-      metadata: ChunkMetadata;
+      vector: number[];
+      metadata: Record<string, unknown>;
     }>,
     scope: Scope
   ): Promise<void> {
     if (chunks.length === 0) return;
 
-    const index = this.chunkIndex(scope);
     const BATCH_SIZE = 100;
     for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
       const batch = chunks.slice(i, i + BATCH_SIZE);
-      await index.upsert(batch);
+      await this.index.upsert(
+        batch.map((c) => ({
+          id: c.id,
+          vector: c.vector,
+          metadata: {
+            ...c.metadata,
+            projectId: scope.projectId,
+            scopeName: scope.scopeName,
+            type: (c.metadata.type as string) || "chunk"
+          }
+        }))
+      );
     }
   }
 
   async search(
-    query: string,
+    vector: number[],
     opts: {
       limit: number;
-      semanticWeight?: number;
-      inputEnrichment?: boolean;
-      reranking?: boolean;
       filter?: string;
     },
     scope: Scope
   ): Promise<VectorHit[]> {
-    const index = this.chunkIndex(scope);
+    const filterParts = [
+      `projectId = '${scope.projectId}'`,
+      `scopeName = '${scope.scopeName}'`,
+      `type = 'chunk'`
+    ];
+    if (opts.filter) {
+      filterParts.push(opts.filter);
+    }
 
-    const results = await index.search({
-      query,
-      limit: opts.limit,
-      semanticWeight: opts.semanticWeight,
-      inputEnrichment: opts.inputEnrichment,
-      reranking: opts.reranking,
-      filter: opts.filter
+    const results = await this.index.query<ChunkVectorMetadata>({
+      vector,
+      topK: opts.limit,
+      includeMetadata: true,
+      filter: filterParts.join(" AND ")
     });
 
     return results.map((doc) => ({
-      id: doc.id,
+      id: String(doc.id),
       score: doc.score,
       metadata: {
-        projectId: (doc.metadata?.projectId as string) ?? "",
-        scopeName: (doc.metadata?.scopeName as string) ?? "",
-        url: doc.content.url as string,
-        path: (doc.metadata?.path as string) ?? "",
-        title: doc.content.title as string,
-        sectionTitle: doc.content.sectionTitle as string,
-        headingPath: doc.content.headingPath ? (doc.content.headingPath as string).split(" > ").filter(Boolean) : [],
-        snippet: (doc.metadata?.snippet as string) ?? "",
-        chunkText: doc.content.text as string,
-        ordinal: (doc.metadata?.ordinal as number) ?? 0,
-        contentHash: (doc.metadata?.contentHash as string) ?? "",
-        depth: (doc.metadata?.depth as number) ?? 0,
-        incomingLinks: (doc.metadata?.incomingLinks as number) ?? 0,
-        routeFile: (doc.metadata?.routeFile as string) ?? "",
-        tags: doc.content.tags ? (doc.content.tags as string).split(",").filter(Boolean) : [],
-        description: (doc.metadata?.description as string) || undefined,
-        keywords: doc.metadata?.keywords ? (doc.metadata.keywords as string).split(",").filter(Boolean) : undefined
+        projectId: doc.metadata?.projectId ?? "",
+        scopeName: doc.metadata?.scopeName ?? "",
+        url: doc.metadata?.url ?? "",
+        path: doc.metadata?.path ?? "",
+        title: doc.metadata?.title ?? "",
+        sectionTitle: doc.metadata?.sectionTitle ?? "",
+        headingPath: doc.metadata?.headingPath
+          ? String(doc.metadata.headingPath).split(" > ").filter(Boolean)
+          : [],
+        snippet: doc.metadata?.snippet ?? "",
+        chunkText: doc.metadata?.chunkText ?? "",
+        ordinal: doc.metadata?.ordinal ?? 0,
+        contentHash: doc.metadata?.contentHash ?? "",
+        depth: doc.metadata?.depth ?? 0,
+        incomingLinks: doc.metadata?.incomingLinks ?? 0,
+        routeFile: doc.metadata?.routeFile ?? "",
+        tags: doc.metadata?.tags ?? [],
+        description: doc.metadata?.description || undefined,
+        keywords: doc.metadata?.keywords?.length
+          ? doc.metadata.keywords
+          : undefined
       }
     }));
   }
 
   async searchPages(
-    query: string,
+    vector: number[],
     opts: {
       limit: number;
-      semanticWeight?: number;
-      inputEnrichment?: boolean;
       filter?: string;
     },
     scope: Scope
   ): Promise<PageHit[]> {
-    const index = this.pageIndex(scope);
+    const filterParts = [
+      `projectId = '${scope.projectId}'`,
+      `scopeName = '${scope.scopeName}'`,
+      `type = 'page'`
+    ];
+    if (opts.filter) {
+      filterParts.push(opts.filter);
+    }
 
     let results;
     try {
-      results = await index.search({
-        query,
-        limit: opts.limit,
-        semanticWeight: opts.semanticWeight,
-        inputEnrichment: opts.inputEnrichment,
-        reranking: true,
-        filter: opts.filter
+      results = await this.index.query<PageVectorMetadata>({
+        vector,
+        topK: opts.limit,
+        includeMetadata: true,
+        filter: filterParts.join(" AND ")
       });
     } catch {
-      // Page index may not exist yet (pre-reindex)
       return [];
     }
 
     return results.map((doc) => ({
-      id: doc.id,
+      id: String(doc.id),
       score: doc.score,
-      title: doc.content.title as string,
-      url: doc.content.url as string,
-      description: (doc.content.description as string) ?? "",
-      tags: doc.content.tags ? (doc.content.tags as string).split(",").filter(Boolean) : [],
-      depth: (doc.metadata?.depth as number) ?? 0,
-      incomingLinks: (doc.metadata?.incomingLinks as number) ?? 0,
-      routeFile: (doc.metadata?.routeFile as string) ?? ""
+      title: doc.metadata?.title ?? "",
+      url: doc.metadata?.url ?? "",
+      description: doc.metadata?.description ?? "",
+      tags: doc.metadata?.tags ?? [],
+      depth: doc.metadata?.depth ?? 0,
+      incomingLinks: doc.metadata?.incomingLinks ?? 0,
+      routeFile: doc.metadata?.routeFile ?? ""
     }));
   }
 
   async deleteByIds(ids: string[], scope: Scope): Promise<void> {
     if (ids.length === 0) return;
 
-    const index = this.chunkIndex(scope);
     const BATCH_SIZE = 100;
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const batch = ids.slice(i, i + BATCH_SIZE);
-      await index.delete(batch);
+      await this.index.delete(batch);
     }
   }
 
   async deleteScope(scope: Scope): Promise<void> {
+    // Range scan to find all vectors for this scope, then delete them
+    const ids: string[] = [];
+    let cursor = "0";
     try {
-      const chunkIdx = this.chunkIndex(scope);
-      await chunkIdx.deleteIndex();
+      for (;;) {
+        const result = await this.index.range<ChunkVectorMetadata>({
+          cursor,
+          limit: 100,
+          includeMetadata: true
+        });
+        for (const doc of result.vectors) {
+          if (
+            doc.metadata?.projectId === scope.projectId &&
+            doc.metadata?.scopeName === scope.scopeName
+          ) {
+            ids.push(String(doc.id));
+          }
+        }
+        if (!result.nextCursor || result.nextCursor === "0") break;
+        cursor = result.nextCursor;
+      }
     } catch {
       // Index may not exist
     }
 
-    try {
-      const pageIdx = this.pageIndex(scope);
-      await pageIdx.deleteIndex();
-    } catch {
-      // Index may not exist
+    if (ids.length > 0) {
+      await this.deleteByIds(ids, scope);
     }
   }
 
   async listScopes(projectId: string): Promise<ScopeInfo[]> {
-    const allIndexes = await this.client.listIndexes();
-    const prefix = `${projectId}--`;
+    const scopeMap = new Map<string, number>();
+    let cursor = "0";
 
-    const scopeNames = new Set<string>();
-    for (const name of allIndexes) {
-      if (name.startsWith(prefix) && !name.endsWith("--pages")) {
-        const scopeName = name.slice(prefix.length);
-        scopeNames.add(scopeName);
+    try {
+      for (;;) {
+        const result = await this.index.range<ChunkVectorMetadata>({
+          cursor,
+          limit: 100,
+          includeMetadata: true
+        });
+        for (const doc of result.vectors) {
+          if (doc.metadata?.projectId === projectId) {
+            const scopeName = doc.metadata.scopeName ?? "";
+            scopeMap.set(scopeName, (scopeMap.get(scopeName) ?? 0) + 1);
+          }
+        }
+        if (!result.nextCursor || result.nextCursor === "0") break;
+        cursor = result.nextCursor;
       }
+    } catch {
+      // Index may not exist
     }
 
-    const scopes: ScopeInfo[] = [];
-    for (const scopeName of scopeNames) {
-      const scope: Scope = {
-        projectId,
-        scopeName,
-        scopeId: `${projectId}:${scopeName}`
-      };
-
-      try {
-        const info = await this.chunkIndex(scope).info();
-        scopes.push({
-          projectId,
-          scopeName,
-          lastIndexedAt: new Date().toISOString(),
-          documentCount: info.documentCount
-        });
-      } catch {
-        scopes.push({
-          projectId,
-          scopeName,
-          lastIndexedAt: "unknown",
-          documentCount: 0
-        });
-      }
-    }
-
-    return scopes;
+    return [...scopeMap.entries()].map(([scopeName, count]) => ({
+      projectId,
+      scopeName,
+      lastIndexedAt: new Date().toISOString(),
+      documentCount: count
+    }));
   }
 
   async getContentHashes(scope: Scope): Promise<Map<string, string>> {
     const map = new Map<string, string>();
-    const index = this.chunkIndex(scope);
-
     let cursor = "0";
+
     try {
       for (;;) {
-        const result = await index.range({ cursor, limit: 100 });
-        for (const doc of result.documents) {
-          if (doc.metadata?.contentHash) {
-            map.set(doc.id, doc.metadata.contentHash as string);
+        const result = await this.index.range<ChunkVectorMetadata>({
+          cursor,
+          limit: 100,
+          includeMetadata: true
+        });
+        for (const doc of result.vectors) {
+          if (
+            doc.metadata?.projectId === scope.projectId &&
+            doc.metadata?.scopeName === scope.scopeName &&
+            doc.metadata?.type === "chunk" &&
+            doc.metadata?.contentHash
+          ) {
+            map.set(String(doc.id), doc.metadata.contentHash);
           }
         }
         if (!result.nextCursor || result.nextCursor === "0") break;
@@ -295,24 +297,30 @@ export class UpstashSearchStore {
     pages: Array<{ url: string; title: string; description: string; routeFile: string }>;
     nextCursor?: string;
   }> {
-    const index = this.pageIndex(scope);
     const cursor = opts?.cursor ?? "0";
     const limit = opts?.limit ?? 50;
 
     try {
-      const rangeOpts: { cursor: string; limit: number; prefix?: string } = { cursor, limit };
-      if (opts?.pathPrefix) {
-        rangeOpts.prefix = opts.pathPrefix;
-      }
+      const result = await this.index.range<PageVectorMetadata>({
+        cursor,
+        limit,
+        includeMetadata: true
+      });
 
-      const result = await index.range(rangeOpts);
-
-      const pages = result.documents.map((doc) => ({
-        url: (doc.content.url as string) ?? "",
-        title: (doc.content.title as string) ?? "",
-        description: (doc.content.description as string) ?? "",
-        routeFile: (doc.metadata?.routeFile as string) ?? ""
-      }));
+      const pages = result.vectors
+        .filter(
+          (doc) =>
+            doc.metadata?.projectId === scope.projectId &&
+            doc.metadata?.scopeName === scope.scopeName &&
+            doc.metadata?.type === "page" &&
+            (!opts?.pathPrefix || (doc.metadata?.url ?? "").startsWith(opts.pathPrefix))
+        )
+        .map((doc) => ({
+          url: doc.metadata?.url ?? "",
+          title: doc.metadata?.title ?? "",
+          description: doc.metadata?.description ?? "",
+          routeFile: doc.metadata?.routeFile ?? ""
+        }));
 
       const response: {
         pages: Array<{ url: string; title: string; description: string; routeFile: string }>;
@@ -325,22 +333,29 @@ export class UpstashSearchStore {
 
       return response;
     } catch {
-      // Page index may not exist yet
       return { pages: [] };
     }
   }
 
   async getPageHashes(scope: Scope): Promise<Map<string, string>> {
     const map = new Map<string, string>();
-    const index = this.pageIndex(scope);
-
     let cursor = "0";
+
     try {
       for (;;) {
-        const result = await index.range({ cursor, limit: 100 });
-        for (const doc of result.documents) {
-          if (doc.metadata?.contentHash) {
-            map.set(doc.id, doc.metadata.contentHash as string);
+        const result = await this.index.range<PageVectorMetadata>({
+          cursor,
+          limit: 100,
+          includeMetadata: true
+        });
+        for (const doc of result.vectors) {
+          if (
+            doc.metadata?.projectId === scope.projectId &&
+            doc.metadata?.scopeName === scope.scopeName &&
+            doc.metadata?.type === "page" &&
+            doc.metadata?.contentHash
+          ) {
+            map.set(String(doc.id), doc.metadata.contentHash);
           }
         }
         if (!result.nextCursor || result.nextCursor === "0") break;
@@ -356,73 +371,65 @@ export class UpstashSearchStore {
   async deletePagesByIds(ids: string[], scope: Scope): Promise<void> {
     if (ids.length === 0) return;
 
-    const index = this.pageIndex(scope);
     const BATCH_SIZE = 50;
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const batch = ids.slice(i, i + BATCH_SIZE);
-      await index.delete(batch);
+      await this.index.delete(batch);
     }
   }
 
-  async upsertPages(pages: PageRecord[], scope: Scope): Promise<void> {
+  async upsertPages(
+    pages: Array<{
+      id: string;
+      vector: number[];
+      metadata: Record<string, unknown>;
+    }>,
+    scope: Scope
+  ): Promise<void> {
     if (pages.length === 0) return;
 
-    const index = this.pageIndex(scope);
     const BATCH_SIZE = 50;
     for (let i = 0; i < pages.length; i += BATCH_SIZE) {
       const batch = pages.slice(i, i + BATCH_SIZE);
-      const docs = batch.map((p) => ({
-        id: p.url,
-        content: {
-          title: p.title,
-          url: p.url,
-          type: "page",
-          description: p.description ?? "",
-          keywords: (p.keywords ?? []).join(","),
-          summary: p.summary ?? "",
-          tags: p.tags.join(",")
-        } as PageContent,
-        metadata: {
-          markdown: p.markdown,
-          projectId: p.projectId,
-          scopeName: p.scopeName,
-          routeFile: p.routeFile,
-          routeResolution: p.routeResolution,
-          incomingLinks: p.incomingLinks,
-          outgoingLinks: p.outgoingLinks,
-          depth: p.depth,
-          indexedAt: p.indexedAt,
-          contentHash: p.contentHash ?? ""
-        } as PageMetadata
-      }));
-      await index.upsert(docs);
+      await this.index.upsert(
+        batch.map((p) => ({
+          id: p.id,
+          vector: p.vector,
+          metadata: {
+            ...p.metadata,
+            projectId: scope.projectId,
+            scopeName: scope.scopeName,
+            type: "page"
+          }
+        }))
+      );
     }
   }
 
   async getPage(url: string, scope: Scope): Promise<PageRecord | null> {
-    const index = this.pageIndex(scope);
-
     try {
-      const results = await index.fetch([url]);
+      const results = await this.index.fetch<PageVectorMetadata>([url], {
+        includeMetadata: true
+      });
       const doc = results[0];
-      if (!doc) return null;
+      if (!doc || !doc.metadata) return null;
 
       return {
-        url: doc.content.url as string,
-        title: doc.content.title as string,
-        markdown: doc.metadata.markdown as string,
-        projectId: doc.metadata.projectId as string,
-        scopeName: doc.metadata.scopeName as string,
-        routeFile: doc.metadata.routeFile as string,
-        routeResolution: (doc.metadata.routeResolution as string) as "exact" | "best-effort",
-        incomingLinks: doc.metadata.incomingLinks as number,
-        outgoingLinks: doc.metadata.outgoingLinks as number,
-        depth: doc.metadata.depth as number,
-        tags: doc.content.tags ? (doc.content.tags as string).split(",").filter(Boolean) : [],
-        indexedAt: doc.metadata.indexedAt as string,
-        summary: (doc.content.summary as string) || undefined,
-        description: (doc.content.description as string) || undefined,
-        keywords: doc.content.keywords ? (doc.content.keywords as string).split(",").filter(Boolean) : undefined
+        url: doc.metadata.url,
+        title: doc.metadata.title,
+        markdown: doc.metadata.markdown,
+        projectId: doc.metadata.projectId,
+        scopeName: doc.metadata.scopeName,
+        routeFile: doc.metadata.routeFile,
+        routeResolution: doc.metadata.routeResolution as "exact" | "best-effort",
+        incomingLinks: doc.metadata.incomingLinks,
+        outgoingLinks: doc.metadata.outgoingLinks,
+        depth: doc.metadata.depth,
+        tags: doc.metadata.tags ?? [],
+        indexedAt: doc.metadata.indexedAt,
+        summary: doc.metadata.summary || undefined,
+        description: doc.metadata.description || undefined,
+        keywords: doc.metadata.keywords?.length ? doc.metadata.keywords : undefined
       };
     } catch {
       return null;
@@ -430,17 +437,40 @@ export class UpstashSearchStore {
   }
 
   async deletePages(scope: Scope): Promise<void> {
+    // Delete all page vectors for this scope
+    const ids: string[] = [];
+    let cursor = "0";
     try {
-      const index = this.pageIndex(scope);
-      await index.reset();
+      for (;;) {
+        const result = await this.index.range<PageVectorMetadata>({
+          cursor,
+          limit: 100,
+          includeMetadata: true
+        });
+        for (const doc of result.vectors) {
+          if (
+            doc.metadata?.projectId === scope.projectId &&
+            doc.metadata?.scopeName === scope.scopeName &&
+            doc.metadata?.type === "page"
+          ) {
+            ids.push(String(doc.id));
+          }
+        }
+        if (!result.nextCursor || result.nextCursor === "0") break;
+        cursor = result.nextCursor;
+      }
     } catch {
       // Index may not exist
+    }
+
+    if (ids.length > 0) {
+      await this.deleteByIds(ids, scope);
     }
   }
 
   async health(): Promise<{ ok: boolean; details?: string }> {
     try {
-      await this.client.info();
+      await this.index.info();
       return { ok: true };
     } catch (error) {
       return {
@@ -451,17 +481,33 @@ export class UpstashSearchStore {
   }
 
   async dropAllIndexes(projectId: string): Promise<void> {
-    const allIndexes = await this.client.listIndexes();
-    const prefix = `${projectId}--`;
-
-    for (const name of allIndexes) {
-      if (name.startsWith(prefix)) {
-        try {
-          const index = this.client.index(name);
-          await index.deleteIndex();
-        } catch {
-          // Ignore deletion failures
+    // Range scan to find all vectors with this projectId, then delete
+    const ids: string[] = [];
+    let cursor = "0";
+    try {
+      for (;;) {
+        const result = await this.index.range<ChunkVectorMetadata>({
+          cursor,
+          limit: 100,
+          includeMetadata: true
+        });
+        for (const doc of result.vectors) {
+          if (doc.metadata?.projectId === projectId) {
+            ids.push(String(doc.id));
+          }
         }
+        if (!result.nextCursor || result.nextCursor === "0") break;
+        cursor = result.nextCursor;
+      }
+    } catch {
+      // Ignore errors
+    }
+
+    if (ids.length > 0) {
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+        const batch = ids.slice(i, i + BATCH_SIZE);
+        await this.index.delete(batch);
       }
     }
   }

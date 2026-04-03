@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDefaultConfig } from "../src/config/defaults";
 import { SearchEngine } from "../src/search/engine";
 import type { UpstashSearchStore } from "../src/vector/upstash";
+import { createMockEmbedder } from "./helpers/mock-embedder";
 
 function createMockStore(): UpstashSearchStore {
   return {
@@ -33,7 +34,8 @@ describe("SearchEngine.create options", () => {
 
     const engine = await SearchEngine.create({
       config,
-      store
+      store,
+      embedder: createMockEmbedder()
     });
 
     expect(engine).toBeDefined();
@@ -47,7 +49,8 @@ describe("SearchEngine.create options", () => {
 
     const engine = await SearchEngine.create({
       config,
-      store
+      store,
+      embedder: createMockEmbedder()
     });
 
     expect(engine.getConfig()).toBe(config);

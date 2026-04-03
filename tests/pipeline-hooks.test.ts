@@ -6,6 +6,7 @@ import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { UpstashSearchStore } from "../src/vector/upstash";
 import type { ResolvedSearchSocketConfig, ExtractedPage, Chunk, IndexStats } from "../src/types";
+import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
@@ -72,6 +73,7 @@ describe("IndexPipeline hooks", () => {
         cwd,
         config,
         store,
+        embedder: createMockEmbedder(),
         hooks: { transformPage }
       });
 
@@ -81,8 +83,8 @@ describe("IndexPipeline hooks", () => {
       expect(stats.pagesProcessed).toBe(1);
 
       const upsertCall = (store.upsertChunks as ReturnType<typeof vi.fn>).mock.calls[0]!;
-      const docs = upsertCall[0] as Array<{ content: { title: string } }>;
-      expect(docs[0]!.content.title).toBe("Modified Title");
+      const docs = upsertCall[0] as Array<{ metadata: { title: string } }>;
+      expect(docs[0]!.metadata.title).toBe("Modified Title");
     });
 
     it("skips pages when returning null", async () => {
@@ -93,6 +95,7 @@ describe("IndexPipeline hooks", () => {
         cwd,
         config,
         store,
+        embedder: createMockEmbedder(),
         hooks: { transformPage: () => null }
       });
 
@@ -111,6 +114,7 @@ describe("IndexPipeline hooks", () => {
         cwd,
         config,
         store,
+        embedder: createMockEmbedder(),
         hooks: {
           transformPage: async (page) => {
             await new Promise((r) => setTimeout(r, 1));
@@ -131,6 +135,7 @@ describe("IndexPipeline hooks", () => {
         cwd,
         config,
         store,
+        embedder: createMockEmbedder(),
         hooks: {
           transformPage: () => {
             throw new Error("transformPage hook error");
@@ -156,6 +161,7 @@ describe("IndexPipeline hooks", () => {
         cwd,
         config,
         store,
+        embedder: createMockEmbedder(),
         hooks: { transformChunk }
       });
 
@@ -173,6 +179,7 @@ describe("IndexPipeline hooks", () => {
         cwd,
         config,
         store,
+        embedder: createMockEmbedder(),
         hooks: { transformChunk: () => null }
       });
 
@@ -194,6 +201,7 @@ describe("IndexPipeline hooks", () => {
         cwd,
         config,
         store,
+        embedder: createMockEmbedder(),
         hooks: { beforeIndex }
       });
 
@@ -212,6 +220,7 @@ describe("IndexPipeline hooks", () => {
         cwd,
         config,
         store,
+        embedder: createMockEmbedder(),
         hooks: { beforeIndex: () => [] }
       });
 
@@ -232,6 +241,7 @@ describe("IndexPipeline hooks", () => {
         cwd,
         config,
         store,
+        embedder: createMockEmbedder(),
         hooks: { afterIndex }
       });
 
@@ -251,6 +261,7 @@ describe("IndexPipeline hooks", () => {
         cwd,
         config,
         store,
+        embedder: createMockEmbedder(),
         hooks: {
           afterIndex: async () => {
             throw new Error("afterIndex hook error");
@@ -270,7 +281,8 @@ describe("IndexPipeline hooks", () => {
       const pipeline = await IndexPipeline.create({
         cwd,
         config,
-        store
+        store,
+        embedder: createMockEmbedder()
       });
 
       const stats = await pipeline.run({ changedOnly: true });

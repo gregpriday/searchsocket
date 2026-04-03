@@ -284,8 +284,8 @@ export function writeMinimalConfig(cwd: string): string {
   }
 
   const content = `export default {
-  // Upstash Search credentials (set via env vars or directly here)
-  // upstash: { urlEnv: "UPSTASH_SEARCH_REST_URL", tokenEnv: "UPSTASH_SEARCH_REST_TOKEN" }
+  // Upstash Vector credentials (set via env vars or directly here)
+  // upstash: { urlEnv: "UPSTASH_VECTOR_REST_URL", tokenEnv: "UPSTASH_VECTOR_REST_TOKEN" }
 };
 `;
 

@@ -7,52 +7,49 @@ import { SearchEngine } from "../src/search/engine";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { ResolvedSearchSocketConfig, Scope, VectorHit, PageRecord } from "../src/types";
 import type { UpstashSearchStore } from "../src/vector/upstash";
+import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
 function createMockStore(): {
   store: UpstashSearchStore;
-  upsertedChunks: Array<{ id: string; content: Record<string, unknown>; metadata: Record<string, unknown> }>;
-  upsertedPages: PageRecord[];
+  upsertedChunks: Array<{ id: string; vector: number[]; metadata: Record<string, unknown> }>;
+  upsertedPages: Array<{ id: string; vector: number[]; metadata: Record<string, unknown> }>;
 } {
-  const upsertedChunks: Array<{ id: string; content: Record<string, unknown>; metadata: Record<string, unknown> }> = [];
-  const upsertedPages: PageRecord[] = [];
+  const upsertedChunks: Array<{ id: string; vector: number[]; metadata: Record<string, unknown> }> = [];
+  const upsertedPages: Array<{ id: string; vector: number[]; metadata: Record<string, unknown> }> = [];
 
   const store = {
-    upsertChunks: vi.fn(async (chunks: Array<{ id: string; content: Record<string, unknown>; metadata: Record<string, unknown> }>) => {
+    upsertChunks: vi.fn(async (chunks: Array<{ id: string; vector: number[]; metadata: Record<string, unknown> }>) => {
       upsertedChunks.push(...chunks);
     }),
-    search: vi.fn(async (query: string) => {
-      // Simple keyword matching against upserted chunks
-      const results: VectorHit[] = [];
-      for (const chunk of upsertedChunks) {
-        const text = String(chunk.content.text ?? "").toLowerCase();
-        const title = String(chunk.content.title ?? "").toLowerCase();
-        const q = query.toLowerCase();
-        if (text.includes(q) || title.includes(q)) {
-          results.push({
-            id: chunk.id,
-            score: 0.8,
-            metadata: {
-              projectId: String(chunk.metadata.projectId ?? ""),
-              scopeName: String(chunk.metadata.scopeName ?? ""),
-              url: String(chunk.content.url ?? ""),
-              path: String(chunk.metadata.path ?? ""),
-              title: String(chunk.content.title ?? ""),
-              sectionTitle: String(chunk.content.sectionTitle ?? ""),
-              headingPath: chunk.content.headingPath ? String(chunk.content.headingPath).split(" > ").filter(Boolean) : [],
-              snippet: String(chunk.metadata.snippet ?? ""),
-              chunkText: String(chunk.content.text ?? ""),
-              ordinal: Number(chunk.metadata.ordinal ?? 0),
-              contentHash: String(chunk.metadata.contentHash ?? ""),
-              depth: Number(chunk.metadata.depth ?? 0),
-              incomingLinks: Number(chunk.metadata.incomingLinks ?? 0),
-              routeFile: String(chunk.metadata.routeFile ?? ""),
-              tags: chunk.content.tags ? String(chunk.content.tags).split(",").filter(Boolean) : []
-            }
-          });
+    search: vi.fn(async (_vector: number[]) => {
+      // Return all upserted chunks as search results (vector search mock)
+      const results: VectorHit[] = upsertedChunks.map((chunk) => ({
+        id: chunk.id,
+        score: 0.8,
+        metadata: {
+          projectId: String(chunk.metadata.projectId ?? ""),
+          scopeName: String(chunk.metadata.scopeName ?? ""),
+          url: String(chunk.metadata.url ?? ""),
+          path: String(chunk.metadata.path ?? ""),
+          title: String(chunk.metadata.title ?? ""),
+          sectionTitle: String(chunk.metadata.sectionTitle ?? ""),
+          headingPath: chunk.metadata.headingPath
+            ? String(chunk.metadata.headingPath).split(" > ").filter(Boolean)
+            : [],
+          snippet: String(chunk.metadata.snippet ?? ""),
+          chunkText: String(chunk.metadata.chunkText ?? ""),
+          ordinal: Number(chunk.metadata.ordinal ?? 0),
+          contentHash: String(chunk.metadata.contentHash ?? ""),
+          depth: Number(chunk.metadata.depth ?? 0),
+          incomingLinks: Number(chunk.metadata.incomingLinks ?? 0),
+          routeFile: String(chunk.metadata.routeFile ?? ""),
+          tags: Array.isArray(chunk.metadata.tags)
+            ? (chunk.metadata.tags as string[])
+            : []
         }
-      }
+      }));
       return results;
     }),
     searchPages: vi.fn(async () => []),
@@ -61,7 +58,7 @@ function createMockStore(): {
     listScopes: vi.fn(async () => []),
     health: vi.fn(async () => ({ ok: true })),
     getContentHashes: vi.fn(async () => new Map<string, string>()),
-    upsertPages: vi.fn(async (pages: PageRecord[]) => {
+    upsertPages: vi.fn(async (pages: Array<{ id: string; vector: number[]; metadata: Record<string, unknown> }>) => {
       upsertedPages.push(...pages);
     }),
     getPage: vi.fn(async () => null),
@@ -133,7 +130,8 @@ describe("integration: index -> search", () => {
     const pipeline = await IndexPipeline.create({
       cwd,
       config,
-      store
+      store,
+      embedder: createMockEmbedder()
     });
 
     const stats = await pipeline.run({ changedOnly: true });
@@ -143,7 +141,8 @@ describe("integration: index -> search", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store
+      store,
+      embedder: createMockEmbedder()
     });
 
     const result = await engine.search({

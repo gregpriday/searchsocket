@@ -6,6 +6,7 @@ import { resolveScope } from "../core/scope";
 import { hrTimeMs } from "../utils/time";
 import { normalizeUrlPath } from "../utils/path";
 import { createUpstashStore } from "../vector/factory";
+import { GeminiEmbedder } from "../vector/gemini";
 import { rankHits, aggregateByPage, trimByScoreGap, mergePageAndChunkResults } from "./ranking";
 import type {
   PageHit,
@@ -113,21 +114,25 @@ export interface SearchEngineOptions {
   configPath?: string;
   config?: ResolvedSearchSocketConfig;
   store?: UpstashSearchStore;
+  embedder?: GeminiEmbedder;
 }
 
 export class SearchEngine {
   private readonly cwd: string;
   private readonly config: ResolvedSearchSocketConfig;
   private readonly store: UpstashSearchStore;
+  private readonly embedder: GeminiEmbedder;
 
   private constructor(options: {
     cwd: string;
     config: ResolvedSearchSocketConfig;
     store: UpstashSearchStore;
+    embedder: GeminiEmbedder;
   }) {
     this.cwd = options.cwd;
     this.config = options.config;
     this.store = options.store;
+    this.embedder = options.embedder;
   }
 
   static async create(options: SearchEngineOptions = {}): Promise<SearchEngine> {
@@ -135,11 +140,13 @@ export class SearchEngine {
     const config = options.config ?? (await loadConfig({ cwd, configPath: options.configPath }));
 
     const store = options.store ?? await createUpstashStore(config);
+    const embedder = options.embedder ?? GeminiEmbedder.fromConfig(config);
 
     return new SearchEngine({
       cwd,
       config,
-      store
+      store,
+      embedder
     });
   }
 
@@ -165,69 +172,83 @@ export class SearchEngine {
       ? Math.max(topK * 10, 50)
       : Math.max(50, topK);
 
-    // Build filter string for Upstash Search
-    const filterParts: string[] = [];
-    if (input.pathPrefix) {
-      const prefix = input.pathPrefix.startsWith("/") ? input.pathPrefix : `/${input.pathPrefix}`;
-      filterParts.push(`url GLOB '${prefix}*'`);
-    }
-    if (input.tags && input.tags.length > 0) {
-      for (const tag of input.tags) {
-        filterParts.push(`tags GLOB '*${tag}*'`);
-      }
-    }
-    const filter = filterParts.length > 0 ? filterParts.join(" AND ") : undefined;
-
     const useDualSearch = this.config.search.dualSearch && groupByPage;
+
+    // Embed the query text via Gemini
+    const queryVector = await this.embedder.embedQuery(input.q);
 
     const searchStart = process.hrtime.bigint();
     let ranked: RankedHit[];
 
+    // Post-query filtering for pathPrefix and tags (Upstash Vector doesn't support GLOB)
+    const pathPrefix = input.pathPrefix
+      ? (input.pathPrefix.startsWith("/") ? input.pathPrefix : `/${input.pathPrefix}`)
+      : undefined;
+    const filterTags = input.tags && input.tags.length > 0 ? input.tags : undefined;
+
+    const applyPostFilters = (hits: VectorHit[]): VectorHit[] => {
+      let filtered = hits;
+      if (pathPrefix) {
+        filtered = filtered.filter((h) => h.metadata.url.startsWith(pathPrefix));
+      }
+      if (filterTags) {
+        filtered = filtered.filter((h) =>
+          filterTags.every((tag) => h.metadata.tags.includes(tag))
+        );
+      }
+      return filtered;
+    };
+
+    const applyPagePostFilters = (hits: PageHit[]): PageHit[] => {
+      let filtered = hits;
+      if (pathPrefix) {
+        filtered = filtered.filter((h) => h.url.startsWith(pathPrefix));
+      }
+      if (filterTags) {
+        filtered = filtered.filter((h) =>
+          filterTags.every((tag) => h.tags.includes(tag))
+        );
+      }
+      return filtered;
+    };
+
     if (useDualSearch) {
-      // Parallel search: reranked page search + fast chunk search
+      // Parallel search: page search + chunk search using the same query vector
       const chunkLimit = Math.max(topK * 10, 100);
       const pageLimit = 20;
 
+      // Over-fetch when filters are active
+      const fetchMultiplier = (pathPrefix || filterTags) ? 2 : 1;
+
       const [pageHits, chunkHits] = await Promise.all([
         this.store.searchPages(
-          input.q,
-          {
-            limit: pageLimit,
-            semanticWeight: this.config.search.semanticWeight,
-            inputEnrichment: this.config.search.inputEnrichment,
-            filter
-          },
+          queryVector,
+          { limit: pageLimit * fetchMultiplier },
           resolvedScope
         ),
         this.store.search(
-          input.q,
-          {
-            limit: chunkLimit,
-            semanticWeight: this.config.search.semanticWeight,
-            inputEnrichment: this.config.search.inputEnrichment,
-            reranking: false,
-            filter
-          },
+          queryVector,
+          { limit: chunkLimit * fetchMultiplier },
           resolvedScope
         )
       ]);
 
-      const rankedChunks = rankHits(chunkHits, this.config, input.q, input.debug);
-      ranked = mergePageAndChunkResults(pageHits, rankedChunks, this.config);
+      const filteredChunks = applyPostFilters(chunkHits);
+      const filteredPages = applyPagePostFilters(pageHits);
+
+      const rankedChunks = rankHits(filteredChunks, this.config, input.q, input.debug);
+      ranked = mergePageAndChunkResults(filteredPages, rankedChunks, this.config);
     } else {
-      // Legacy single-search behavior
+      // Single search
+      const fetchMultiplier = (pathPrefix || filterTags) ? 2 : 1;
+
       const hits = await this.store.search(
-        input.q,
-        {
-          limit: candidateK,
-          semanticWeight: this.config.search.semanticWeight,
-          inputEnrichment: this.config.search.inputEnrichment,
-          reranking: this.config.search.reranking,
-          filter
-        },
+        queryVector,
+        { limit: candidateK * fetchMultiplier },
         resolvedScope
       );
-      ranked = rankHits(hits, this.config, input.q, input.debug);
+      const filtered = applyPostFilters(hits);
+      ranked = rankHits(filtered, this.config, input.q, input.debug);
     }
     const searchMs = hrTimeMs(searchStart);
 

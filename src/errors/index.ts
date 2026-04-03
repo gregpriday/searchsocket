@@ -7,6 +7,7 @@ export type SearchSocketErrorCode =
   | "RATE_LIMITED"
   | "INVALID_REQUEST"
   | "INTERNAL_ERROR"
+  | "EMBEDDING_FAILED"
   | "BUILD_MANIFEST_NOT_FOUND"
   | "BUILD_SERVER_FAILED";
 

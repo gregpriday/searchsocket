@@ -6,6 +6,7 @@ import { SearchEngine } from "../src/search/engine";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { PageHit, PageRecord, VectorHit } from "../src/types";
 import type { UpstashSearchStore } from "../src/vector/upstash";
+import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
@@ -90,7 +91,8 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store: createMockStore()
+      store: createMockStore(),
+      embedder: createMockEmbedder()
     });
 
     await expect(engine.search({ q: "   " })).rejects.toMatchObject({
@@ -106,7 +108,8 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store: createMockStore()
+      store: createMockStore(),
+      embedder: createMockEmbedder()
     });
 
     await expect(engine.search({ q: "test", topK: 0 })).rejects.toMatchObject({
@@ -142,7 +145,8 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store
+      store,
+      embedder: createMockEmbedder()
     });
 
     const page = await engine.getPage("https://example.com/docs/getting-started?ref=nav#install");
@@ -175,7 +179,8 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store
+      store,
+      embedder: createMockEmbedder()
     });
 
     const page = await engine.getPage("/docs/faq?ref=nav#pricing");
@@ -190,7 +195,8 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store: createMockStore()
+      store: createMockStore(),
+      embedder: createMockEmbedder()
     });
 
     await expect(engine.getPage("/missing")).rejects.toMatchObject({
@@ -222,7 +228,8 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store
+      store,
+      embedder: createMockEmbedder()
     });
 
     const page = await engine.getPage("https://example.com");
@@ -233,7 +240,7 @@ describe("SearchEngine - adversarial cases", () => {
   it("overfetches vector candidates with higher multiplier in page mode (default)", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    // Disable dual search to test legacy overfetch behavior
+    // Disable dual search to test single-search overfetch behavior
     config.search.dualSearch = false;
 
     const store = createMockStore();
@@ -241,14 +248,15 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store
+      store,
+      embedder: createMockEmbedder()
     });
 
     await engine.search({ q: "test", topK: 2 });
 
-    // Default is page mode: Math.max(2 * 10, 50) = 50
+    // Default is page mode: Math.max(2 * 10, 50) = 50, search receives a vector now
     expect(store.search).toHaveBeenCalledWith(
-      "test",
+      expect.any(Array),
       expect.objectContaining({ limit: 50 }),
       expect.any(Object)
     );
@@ -263,14 +271,15 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store
+      store,
+      embedder: createMockEmbedder()
     });
 
     await engine.search({ q: "test", topK: 2, groupBy: "chunk" });
 
-    // Chunk mode: Math.max(50, 2) = 50
+    // Chunk mode: Math.max(50, 2) = 50, search receives a vector now
     expect(store.search).toHaveBeenCalledWith(
-      "test",
+      expect.any(Array),
       expect.objectContaining({ limit: 50 }),
       expect.any(Object)
     );
@@ -290,7 +299,8 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store: createMockStore(hits)
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
     });
 
     const result = await engine.search({ q: "test", topK: 10 });
@@ -326,7 +336,8 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store: createMockStore(hits)
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
     });
 
     const result = await engine.search({ q: "test", topK: 10 });
@@ -350,7 +361,8 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store: createMockStore(hits)
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
     });
 
     const result = await engine.search({ q: "test", topK: 10, groupBy: "chunk" });
@@ -366,7 +378,7 @@ describe("SearchEngine - adversarial cases", () => {
   it("uses requested topK when it exceeds the candidate floor", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    // Disable dual search to test legacy overfetch behavior
+    // Disable dual search to test single-search overfetch behavior
     config.search.dualSearch = false;
 
     const store = createMockStore();
@@ -374,14 +386,15 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store
+      store,
+      embedder: createMockEmbedder()
     });
 
     await engine.search({ q: "test", topK: 80 });
 
     // Page mode: Math.max(80 * 10, 50) = 800
     expect(store.search).toHaveBeenCalledWith(
-      "test",
+      expect.any(Array),
       expect.objectContaining({ limit: 800 }),
       expect.any(Object)
     );
@@ -408,7 +421,8 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store: createMockStore(hits)
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
     });
 
     const result = await engine.search({ q: "terminal features", topK: 10 });
@@ -440,7 +454,8 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store: createMockStore(hits)
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
     });
 
     const result = await engine.search({ q: "docs", topK: 10 });
@@ -461,7 +476,8 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store: createMockStore(hits)
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
     });
 
     const result = await engine.search({ q: "test query", topK: 10 });
@@ -484,7 +500,8 @@ describe("SearchEngine - adversarial cases", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store: createMockStore(hits)
+      store: createMockStore(hits),
+      embedder: createMockEmbedder()
     });
 
     const result = await engine.search({ q: "xyzzy gibberish asdf", topK: 10 });
@@ -516,7 +533,7 @@ describe("SearchEngine - dual search", () => {
     ];
 
     const store = createMockStore(chunkHits, pageHits);
-    const engine = await SearchEngine.create({ cwd, config, store });
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
 
     const result = await engine.search({ q: "documentation", topK: 10 });
 
@@ -524,10 +541,10 @@ describe("SearchEngine - dual search", () => {
     expect(store.searchPages).toHaveBeenCalledTimes(1);
     expect(store.search).toHaveBeenCalledTimes(1);
 
-    // Chunk search should NOT have reranking (dual search disables it for chunks)
+    // Both search methods receive a vector, not a string
     expect(store.search).toHaveBeenCalledWith(
-      "documentation",
-      expect.objectContaining({ reranking: false }),
+      expect.any(Array),
+      expect.objectContaining({ limit: expect.any(Number) }),
       expect.any(Object)
     );
 
@@ -541,16 +558,16 @@ describe("SearchEngine - dual search", () => {
     config.search.dualSearch = false;
 
     const store = createMockStore([makeHit("chunk-1", "/home")]);
-    const engine = await SearchEngine.create({ cwd, config, store });
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
 
     await engine.search({ q: "test", topK: 5 });
 
     expect(store.searchPages).not.toHaveBeenCalled();
     expect(store.search).toHaveBeenCalledTimes(1);
-    // Single search should use the configured reranking setting
+    // Search receives a vector now
     expect(store.search).toHaveBeenCalledWith(
-      "test",
-      expect.objectContaining({ reranking: true }),
+      expect.any(Array),
+      expect.objectContaining({ limit: expect.any(Number) }),
       expect.any(Object)
     );
   });
@@ -561,7 +578,7 @@ describe("SearchEngine - dual search", () => {
     // dualSearch is true, but groupBy=chunk should bypass it
 
     const store = createMockStore([makeHit("chunk-1", "/home")]);
-    const engine = await SearchEngine.create({ cwd, config, store });
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
 
     await engine.search({ q: "test", topK: 5, groupBy: "chunk" });
 
@@ -579,7 +596,7 @@ describe("SearchEngine - dual search", () => {
     ];
     // No page hits (e.g., page index not yet populated)
     const store = createMockStore(chunkHits, []);
-    const engine = await SearchEngine.create({ cwd, config, store });
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
 
     const result = await engine.search({ q: "test", topK: 10 });
 
@@ -613,7 +630,7 @@ describe("SearchEngine - dual search", () => {
     ];
 
     const store = createMockStore(chunkHits, pageHits);
-    const engine = await SearchEngine.create({ cwd, config, store });
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
 
     const result = await engine.search({ q: "test", topK: 10 });
 
@@ -631,7 +648,7 @@ describe("SearchEngine - listPages", () => {
     const config = createDefaultConfig("searchsocket-engine-test");
     const store = createMockStore();
 
-    const engine = await SearchEngine.create({ cwd, config, store });
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
     const result = await engine.listPages();
 
     expect(result.pages).toEqual([]);
@@ -649,7 +666,7 @@ describe("SearchEngine - listPages", () => {
     ];
     store.listPages.mockResolvedValueOnce({ pages: mockPages, nextCursor: "abc123" });
 
-    const engine = await SearchEngine.create({ cwd, config, store });
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
     const result = await engine.listPages();
 
     expect(result.pages).toEqual(mockPages);
@@ -661,7 +678,7 @@ describe("SearchEngine - listPages", () => {
     const config = createDefaultConfig("searchsocket-engine-test");
     const store = createMockStore();
 
-    const engine = await SearchEngine.create({ cwd, config, store });
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
     await engine.listPages({ pathPrefix: "/docs", cursor: "xyz", limit: 25 });
 
     expect(store.listPages).toHaveBeenCalledWith(
@@ -675,7 +692,7 @@ describe("SearchEngine - listPages", () => {
     const config = createDefaultConfig("searchsocket-engine-test");
     const store = createMockStore();
 
-    const engine = await SearchEngine.create({ cwd, config, store });
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
     await engine.listPages({ scope: "staging" });
 
     expect(store.listPages).toHaveBeenCalledWith(
@@ -692,7 +709,7 @@ describe("SearchEngine - listPages", () => {
       pages: [{ url: "/", title: "Home", description: "", routeFile: "" }]
     });
 
-    const engine = await SearchEngine.create({ cwd, config, store });
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
     const result = await engine.listPages();
 
     expect(result.pages).toHaveLength(1);
@@ -704,7 +721,7 @@ describe("SearchEngine - listPages", () => {
     const config = createDefaultConfig("searchsocket-engine-test");
     const store = createMockStore();
 
-    const engine = await SearchEngine.create({ cwd, config, store });
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
     await engine.listPages({ pathPrefix: "docs" });
 
     expect(store.listPages).toHaveBeenCalledWith(
@@ -718,7 +735,7 @@ describe("SearchEngine - listPages", () => {
     const config = createDefaultConfig("searchsocket-engine-test");
     const store = createMockStore();
 
-    const engine = await SearchEngine.create({ cwd, config, store });
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
     await engine.listPages();
 
     expect(store.listPages).toHaveBeenCalledWith(
