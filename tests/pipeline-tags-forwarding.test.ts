@@ -6,7 +6,6 @@ import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { UpstashSearchStore } from "../src/vector/upstash";
 import type { ResolvedSearchSocketConfig } from "../src/types";
-import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
@@ -74,7 +73,7 @@ describe("Pipeline tags forwarding", () => {
     const upsertChunks = vi.fn().mockResolvedValue(undefined);
     const store = createMockStore({ upsertChunks });
 
-    const pipeline = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
+    const pipeline = await IndexPipeline.create({ cwd, config, store });
     await pipeline.run({ force: true });
 
     expect(upsertChunks).toHaveBeenCalled();
@@ -92,7 +91,7 @@ describe("Pipeline tags forwarding", () => {
     const upsertPages = vi.fn().mockResolvedValue(undefined);
     const store = createMockStore({ upsertPages });
 
-    const pipeline = await IndexPipeline.create({ cwd, config, store, embedder: createMockEmbedder() });
+    const pipeline = await IndexPipeline.create({ cwd, config, store });
     await pipeline.run({ force: true });
 
     expect(upsertPages).toHaveBeenCalled();

@@ -6,7 +6,6 @@ import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { UpstashSearchStore } from "../src/vector/upstash";
 import type { PageRecord, ResolvedSearchSocketConfig } from "../src/types";
-import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
@@ -133,7 +132,6 @@ describe("IndexPipeline link graph", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     await pipeline.run({ changedOnly: true });
@@ -151,7 +149,6 @@ describe("IndexPipeline link graph", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     await pipeline.run({ changedOnly: true });

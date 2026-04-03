@@ -40,7 +40,7 @@ describe("createDefaultConfig", () => {
 
   it("has embedding defaults", () => {
     const config = createDefaultConfig("example");
-    expect(config.embedding.model).toBe("gemini-embedding-001");
+    expect(config.embedding.model).toBe("bge-large-en-v1.5");
     expect(config.embedding.dimensions).toBe(1024);
     expect(config.embedding.apiKeyEnv).toBe("GEMINI_API_KEY");
     expect(config.embedding.batchSize).toBe(100);
@@ -225,7 +225,7 @@ describe("mergeConfig", () => {
     expect(merged.embedding.dimensions).toBe(768);
     expect(merged.embedding.batchSize).toBe(50);
     expect(merged.embedding.images.enable).toBe(true);
-    expect(merged.embedding.model).toBe("gemini-embedding-001"); // default preserved
+    expect(merged.embedding.model).toBe("bge-large-en-v1.5"); // default preserved
     expect(merged.embedding.apiKeyEnv).toBe("GEMINI_API_KEY"); // default preserved
   });
 

@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDefaultConfig } from "../src/config/defaults";
 import { SearchEngine } from "../src/search/engine";
 import type { UpstashSearchStore } from "../src/vector/upstash";
-import { createMockEmbedder } from "./helpers/mock-embedder";
 
 function createMockStore(): UpstashSearchStore {
   return {
     upsertChunks: vi.fn(async () => undefined),
     search: vi.fn(async () => []),
-    searchPages: vi.fn(async () => []),
+    searchPagesByText: vi.fn(async () => []),
+    searchPagesByVector: vi.fn(async () => []),
     deleteByIds: vi.fn(async () => undefined),
     deleteScope: vi.fn(async () => undefined),
     listScopes: vi.fn(async () => []),
@@ -35,7 +35,6 @@ describe("SearchEngine.create options", () => {
     const engine = await SearchEngine.create({
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     expect(engine).toBeDefined();
@@ -50,7 +49,6 @@ describe("SearchEngine.create options", () => {
     const engine = await SearchEngine.create({
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     expect(engine.getConfig()).toBe(config);

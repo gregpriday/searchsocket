@@ -6,7 +6,6 @@ import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { UpstashSearchStore } from "../src/vector/upstash";
 import type { ResolvedSearchSocketConfig } from "../src/types";
-import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
@@ -91,7 +90,6 @@ describe("IndexPipeline force cleanup", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     const firstStats = await firstPipeline.run({ changedOnly: true });
@@ -109,7 +107,6 @@ describe("IndexPipeline force cleanup", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     const secondStats = await secondPipeline.run({ changedOnly: true });

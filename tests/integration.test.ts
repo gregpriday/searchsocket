@@ -7,24 +7,22 @@ import { SearchEngine } from "../src/search/engine";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { ResolvedSearchSocketConfig, Scope, VectorHit, PageRecord } from "../src/types";
 import type { UpstashSearchStore } from "../src/vector/upstash";
-import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
 function createMockStore(): {
   store: UpstashSearchStore;
-  upsertedChunks: Array<{ id: string; vector: number[]; metadata: Record<string, unknown> }>;
-  upsertedPages: Array<{ id: string; vector: number[]; metadata: Record<string, unknown> }>;
+  upsertedChunks: Array<{ id: string; data: string; metadata: Record<string, unknown> }>;
+  upsertedPages: Array<{ id: string; data: string; metadata: Record<string, unknown> }>;
 } {
-  const upsertedChunks: Array<{ id: string; vector: number[]; metadata: Record<string, unknown> }> = [];
-  const upsertedPages: Array<{ id: string; vector: number[]; metadata: Record<string, unknown> }> = [];
+  const upsertedChunks: Array<{ id: string; data: string; metadata: Record<string, unknown> }> = [];
+  const upsertedPages: Array<{ id: string; data: string; metadata: Record<string, unknown> }> = [];
 
   const store = {
-    upsertChunks: vi.fn(async (chunks: Array<{ id: string; vector: number[]; metadata: Record<string, unknown> }>) => {
+    upsertChunks: vi.fn(async (chunks: Array<{ id: string; data: string; metadata: Record<string, unknown> }>) => {
       upsertedChunks.push(...chunks);
     }),
-    search: vi.fn(async (_vector: number[]) => {
-      // Return all upserted chunks as search results (vector search mock)
+    search: vi.fn(async (_data: string) => {
       const results: VectorHit[] = upsertedChunks.map((chunk) => ({
         id: chunk.id,
         score: 0.8,
@@ -52,8 +50,7 @@ function createMockStore(): {
       }));
       return results;
     }),
-    searchPages: vi.fn(async () => {
-      // Return page hits from upserted pages for page-first pipeline
+    searchPagesByText: vi.fn(async () => {
       return upsertedPages.map((page) => ({
         id: String(page.metadata.url ?? page.id),
         score: 0.8,
@@ -66,8 +63,8 @@ function createMockStore(): {
         routeFile: String(page.metadata.routeFile ?? "")
       }));
     }),
-    searchChunksByUrl: vi.fn(async (_vector: number[], url: string) => {
-      // Return chunks matching the given URL for page-first pipeline
+    searchPagesByVector: vi.fn(async () => []),
+    searchChunksByUrl: vi.fn(async (_data: string, url: string) => {
       const results: VectorHit[] = upsertedChunks
         .filter((chunk) => String(chunk.metadata.url ?? "") === url)
         .map((chunk) => ({
@@ -102,7 +99,7 @@ function createMockStore(): {
     listScopes: vi.fn(async () => []),
     health: vi.fn(async () => ({ ok: true })),
     getContentHashes: vi.fn(async () => new Map<string, string>()),
-    upsertPages: vi.fn(async (pages: Array<{ id: string; vector: number[]; metadata: Record<string, unknown> }>) => {
+    upsertPages: vi.fn(async (pages: Array<{ id: string; data: string; metadata: Record<string, unknown> }>) => {
       upsertedPages.push(...pages);
     }),
     getPage: vi.fn(async () => null),
@@ -174,8 +171,7 @@ describe("integration: index -> search", () => {
     const pipeline = await IndexPipeline.create({
       cwd,
       config,
-      store,
-      embedder: createMockEmbedder()
+      store
     });
 
     const stats = await pipeline.run({ changedOnly: true });
@@ -185,8 +181,7 @@ describe("integration: index -> search", () => {
     const engine = await SearchEngine.create({
       cwd,
       config,
-      store,
-      embedder: createMockEmbedder()
+      store
     });
 
     const result = await engine.search({

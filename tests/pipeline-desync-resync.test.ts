@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { UpstashSearchStore } from "../src/vector/upstash";
-import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
@@ -71,7 +70,6 @@ describe("IndexPipeline single-source-of-truth resync", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     const stats = await pipeline.run({ changedOnly: true });
@@ -94,7 +92,6 @@ describe("IndexPipeline single-source-of-truth resync", () => {
       cwd,
       config,
       store: firstStore,
-      embedder: createMockEmbedder()
     });
     const firstStats = await firstPipeline.run({ changedOnly: true });
     expect(firstStats.chunksChanged).toBeGreaterThan(0);
@@ -116,7 +113,6 @@ describe("IndexPipeline single-source-of-truth resync", () => {
       cwd,
       config,
       store: secondStore,
-      embedder: createMockEmbedder()
     });
     const secondStats = await secondPipeline.run({ changedOnly: true });
 

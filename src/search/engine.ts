@@ -6,7 +6,6 @@ import { resolveScope } from "../core/scope";
 import { hrTimeMs } from "../utils/time";
 import { normalizeUrlPath } from "../utils/path";
 import { createUpstashStore } from "../vector/factory";
-import { GeminiEmbedder } from "../vector/gemini";
 import { rankHits, aggregateByPage, trimByScoreGap, mergePageAndChunkResults, rankPageHits, trimPagesByScoreGap } from "./ranking";
 import type {
   PageHit,
@@ -162,25 +161,21 @@ export interface SearchEngineOptions {
   configPath?: string;
   config?: ResolvedSearchSocketConfig;
   store?: UpstashSearchStore;
-  embedder?: GeminiEmbedder;
 }
 
 export class SearchEngine {
   private readonly cwd: string;
   private readonly config: ResolvedSearchSocketConfig;
   private readonly store: UpstashSearchStore;
-  private readonly embedder: GeminiEmbedder;
 
   private constructor(options: {
     cwd: string;
     config: ResolvedSearchSocketConfig;
     store: UpstashSearchStore;
-    embedder: GeminiEmbedder;
   }) {
     this.cwd = options.cwd;
     this.config = options.config;
     this.store = options.store;
-    this.embedder = options.embedder;
   }
 
   static async create(options: SearchEngineOptions = {}): Promise<SearchEngine> {
@@ -188,13 +183,11 @@ export class SearchEngine {
     const config = options.config ?? (await loadConfig({ cwd, configPath: options.configPath }));
 
     const store = options.store ?? await createUpstashStore(config);
-    const embedder = options.embedder ?? GeminiEmbedder.fromConfig(config);
 
     return new SearchEngine({
       cwd,
       config,
-      store,
-      embedder
+      store
     });
   }
 
@@ -222,8 +215,7 @@ export class SearchEngine {
     const maxSubResults = input.maxSubResults ?? 5;
     const groupByPage = (input.groupBy ?? "page") === "page";
 
-    // Embed the query text via Gemini
-    const queryVector = await this.embedder.embedQuery(input.q);
+    const queryText = input.q;
 
     // Post-query filtering for pathPrefix and tags
     const pathPrefix = input.pathPrefix
@@ -268,8 +260,8 @@ export class SearchEngine {
       const fetchMultiplier = (pathPrefix || filterTags) ? 2 : 1;
       const pageLimit = Math.max(topK * 2, 20);
 
-      const pageHits = await this.store.searchPages(
-        queryVector,
+      const pageHits = await this.store.searchPagesByText(
+        queryText,
         { limit: pageLimit * fetchMultiplier, filter: metaFilter },
         resolvedScope
       );
@@ -286,7 +278,7 @@ export class SearchEngine {
       // 3. For each top page, find best-matching chunks within that page
       const chunkPromises = topPages.map((page) =>
         this.store.searchChunksByUrl(
-          queryVector,
+          queryText,
           page.url,
           { limit: maxSubResults, filter: metaFilter },
           resolvedScope
@@ -315,7 +307,7 @@ export class SearchEngine {
       const fetchMultiplier = (pathPrefix || filterTags) ? 2 : 1;
 
       const hits = await this.store.search(
-        queryVector,
+        queryText,
         { limit: candidateK * fetchMultiplier, filter: metaFilter },
         resolvedScope
       );
@@ -570,8 +562,8 @@ export class SearchEngine {
 
     const sourceOutgoing = new Set(source.metadata.outgoingLinkUrls ?? []);
 
-    // ANN query for semantically similar pages
-    const semanticHits = await this.store.searchPages(
+    // ANN query for semantically similar pages (using stored vector)
+    const semanticHits = await this.store.searchPagesByVector(
       source.vector,
       { limit: 50 },
       resolvedScope

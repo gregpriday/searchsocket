@@ -5,8 +5,7 @@ import { ensureStateDirs } from "../core/state";
 import { SearchSocketError } from "../errors";
 import { createUpstashStore } from "../vector";
 import { UpstashSearchStore } from "../vector/upstash";
-import { GeminiEmbedder } from "../vector/gemini";
-import { buildEmbeddingText, buildEmbeddingTitle, chunkPage } from "./chunker";
+import { buildEmbeddingText, chunkPage } from "./chunker";
 import { extractFromHtml, extractFromMarkdown } from "./extractor";
 import { buildRoutePatterns, mapUrlToRoute } from "./route-mapper";
 import { loadBuildPages } from "./sources/build";
@@ -95,7 +94,6 @@ interface IndexPipelineOptions {
   configPath?: string;
   config?: ResolvedSearchSocketConfig;
   store?: UpstashSearchStore;
-  embedder?: GeminiEmbedder;
   logger?: Logger;
   hooks?: IndexingHooks;
 }
@@ -104,7 +102,6 @@ export class IndexPipeline {
   private readonly cwd: string;
   private readonly config: ResolvedSearchSocketConfig;
   private readonly store: UpstashSearchStore;
-  private readonly embedder: GeminiEmbedder;
   private readonly logger: Logger;
   private readonly hooks: IndexingHooks;
 
@@ -112,14 +109,12 @@ export class IndexPipeline {
     cwd: string;
     config: ResolvedSearchSocketConfig;
     store: UpstashSearchStore;
-    embedder: GeminiEmbedder;
     logger: Logger;
     hooks: IndexingHooks;
   }) {
     this.cwd = options.cwd;
     this.config = options.config;
     this.store = options.store;
-    this.embedder = options.embedder;
     this.logger = options.logger;
     this.hooks = options.hooks;
   }
@@ -128,13 +123,11 @@ export class IndexPipeline {
     const cwd = path.resolve(options.cwd ?? process.cwd());
     const config = options.config ?? (await loadConfig({ cwd, configPath: options.configPath }));
     const store = options.store ?? await createUpstashStore(config);
-    const embedder = options.embedder ?? GeminiEmbedder.fromConfig(config);
 
     return new IndexPipeline({
       cwd,
       config,
       store,
-      embedder,
       logger: options.logger ?? new Logger(),
       hooks: options.hooks ?? {}
     });
@@ -530,13 +523,10 @@ export class IndexPipeline {
     if (!options.dryRun) {
       if (options.force) {
         await this.store.deletePages(scope);
-        // Embed all page summaries
-        const pageSummaries = pageRecords.map((r) => r.summary ?? r.title);
-        this.logger.info(`Embedding ${pageSummaries.length} page summaries...`);
-        const pageVectors = await this.embedder.embedTexts(pageSummaries, this.config.embedding.taskType);
-        const pageDocs = pageRecords.map((r, i) => ({
+        this.logger.info(`Upserting ${pageRecords.length} page summaries...`);
+        const pageDocs = pageRecords.map((r) => ({
           id: r.url,
-          vector: pageVectors[i]!,
+          data: r.summary ?? r.title,
           metadata: {
             title: r.title,
             url: r.url,
@@ -560,12 +550,10 @@ export class IndexPipeline {
         await this.store.upsertPages(pageDocs, scope);
       } else {
         if (changedPages.length > 0) {
-          const pageSummaries = changedPages.map((r) => r.summary ?? r.title);
-          this.logger.info(`Embedding ${pageSummaries.length} changed page summaries...`);
-          const pageVectors = await this.embedder.embedTexts(pageSummaries, this.config.embedding.taskType);
-          const pageDocs = changedPages.map((r, i) => ({
+          this.logger.info(`Upserting ${changedPages.length} changed page summaries...`);
+          const pageDocs = changedPages.map((r) => ({
             id: r.url,
-            vector: pageVectors[i]!,
+            data: r.summary ?? r.title,
             metadata: {
               title: r.title,
               url: r.url,
@@ -663,26 +651,16 @@ export class IndexPipeline {
 
     this.logger.info(`Changes detected: ${changedChunks.length} changed, ${deletes.length} deleted, ${chunks.length - changedChunks.length} unchanged`);
 
-    // Embed changed chunks via Gemini, then upsert to Upstash Vector
+    // Upsert changed chunks to Upstash Vector (embedding handled server-side)
     const upsertStart = stageStart();
     let documentsUpserted = 0;
 
     if (!options.dryRun && changedChunks.length > 0) {
-      this.logger.info(`Embedding ${changedChunks.length} chunk${changedChunks.length === 1 ? "" : "s"}...`);
-
-      const embeddingTexts = changedChunks.map((chunk) =>
-        buildEmbeddingText(chunk, this.config.chunking.prependTitle)
-      );
-      const embeddingTitles = this.config.chunking.weightHeadings
-        ? changedChunks.map((chunk) => buildEmbeddingTitle(chunk) ?? "")
-        : undefined;
-      const vectors = await this.embedder.embedTexts(embeddingTexts, this.config.embedding.taskType, embeddingTitles);
-
       this.logger.info(`Upserting ${changedChunks.length} chunk${changedChunks.length === 1 ? "" : "s"} to Upstash Vector...`);
 
-      const docs = changedChunks.map((chunk, i) => ({
+      const docs = changedChunks.map((chunk) => ({
         id: chunk.chunkKey,
-        vector: vectors[i]!,
+        data: buildEmbeddingText(chunk, this.config.chunking.prependTitle),
         metadata: {
           url: chunk.url,
           path: chunk.path,

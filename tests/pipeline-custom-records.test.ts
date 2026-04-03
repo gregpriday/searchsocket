@@ -6,7 +6,6 @@ import { IndexPipeline } from "../src/indexing/pipeline";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { UpstashSearchStore } from "../src/vector/upstash";
 import type { ResolvedSearchSocketConfig, CustomRecord } from "../src/types";
-import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
@@ -79,7 +78,6 @@ describe("IndexPipeline custom records", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     const stats = await pipeline.run({
@@ -108,7 +106,6 @@ describe("IndexPipeline custom records", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     await pipeline.run({
@@ -130,7 +127,6 @@ describe("IndexPipeline custom records", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     const stats = await pipeline.run({
@@ -149,7 +145,6 @@ describe("IndexPipeline custom records", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     const stats = await pipeline.run({
@@ -171,7 +166,6 @@ describe("IndexPipeline custom records", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     // Content with frontmatter that would cause extractFromMarkdown to drop the record
@@ -196,7 +190,6 @@ describe("IndexPipeline custom records", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     // Content that would set weight=0 via frontmatter, but caller sets weight=2
@@ -221,7 +214,6 @@ describe("IndexPipeline custom records", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     const stats = await pipeline.run({
@@ -240,7 +232,6 @@ describe("IndexPipeline custom records", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     // Custom record URL collides with the HTML page at /docs
@@ -266,7 +257,6 @@ describe("IndexPipeline custom records", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     const stats = await pipeline.run({
@@ -290,7 +280,6 @@ describe("IndexPipeline custom records", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder(),
       hooks: { transformPage }
     });
 
@@ -315,7 +304,6 @@ describe("IndexPipeline custom records", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     const stats = await pipeline.run({
@@ -338,7 +326,6 @@ describe("IndexPipeline custom records", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     const statsUndefined = await pipeline.run({});
@@ -347,7 +334,6 @@ describe("IndexPipeline custom records", () => {
       cwd,
       config,
       store: store2,
-      embedder: createMockEmbedder()
     });
     const statsEmpty = await pipeline2.run({ customRecords: [] });
 
@@ -362,7 +348,6 @@ describe("IndexPipeline custom records", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
     });
 
     // weight=2 should not be filtered (only weight=0 is filtered)

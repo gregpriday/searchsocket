@@ -44,7 +44,7 @@ describe("UpstashSearchStore namespace routing", () => {
     const store = new UpstashSearchStore({ index, pagesNamespace: "pages", chunksNamespace: "chunks" });
 
     await store.upsertChunks(
-      [{ id: "c1", vector: [0.1], metadata: { url: "/test" } }],
+      [{ id: "c1", data: "test text", metadata: { url: "/test" } }],
       scope
     );
 
@@ -60,7 +60,7 @@ describe("UpstashSearchStore namespace routing", () => {
     const store = new UpstashSearchStore({ index, pagesNamespace: "pages", chunksNamespace: "chunks" });
 
     await store.upsertPages(
-      [{ id: "p1", vector: [0.1], metadata: { url: "/test" } }],
+      [{ id: "p1", data: "test text", metadata: { url: "/test" } }],
       scope
     );
 
@@ -74,23 +74,37 @@ describe("UpstashSearchStore namespace routing", () => {
     const { index, chunksNs } = createFakeIndex();
     const store = new UpstashSearchStore({ index, pagesNamespace: "pages", chunksNamespace: "chunks" });
 
-    await store.search([0.1], { limit: 10 }, scope);
+    await store.search("test query", { limit: 10 }, scope);
 
     expect(chunksNs.query).toHaveBeenCalledTimes(1);
-    const queryArgs = (chunksNs.query.mock.lastCall as unknown as [{ filter: string }])[0];
+    const queryArgs = (chunksNs.query.mock.lastCall as unknown as [{ filter: string; data: string }])[0];
+    expect(queryArgs.data).toBe("test query");
     expect(queryArgs.filter).not.toContain("type");
     expect(queryArgs.filter).toContain("projectId = 'test-project'");
     expect(queryArgs.filter).toContain("scopeName = 'main'");
   });
 
-  it("routes searchPages to pages namespace without type filter", async () => {
+  it("routes searchPagesByText to pages namespace without type filter", async () => {
     const { index, pagesNs } = createFakeIndex();
     const store = new UpstashSearchStore({ index, pagesNamespace: "pages", chunksNamespace: "chunks" });
 
-    await store.searchPages([0.1], { limit: 10 }, scope);
+    await store.searchPagesByText("test query", { limit: 10 }, scope);
 
     expect(pagesNs.query).toHaveBeenCalledTimes(1);
-    const queryArgs = (pagesNs.query.mock.lastCall as unknown as [{ filter: string }])[0];
+    const queryArgs = (pagesNs.query.mock.lastCall as unknown as [{ filter: string; data: string }])[0];
+    expect(queryArgs.data).toBe("test query");
+    expect(queryArgs.filter).not.toContain("type");
+  });
+
+  it("routes searchPagesByVector to pages namespace with vector", async () => {
+    const { index, pagesNs } = createFakeIndex();
+    const store = new UpstashSearchStore({ index, pagesNamespace: "pages", chunksNamespace: "chunks" });
+
+    await store.searchPagesByVector([0.1, 0.2], { limit: 10 }, scope);
+
+    expect(pagesNs.query).toHaveBeenCalledTimes(1);
+    const queryArgs = (pagesNs.query.mock.lastCall as unknown as [{ filter: string; vector: number[] }])[0];
+    expect(queryArgs.vector).toEqual([0.1, 0.2]);
     expect(queryArgs.filter).not.toContain("type");
   });
 
@@ -98,10 +112,11 @@ describe("UpstashSearchStore namespace routing", () => {
     const { index, chunksNs } = createFakeIndex();
     const store = new UpstashSearchStore({ index, pagesNamespace: "pages", chunksNamespace: "chunks" });
 
-    await store.searchChunksByUrl([0.1], "/test", { limit: 10 }, scope);
+    await store.searchChunksByUrl("test query", "/test", { limit: 10 }, scope);
 
     expect(chunksNs.query).toHaveBeenCalledTimes(1);
-    const queryArgs = (chunksNs.query.mock.lastCall as unknown as [{ filter: string }])[0];
+    const queryArgs = (chunksNs.query.mock.lastCall as unknown as [{ filter: string; data: string }])[0];
+    expect(queryArgs.data).toBe("test query");
     expect(queryArgs.filter).not.toContain("type");
     expect(queryArgs.filter).toContain("url = '/test'");
   });
@@ -267,8 +282,8 @@ describe("UpstashSearchStore namespace routing", () => {
 
     const store = new UpstashSearchStore({ index, pagesNamespace: "my-pages", chunksNamespace: "my-chunks" });
 
-    await store.upsertPages([{ id: "p1", vector: [0.1], metadata: {} }], scope);
-    await store.upsertChunks([{ id: "c1", vector: [0.1], metadata: {} }], scope);
+    await store.upsertPages([{ id: "p1", data: "test text", metadata: {} }], scope);
+    await store.upsertChunks([{ id: "c1", data: "test text", metadata: {} }], scope);
 
     expect(customPagesNs.upsert).toHaveBeenCalledTimes(1);
     expect(customChunksNs.upsert).toHaveBeenCalledTimes(1);

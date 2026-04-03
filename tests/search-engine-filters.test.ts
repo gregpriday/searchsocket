@@ -6,20 +6,21 @@ import { SearchEngine } from "../src/search/engine";
 import { createDefaultConfig } from "../src/config/defaults";
 import type { PageHit, VectorHit } from "../src/types";
 import type { UpstashSearchStore } from "../src/vector/upstash";
-import { createMockEmbedder } from "./helpers/mock-embedder";
 
 const tempDirs: string[] = [];
 
 function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): UpstashSearchStore & {
   search: ReturnType<typeof vi.fn>;
-  searchPages: ReturnType<typeof vi.fn>;
+  searchPagesByText: ReturnType<typeof vi.fn>;
+  searchPagesByVector: ReturnType<typeof vi.fn>;
   searchChunksByUrl: ReturnType<typeof vi.fn>;
 } {
   const store = {
     upsertChunks: vi.fn(async () => undefined),
     search: vi.fn(async () => hits),
-    searchPages: vi.fn(async () => pageHits),
-    searchChunksByUrl: vi.fn(async (_vector: number[], url: string) => {
+    searchPagesByText: vi.fn(async () => pageHits),
+    searchPagesByVector: vi.fn(async () => pageHits),
+    searchChunksByUrl: vi.fn(async (_data: string, url: string) => {
       return hits.filter((h) => h.metadata.url === url);
     }),
     deleteByIds: vi.fn(async () => undefined),
@@ -37,7 +38,8 @@ function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): Upst
   };
   return store as unknown as UpstashSearchStore & {
     search: ReturnType<typeof vi.fn>;
-    searchPages: ReturnType<typeof vi.fn>;
+    searchPagesByText: ReturnType<typeof vi.fn>;
+    searchPagesByVector: ReturnType<typeof vi.fn>;
     searchChunksByUrl: ReturnType<typeof vi.fn>;
   };
 }
@@ -86,7 +88,7 @@ describe("SearchEngine — metadata filters", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
+
     });
 
     await engine.search({
@@ -112,7 +114,7 @@ describe("SearchEngine — metadata filters", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
+
     });
 
     await engine.search({
@@ -120,9 +122,9 @@ describe("SearchEngine — metadata filters", () => {
       filters: { deprecated: false, category: "auth" }
     });
 
-    expect(store.searchPages).toHaveBeenCalledTimes(1);
+    expect(store.searchPagesByText).toHaveBeenCalledTimes(1);
 
-    const pageFilter = store.searchPages.mock.calls[0]![1].filter;
+    const pageFilter = store.searchPagesByText.mock.calls[0]![1].filter;
     expect(pageFilter).toContain("meta.deprecated = false");
     expect(pageFilter).toContain("meta.category CONTAINS 'auth'");
 
@@ -141,7 +143,7 @@ describe("SearchEngine — metadata filters", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
+
     });
 
     await engine.search({ q: "test", groupBy: "chunk", filters: {} });
@@ -159,7 +161,7 @@ describe("SearchEngine — metadata filters", () => {
       cwd,
       config,
       store,
-      embedder: createMockEmbedder()
+
     });
 
     await engine.search({ q: "test", groupBy: "chunk" });
