@@ -33,6 +33,7 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       dropSelectors: DEFAULT_DROP_SELECTORS,
       ignoreAttr: "data-search-ignore",
       noindexAttr: "data-search-noindex",
+      imageDescAttr: "data-search-description",
       respectRobotsNoindex: true
     },
     transform: {

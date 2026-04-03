@@ -44,6 +44,7 @@ export interface SearchSocketConfig {
     dropSelectors?: string[];
     ignoreAttr?: string;
     noindexAttr?: string;
+    imageDescAttr?: string;
     respectRobotsNoindex?: boolean;
   };
   transform?: {
@@ -156,6 +157,7 @@ export interface ResolvedSearchSocketConfig {
     dropSelectors: string[];
     ignoreAttr: string;
     noindexAttr: string;
+    imageDescAttr: string;
     respectRobotsNoindex: boolean;
   };
   transform: {
