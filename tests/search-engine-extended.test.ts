@@ -15,6 +15,8 @@ function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): Upst
   searchPages: ReturnType<typeof vi.fn>;
   getPage: ReturnType<typeof vi.fn>;
   listPages: ReturnType<typeof vi.fn>;
+  fetchPageWithVector: ReturnType<typeof vi.fn>;
+  fetchPagesBatch: ReturnType<typeof vi.fn>;
   _pages: Map<string, PageRecord>;
 } {
   const pages = new Map<string, PageRecord>();
@@ -37,6 +39,8 @@ function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): Upst
     getPageHashes: vi.fn(async () => new Map()),
     deletePagesByIds: vi.fn(async () => undefined),
     dropAllIndexes: vi.fn(async () => undefined),
+    fetchPageWithVector: vi.fn(async () => null),
+    fetchPagesBatch: vi.fn(async () => []),
     _pages: pages
   };
 
@@ -45,6 +49,8 @@ function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): Upst
     searchPages: ReturnType<typeof vi.fn>;
     getPage: ReturnType<typeof vi.fn>;
     listPages: ReturnType<typeof vi.fn>;
+    fetchPageWithVector: ReturnType<typeof vi.fn>;
+    fetchPagesBatch: ReturnType<typeof vi.fn>;
     _pages: Map<string, PageRecord>;
   };
 }
@@ -1003,5 +1009,179 @@ describe("SearchEngine - listPages", () => {
       expect.any(Object),
       { cursor: undefined, limit: undefined, pathPrefix: undefined }
     );
+  });
+});
+
+describe("SearchEngine - getRelatedPages", () => {
+  function makeSourcePage(url: string, outgoingLinkUrls: string[] = []) {
+    return {
+      metadata: {
+        projectId: "searchsocket-engine-test",
+        scopeName: "main",
+        type: "page",
+        title: `Page ${url}`,
+        url,
+        description: "",
+        keywords: [],
+        summary: "",
+        tags: [],
+        markdown: "",
+        routeFile: `src/routes${url}/+page.svelte`,
+        routeResolution: "exact",
+        incomingLinks: 0,
+        outgoingLinks: outgoingLinkUrls.length,
+        outgoingLinkUrls,
+        depth: url.split("/").filter(Boolean).length,
+        indexedAt: "2026-01-01T00:00:00.000Z",
+        contentHash: "abc123"
+      },
+      vector: new Array(1024).fill(0)
+    };
+  }
+
+  it("throws 404 for unknown URL", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    const store = createMockStore();
+
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
+
+    await expect(engine.getRelatedPages("/missing")).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+      status: 404
+    });
+  });
+
+  it("returns related pages sorted by composite score", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    const store = createMockStore();
+
+    // Source page /docs/auth links to /docs/sessions
+    store.fetchPageWithVector.mockResolvedValue(
+      makeSourcePage("/docs/auth", ["/docs/sessions"])
+    );
+
+    // Semantic results include /docs/sessions (linked) and /blog/post (unrelated)
+    store.searchPages.mockResolvedValue([
+      { id: "/docs/sessions", score: 0.8, title: "Sessions", url: "/docs/sessions", description: "", tags: [], depth: 2, incomingLinks: 1, routeFile: "src/routes/docs/sessions/+page.svelte" },
+      { id: "/blog/post", score: 0.6, title: "Blog Post", url: "/blog/post", description: "", tags: [], depth: 2, incomingLinks: 0, routeFile: "src/routes/blog/post/+page.svelte" }
+    ]);
+
+    // fetchPagesBatch returns metadata for all candidates
+    store.fetchPagesBatch.mockResolvedValue([
+      { url: "/docs/sessions", title: "Sessions", routeFile: "src/routes/docs/sessions/+page.svelte", outgoingLinkUrls: [] },
+      { url: "/blog/post", title: "Blog Post", routeFile: "src/routes/blog/post/+page.svelte", outgoingLinkUrls: [] }
+    ]);
+
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
+    const result = await engine.getRelatedPages("/docs/auth");
+
+    expect(result.sourceUrl).toBe("/docs/auth");
+    expect(result.relatedPages.length).toBe(2);
+
+    // /docs/sessions should be first: outgoing link (0.5) + dice(0.5)*0.3 + semantic(0.8)*0.2
+    expect(result.relatedPages[0]!.url).toBe("/docs/sessions");
+    expect(result.relatedPages[0]!.relationshipType).toBe("outgoing_link");
+    expect(result.relatedPages[0]!.score).toBeGreaterThan(result.relatedPages[1]!.score);
+
+    // /blog/post should be semantic only
+    expect(result.relatedPages[1]!.url).toBe("/blog/post");
+    expect(result.relatedPages[1]!.relationshipType).toBe("semantic");
+  });
+
+  it("excludes source URL from results", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    const store = createMockStore();
+
+    store.fetchPageWithVector.mockResolvedValue(makeSourcePage("/docs/auth"));
+
+    // Semantic results include the source URL itself
+    store.searchPages.mockResolvedValue([
+      { id: "/docs/auth", score: 1.0, title: "Auth", url: "/docs/auth", description: "", tags: [], depth: 2, incomingLinks: 0, routeFile: "" },
+      { id: "/docs/other", score: 0.5, title: "Other", url: "/docs/other", description: "", tags: [], depth: 2, incomingLinks: 0, routeFile: "" }
+    ]);
+
+    store.fetchPagesBatch.mockResolvedValue([
+      { url: "/docs/other", title: "Other", routeFile: "", outgoingLinkUrls: [] }
+    ]);
+
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
+    const result = await engine.getRelatedPages("/docs/auth");
+
+    expect(result.relatedPages.every((p) => p.url !== "/docs/auth")).toBe(true);
+    expect(result.relatedPages.length).toBe(1);
+  });
+
+  it("detects incoming links from candidates", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    const store = createMockStore();
+
+    // Source page has no outgoing links
+    store.fetchPageWithVector.mockResolvedValue(makeSourcePage("/docs/auth"));
+
+    store.searchPages.mockResolvedValue([
+      { id: "/docs/overview", score: 0.7, title: "Overview", url: "/docs/overview", description: "", tags: [], depth: 2, incomingLinks: 0, routeFile: "" }
+    ]);
+
+    // /docs/overview links back to /docs/auth
+    store.fetchPagesBatch.mockResolvedValue([
+      { url: "/docs/overview", title: "Overview", routeFile: "", outgoingLinkUrls: ["/docs/auth"] }
+    ]);
+
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
+    const result = await engine.getRelatedPages("/docs/auth");
+
+    expect(result.relatedPages[0]!.relationshipType).toBe("incoming_link");
+  });
+
+  it("caps results at topK", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    const store = createMockStore();
+
+    store.fetchPageWithVector.mockResolvedValue(makeSourcePage("/docs"));
+
+    const hits = Array.from({ length: 20 }, (_, i) => ({
+      id: `/page/${i}`, score: 0.9 - i * 0.01, title: `Page ${i}`,
+      url: `/page/${i}`, description: "", tags: [], depth: 2, incomingLinks: 0, routeFile: ""
+    }));
+    store.searchPages.mockResolvedValue(hits);
+    store.fetchPagesBatch.mockResolvedValue(
+      hits.map((h) => ({ url: h.url, title: h.title, routeFile: "", outgoingLinkUrls: [] }))
+    );
+
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
+    const result = await engine.getRelatedPages("/docs", { topK: 3 });
+
+    expect(result.relatedPages.length).toBe(3);
+  });
+
+  it("handles pages with no outgoingLinkUrls gracefully", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    const store = createMockStore();
+
+    // Source page metadata has no outgoingLinkUrls (pre-reindex data)
+    const source = makeSourcePage("/old-page");
+    delete (source.metadata as Record<string, unknown>).outgoingLinkUrls;
+    store.fetchPageWithVector.mockResolvedValue(source);
+
+    store.searchPages.mockResolvedValue([
+      { id: "/other", score: 0.7, title: "Other", url: "/other", description: "", tags: [], depth: 1, incomingLinks: 0, routeFile: "" }
+    ]);
+
+    store.fetchPagesBatch.mockResolvedValue([
+      { url: "/other", title: "Other", routeFile: "", outgoingLinkUrls: [] }
+    ]);
+
+    const engine = await SearchEngine.create({ cwd, config, store, embedder: createMockEmbedder() });
+    const result = await engine.getRelatedPages("/old-page");
+
+    // Should still return results using semantic + structural signals
+    expect(result.relatedPages.length).toBe(1);
+    expect(result.relatedPages[0]!.relationshipType).toBe("semantic");
   });
 });

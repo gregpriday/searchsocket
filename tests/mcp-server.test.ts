@@ -191,11 +191,11 @@ describe("get_site_structure tool", () => {
     expect(toolNames).toContain("get_site_structure");
   });
 
-  it("registers exactly 5 tools", () => {
-    const mockEngine = { search: vi.fn(), getSiteStructure: vi.fn() };
+  it("registers exactly 6 tools", () => {
+    const mockEngine = { search: vi.fn(), getSiteStructure: vi.fn(), getRelatedPages: vi.fn() };
     const server = createServer(mockEngine as never);
     const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
-    expect(calls.length).toBe(5);
+    expect(calls.length).toBe(6);
   });
 
   it("returns site structure JSON from engine", async () => {

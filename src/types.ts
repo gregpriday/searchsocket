@@ -337,6 +337,7 @@ export interface IndexedPage {
   generatedAt: string;
   incomingLinks: number;
   outgoingLinks: number;
+  outgoingLinkUrls?: string[];
   depth: number;
   tags: string[];
   markdown: string;
@@ -407,6 +408,7 @@ export interface PageRecord {
   routeResolution: "exact" | "best-effort";
   incomingLinks: number;
   outgoingLinks: number;
+  outgoingLinkUrls?: string[];
   depth: number;
   tags: string[];
   indexedAt: string;
@@ -555,4 +557,20 @@ export interface SiteStructureResult {
   root: SiteTreeNode;
   totalPages: number;
   truncated: boolean;
+}
+
+export type RelationshipType = "outgoing_link" | "incoming_link" | "sibling" | "semantic";
+
+export interface RelatedPage {
+  url: string;
+  title: string;
+  score: number;
+  relationshipType: RelationshipType;
+  routeFile: string;
+}
+
+export interface RelatedPagesResult {
+  sourceUrl: string;
+  scope: string;
+  relatedPages: RelatedPage[];
 }
