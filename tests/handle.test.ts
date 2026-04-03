@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { searchsocketHandle } from "../src/sveltekit/handle";
 import { createDefaultConfig } from "../src/config/defaults";
 import { SearchEngine } from "../src/search/engine";
@@ -464,5 +467,140 @@ describe("searchsocketHandle", () => {
     // Both succeed because rate limiter is disabled on serverless
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
+  });
+});
+
+describe("searchsocketHandle llms.txt serving", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "handle-llms-test-"));
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("serves llms.txt as text/plain when enabled and file exists", async () => {
+    const staticDir = path.join(tmpDir, "static");
+    await fs.mkdir(staticDir, { recursive: true });
+    await fs.writeFile(path.join(staticDir, "llms.txt"), "# My Site\n\n## Pages\n", "utf8");
+
+    const config = makeConfig({
+      llmsTxt: {
+        enable: true,
+        outputPath: "static/llms.txt",
+        generateFull: false
+      }
+    } as Partial<ResolvedSearchSocketConfig>);
+
+    const handle = searchsocketHandle({ config, cwd: tmpDir });
+    const resolve = vi.fn().mockResolvedValue(new Response("fallback"));
+    const event = makeEvent({ pathname: "/llms.txt", method: "GET" });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(await response.text()).toContain("# My Site");
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("falls through when llms.txt is enabled but file does not exist", async () => {
+    const config = makeConfig({
+      llmsTxt: {
+        enable: true,
+        outputPath: "static/llms.txt",
+        generateFull: false
+      }
+    } as Partial<ResolvedSearchSocketConfig>);
+
+    const handle = searchsocketHandle({ config, cwd: tmpDir });
+    const resolveResult = new Response("fallback");
+    const resolve = vi.fn().mockResolvedValue(resolveResult);
+    const event = makeEvent({ pathname: "/llms.txt", method: "GET" });
+
+    const response = await handle({ event, resolve });
+    expect(resolve).toHaveBeenCalled();
+    expect(await response.text()).toBe("fallback");
+  });
+
+  it("falls through when llms.txt is disabled", async () => {
+    const config = makeConfig({
+      llmsTxt: {
+        enable: false,
+        outputPath: "static/llms.txt",
+        generateFull: false
+      }
+    } as Partial<ResolvedSearchSocketConfig>);
+
+    const handle = searchsocketHandle({ config, cwd: tmpDir });
+    const resolveResult = new Response("fallback");
+    const resolve = vi.fn().mockResolvedValue(resolveResult);
+    const event = makeEvent({ pathname: "/llms.txt", method: "GET" });
+
+    const response = await handle({ event, resolve });
+    expect(resolve).toHaveBeenCalled();
+  });
+
+  it("serves llms.txt even after API search requests have been made", async () => {
+    const staticDir = path.join(tmpDir, "static");
+    await fs.mkdir(staticDir, { recursive: true });
+    await fs.writeFile(path.join(staticDir, "llms.txt"), "# My Site\n", "utf8");
+
+    const config = makeConfig({
+      llmsTxt: {
+        enable: true,
+        outputPath: "static/llms.txt",
+        generateFull: false
+      }
+    } as Partial<ResolvedSearchSocketConfig>);
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn().mockResolvedValue({
+        q: "ok",
+        scope: "main",
+        results: [],
+        meta: { timingsMs: { search: 0, total: 0 } }
+      })
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config, cwd: tmpDir });
+    const resolve = vi.fn().mockResolvedValue(new Response("fallback"));
+
+    // First: a POST to /api/search (triggers config loading and sets apiPath)
+    const searchEvent = makeEvent({ pathname: "/api/search", method: "POST", body: { q: "test" } });
+    const searchResponse = await handle({ event: searchEvent, resolve });
+    expect(searchResponse.status).toBe(200);
+
+    // Second: a GET to /llms.txt should still work
+    const llmsEvent = makeEvent({ pathname: "/llms.txt", method: "GET" });
+    const llmsResponse = await handle({ event: llmsEvent, resolve });
+    expect(llmsResponse.status).toBe(200);
+    expect(await llmsResponse.text()).toContain("# My Site");
+  });
+
+  it("does not intercept POST requests to /llms.txt", async () => {
+    const staticDir = path.join(tmpDir, "static");
+    await fs.mkdir(staticDir, { recursive: true });
+    await fs.writeFile(path.join(staticDir, "llms.txt"), "# My Site\n", "utf8");
+
+    const config = makeConfig({
+      llmsTxt: {
+        enable: true,
+        outputPath: "static/llms.txt",
+        generateFull: false
+      }
+    } as Partial<ResolvedSearchSocketConfig>);
+
+    const handle = searchsocketHandle({ config, cwd: tmpDir });
+    const resolveResult = new Response("fallback");
+    const resolve = vi.fn().mockResolvedValue(resolveResult);
+    const event = makeEvent({ pathname: "/llms.txt", method: "POST", body: {} });
+
+    const response = await handle({ event, resolve });
+    // POST to /llms.txt should not be intercepted - it falls through to the API path check
+    // which will also fall through since /llms.txt != /api/search
+    expect(resolve).toHaveBeenCalled();
   });
 });

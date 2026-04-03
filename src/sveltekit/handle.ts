@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import nodePath from "node:path";
 import { loadConfig, mergeConfig } from "../config/load";
 import { isServerless } from "../core/serverless";
 import { SearchSocketError, toErrorPayload } from "../errors";
@@ -48,6 +50,7 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
   let enginePromise: Promise<SearchEngine> | null = null;
   let configPromise: Promise<ResolvedSearchSocketConfig> | null = null;
   let apiPath = options.path;
+  let llmsServePath: string | null = null;
   let rateLimiter: InMemoryRateLimiter | null = null;
 
   const getConfig = async (): Promise<ResolvedSearchSocketConfig> => {
@@ -68,6 +71,10 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
       configPromise = configP.then((config) => {
         apiPath = apiPath ?? config.api.path;
+
+        if (config.llmsTxt.enable) {
+          llmsServePath = "/" + config.llmsTxt.outputPath.replace(/^static\//, "");
+        }
 
         if (config.api.rateLimit && !isServerless()) {
           rateLimiter = new InMemoryRateLimiter(config.api.rateLimit.windowMs, config.api.rateLimit.max);
@@ -95,11 +102,27 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
   const bodyLimit = options.maxBodyBytes ?? 64 * 1024;
 
   return async ({ event, resolve }: { event: any; resolve: (event: any) => Promise<Response> }) => {
-    if (apiPath && event.url.pathname !== apiPath) {
+    if (apiPath && event.url.pathname !== apiPath && event.url.pathname !== llmsServePath) {
       return resolve(event);
     }
 
     const config = await getConfig();
+
+    // Serve llms.txt if enabled and the file exists
+    if (llmsServePath && event.request.method === "GET" && event.url.pathname === llmsServePath) {
+      const cwd = options.cwd ?? process.cwd();
+      const filePath = nodePath.resolve(cwd, config.llmsTxt.outputPath);
+      try {
+        const content = await fs.readFile(filePath, "utf8");
+        return new Response(content, {
+          status: 200,
+          headers: { "content-type": "text/plain; charset=utf-8" }
+        });
+      } catch {
+        return resolve(event);
+      }
+    }
+
     const targetPath = apiPath ?? config.api.path;
 
     if (event.url.pathname !== targetPath) {

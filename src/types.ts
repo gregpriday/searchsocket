@@ -109,6 +109,13 @@ export interface SearchSocketConfig {
       path?: string;
     };
   };
+  llmsTxt?: {
+    enable?: boolean;
+    outputPath?: string;
+    title?: string;
+    description?: string;
+    generateFull?: boolean;
+  };
   state?: {
     dir?: string;
   };
@@ -221,6 +228,13 @@ export interface ResolvedSearchSocketConfig {
       port: number;
       path: string;
     };
+  };
+  llmsTxt: {
+    enable: boolean;
+    outputPath: string;
+    title?: string;
+    description?: string;
+    generateFull: boolean;
   };
   state: {
     dir: string;

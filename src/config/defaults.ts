@@ -92,6 +92,11 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
         path: "/mcp"
       }
     },
+    llmsTxt: {
+      enable: false,
+      outputPath: "static/llms.txt",
+      generateFull: false
+    },
     state: {
       dir: ".searchsocket"
     }
