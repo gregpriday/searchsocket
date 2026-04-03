@@ -283,9 +283,10 @@ async function handleGetSearch(
   const topK = params.get("topK");
   if (topK !== null) {
     const parsed = Number.parseInt(topK, 10);
-    if (!Number.isNaN(parsed)) {
-      searchRequest.topK = parsed;
+    if (Number.isNaN(parsed) || parsed < 1) {
+      throw new SearchSocketError("INVALID_REQUEST", "topK must be a positive integer", 400);
     }
+    searchRequest.topK = parsed;
   }
 
   const scope = params.get("scope");
@@ -294,8 +295,13 @@ async function handleGetSearch(
   const pathPrefix = params.get("pathPrefix");
   if (pathPrefix !== null) searchRequest.pathPrefix = pathPrefix;
 
-  const groupBy = params.get("groupBy") as SearchRequest["groupBy"];
-  if (groupBy) searchRequest.groupBy = groupBy;
+  const groupBy = params.get("groupBy");
+  if (groupBy) {
+    if (groupBy !== "page" && groupBy !== "chunk") {
+      throw new SearchSocketError("INVALID_REQUEST", 'groupBy must be "page" or "chunk"', 400);
+    }
+    searchRequest.groupBy = groupBy;
+  }
 
   const tags = params.getAll("tags");
   if (tags.length > 0) searchRequest.tags = tags;
