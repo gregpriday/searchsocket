@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SearchSocket Playground</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8f9fa; color: #1a1a2e; padding: 2rem; max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 1.5rem; color: #16213e; }
+  h1 span { font-weight: 400; color: #888; }
+  .search-box { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+  .search-box input { flex: 1; padding: 0.75rem 1rem; font-size: 1rem; border: 2px solid #ddd; border-radius: 8px; outline: none; transition: border-color 0.2s; }
+  .search-box input:focus { border-color: #4361ee; }
+  .search-opts { display: flex; gap: 1rem; margin-bottom: 1.5rem; font-size: 0.85rem; color: #555; align-items: center; }
+  .search-opts label { display: flex; align-items: center; gap: 0.3rem; cursor: pointer; }
+  .search-opts select { padding: 0.25rem 0.5rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; }
+  .meta { font-size: 0.8rem; color: #888; margin-bottom: 1rem; }
+  .result { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 0.75rem; }
+  .result-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+  .result-title { font-size: 1.05rem; font-weight: 600; color: #16213e; text-decoration: none; }
+  .result-title:hover { color: #4361ee; }
+  .result-score { font-size: 0.8rem; font-weight: 600; color: #4361ee; white-space: nowrap; background: #eef1ff; padding: 0.2rem 0.5rem; border-radius: 4px; }
+  .result-url { font-size: 0.8rem; color: #888; margin-top: 0.2rem; }
+  .result-snippet { font-size: 0.9rem; color: #444; margin-top: 0.5rem; line-height: 1.5; }
+  .result-meta { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem; font-size: 0.78rem; color: #777; }
+  .result-meta span { background: #f0f0f0; padding: 0.15rem 0.5rem; border-radius: 4px; }
+  .breakdown { margin-top: 0.5rem; padding: 0.5rem 0.75rem; background: #f8f9fa; border-radius: 6px; font-size: 0.8rem; }
+  .breakdown-row { display: flex; justify-content: space-between; padding: 0.15rem 0; }
+  .breakdown-label { color: #555; }
+  .breakdown-value { font-family: monospace; color: #333; }
+  .chunks-toggle { font-size: 0.8rem; color: #4361ee; cursor: pointer; margin-top: 0.5rem; border: none; background: none; padding: 0; text-decoration: underline; }
+  .chunks { margin-top: 0.5rem; padding-left: 1rem; border-left: 3px solid #e0e0e0; }
+  .chunk { margin-bottom: 0.5rem; font-size: 0.85rem; }
+  .chunk-heading { font-size: 0.78rem; color: #4361ee; margin-bottom: 0.15rem; }
+  .chunk-score { font-size: 0.75rem; color: #999; }
+  .chunk-snippet { color: #555; line-height: 1.4; }
+  .empty { text-align: center; padding: 3rem; color: #999; }
+  .loading { text-align: center; padding: 2rem; color: #999; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<h1>SearchSocket <span>Playground</span></h1>
+<div class="search-box">
+  <input type="text" id="q" placeholder="Type a search query..." autocomplete="off" autofocus>
+</div>
+<div class="search-opts">
+  <label>
+    Group by:
+    <select id="groupBy">
+      <option value="page">Page</option>
+      <option value="chunk">Chunk</option>
+    </select>
+  </label>
+  <label>
+    Top K:
+    <select id="topK">
+      <option value="5">5</option>
+      <option value="10" selected>10</option>
+      <option value="20">20</option>
+      <option value="50">50</option>
+    </select>
+  </label>
+</div>
+<div id="meta" class="meta"></div>
+<div id="results"></div>
+
+<script>
+(function() {
+  const qInput = document.getElementById('q');
+  const groupBySelect = document.getElementById('groupBy');
+  const topKSelect = document.getElementById('topK');
+  const resultsDiv = document.getElementById('results');
+  const metaDiv = document.getElementById('meta');
+
+  let debounceTimer = null;
+
+  // Read initial state from URL
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('q')) qInput.value = params.get('q');
+  if (params.get('groupBy')) groupBySelect.value = params.get('groupBy');
+  if (params.get('topK')) topKSelect.value = params.get('topK');
+
+  function updateUrl() {
+    const p = new URLSearchParams();
+    if (qInput.value) p.set('q', qInput.value);
+    if (groupBySelect.value !== 'page') p.set('groupBy', groupBySelect.value);
+    if (topKSelect.value !== '10') p.set('topK', topKSelect.value);
+    const qs = p.toString();
+    history.replaceState(null, '', qs ? '?' + qs : window.location.pathname);
+  }
+
+  async function doSearch() {
+    const query = qInput.value.trim();
+    updateUrl();
+    if (!query) {
+      resultsDiv.innerHTML = '<div class="empty">Enter a query to search</div>';
+      metaDiv.textContent = '';
+      return;
+    }
+
+    resultsDiv.innerHTML = '<div class="loading">Searching...</div>';
+
+    try {
+      const body = {
+        q: query,
+        topK: parseInt(topKSelect.value, 10),
+        groupBy: groupBySelect.value,
+        debug: true
+      };
+
+      const res = await fetch('/_searchsocket/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok) {
+        const err = await res.text();
+        resultsDiv.innerHTML = '<div class="empty">Error: ' + escapeHtml(err) + '</div>';
+        return;
+      }
+
+      const data = await res.json();
+      renderResults(data);
+    } catch (err) {
+      resultsDiv.innerHTML = '<div class="empty">Network error: ' + escapeHtml(err.message) + '</div>';
+    }
+  }
+
+  function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function renderResults(data) {
+    metaDiv.textContent = data.results.length + ' results in ' + data.meta.timingsMs.total + 'ms (search: ' + data.meta.timingsMs.search + 'ms) \u2014 scope: ' + data.scope;
+
+    if (data.results.length === 0) {
+      resultsDiv.innerHTML = '<div class="empty">No results found</div>';
+      return;
+    }
+
+    resultsDiv.innerHTML = data.results.map(function(r, i) {
+      let html = '<div class="result">';
+      html += '<div class="result-header">';
+      html += '<div><div class="result-title">' + escapeHtml(r.title) + '</div>';
+      html += '<div class="result-url">' + escapeHtml(r.url) + '</div></div>';
+      html += '<div class="result-score">' + r.score.toFixed(4) + '</div>';
+      html += '</div>';
+
+      if (r.snippet) {
+        html += '<div class="result-snippet">' + escapeHtml(r.snippet) + '</div>';
+      }
+
+      html += '<div class="result-meta">';
+      html += '<span>route: ' + escapeHtml(r.routeFile) + '</span>';
+      if (r.sectionTitle) html += '<span>section: ' + escapeHtml(r.sectionTitle) + '</span>';
+      html += '</div>';
+
+      if (r.breakdown) {
+        html += '<div class="breakdown">';
+        html += '<div class="breakdown-row"><span class="breakdown-label">Base score</span><span class="breakdown-value">' + r.breakdown.baseScore.toFixed(6) + '</span></div>';
+        html += '<div class="breakdown-row"><span class="breakdown-label">Incoming link boost</span><span class="breakdown-value">' + r.breakdown.incomingLinkBoost.toFixed(6) + '</span></div>';
+        html += '<div class="breakdown-row"><span class="breakdown-label">Depth boost</span><span class="breakdown-value">' + r.breakdown.depthBoost.toFixed(6) + '</span></div>';
+        html += '<div class="breakdown-row"><span class="breakdown-label">Title match boost</span><span class="breakdown-value">' + r.breakdown.titleMatchBoost.toFixed(6) + '</span></div>';
+        html += '</div>';
+      }
+
+      if (r.chunks && r.chunks.length > 0) {
+        html += '<button class="chunks-toggle" data-idx="' + i + '">Show ' + r.chunks.length + ' chunks</button>';
+        html += '<div class="chunks hidden" id="chunks-' + i + '">';
+        r.chunks.forEach(function(c) {
+          html += '<div class="chunk">';
+          if (c.headingPath && c.headingPath.length > 0) {
+            html += '<div class="chunk-heading">' + escapeHtml(c.headingPath.join(' > ')) + '</div>';
+          }
+          if (c.sectionTitle) {
+            html += '<div class="chunk-heading">' + escapeHtml(c.sectionTitle) + '</div>';
+          }
+          html += '<div class="chunk-snippet">' + escapeHtml(c.snippet) + '</div>';
+          html += '<div class="chunk-score">score: ' + c.score.toFixed(4) + '</div>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+
+      html += '</div>';
+      return html;
+    }).join('');
+  }
+
+  resultsDiv.addEventListener('click', function(e) {
+    if (e.target.classList.contains('chunks-toggle')) {
+      var idx = e.target.getAttribute('data-idx');
+      var chunksDiv = document.getElementById('chunks-' + idx);
+      if (chunksDiv) {
+        chunksDiv.classList.toggle('hidden');
+        e.target.textContent = chunksDiv.classList.contains('hidden')
+          ? 'Show ' + chunksDiv.children.length + ' chunks'
+          : 'Hide chunks';
+      }
+    }
+  });
+
+  function scheduleSearch() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(doSearch, 300);
+  }
+
+  qInput.addEventListener('input', scheduleSearch);
+  groupBySelect.addEventListener('change', scheduleSearch);
+  topKSelect.addEventListener('change', scheduleSearch);
+
+  // Trigger initial search if query is present
+  if (qInput.value.trim()) doSearch();
+})();
+</script>
+</body>
+</html>

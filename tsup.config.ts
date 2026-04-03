@@ -34,6 +34,9 @@ export default defineConfig([
     target: "node20",
     banner: {
       js: "#!/usr/bin/env node"
+    },
+    esbuildOptions(options) {
+      options.loader = { ...options.loader, ".html": "text" };
     }
   }
 ]);

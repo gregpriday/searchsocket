@@ -8,6 +8,16 @@ export default defineConfig({
   test: {
     projects: [
       {
+        plugins: [
+          {
+            name: "html-raw",
+            transform(_code: string, id: string) {
+              if (id.endsWith(".html")) {
+                return { code: `export default ${JSON.stringify(_code)};`, map: null };
+              }
+            }
+          }
+        ],
         test: {
           name: "node",
           environment: "node",
