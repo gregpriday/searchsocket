@@ -27,6 +27,7 @@ interface ChunkVectorMetadata {
   routeFile: string;
   description: string;
   keywords: string[];
+  publishedAt?: number | null;
   [key: string]: unknown;
 }
 
@@ -49,6 +50,7 @@ interface PageVectorMetadata {
   depth: number;
   indexedAt: string;
   contentHash: string;
+  publishedAt?: number | null;
   [key: string]: unknown;
 }
 
@@ -139,7 +141,8 @@ export class UpstashSearchStore {
         description: doc.metadata?.description || undefined,
         keywords: doc.metadata?.keywords?.length
           ? doc.metadata.keywords
-          : undefined
+          : undefined,
+        publishedAt: typeof doc.metadata?.publishedAt === "number" ? doc.metadata.publishedAt : undefined
       }
     }));
   }
@@ -182,7 +185,8 @@ export class UpstashSearchStore {
       tags: doc.metadata?.tags ?? [],
       depth: doc.metadata?.depth ?? 0,
       incomingLinks: doc.metadata?.incomingLinks ?? 0,
-      routeFile: doc.metadata?.routeFile ?? ""
+      routeFile: doc.metadata?.routeFile ?? "",
+      publishedAt: typeof doc.metadata?.publishedAt === "number" ? doc.metadata.publishedAt : undefined
     }));
   }
 

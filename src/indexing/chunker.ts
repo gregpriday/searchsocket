@@ -330,7 +330,8 @@ export function chunkPage(
       tags: page.tags,
       contentHash: "",
       description: page.description,
-      keywords: page.keywords
+      keywords: page.keywords,
+      publishedAt: page.publishedAt
     };
 
     const embeddingText = buildEmbeddingText(summaryChunk, config.chunking.prependTitle);
@@ -363,7 +364,8 @@ export function chunkPage(
       tags: page.tags,
       contentHash: "",
       description: page.description,
-      keywords: page.keywords
+      keywords: page.keywords,
+      publishedAt: page.publishedAt
     };
 
     const embeddingText = buildEmbeddingText(chunk, config.chunking.prependTitle);

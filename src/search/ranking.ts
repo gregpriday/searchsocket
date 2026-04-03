@@ -60,6 +60,17 @@ export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig, 
         }
       }
 
+      let freshnessBoostValue = 0;
+      if (config.ranking.enableFreshnessBoost) {
+        const publishedAt = hit.metadata.publishedAt;
+        if (typeof publishedAt === "number" && Number.isFinite(publishedAt)) {
+          const daysSince = Math.max(0, (Date.now() - publishedAt) / 86_400_000);
+          const decay = 1 / (1 + nonNegativeOrZero(daysSince) * config.ranking.freshnessDecayRate);
+          freshnessBoostValue = decay * config.ranking.weights.freshness;
+          score += freshnessBoostValue;
+        }
+      }
+
       const result: RankedHit = {
         hit,
         finalScore: Number.isFinite(score) ? score : Number.NEGATIVE_INFINITY
@@ -70,7 +81,8 @@ export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig, 
           baseScore,
           incomingLinkBoost: incomingLinkBoostValue,
           depthBoost: depthBoostValue,
-          titleMatchBoost: titleMatchBoostValue
+          titleMatchBoost: titleMatchBoostValue,
+          freshnessBoost: freshnessBoostValue
         };
       }
 
@@ -256,7 +268,8 @@ export function mergePageAndChunkResults(
         depth: pageHit.depth,
         incomingLinks: pageHit.incomingLinks,
         routeFile: pageHit.routeFile,
-        tags: pageHit.tags
+        tags: pageHit.tags,
+        publishedAt: pageHit.publishedAt
       }
     };
 
