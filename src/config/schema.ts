@@ -114,6 +114,7 @@ export const searchSocketConfigSchema = z.object({
       enableDepthBoost: z.boolean().optional(),
       enableFreshnessBoost: z.boolean().optional(),
       freshnessDecayRate: z.number().positive().optional(),
+      enableAnchorTextBoost: z.boolean().optional(),
       pageWeights: z.record(z.string(), z.number().min(0)).optional(),
       aggregationCap: z.number().int().positive().optional(),
       aggregationDecay: z.number().min(0).max(1).optional(),
@@ -126,7 +127,8 @@ export const searchSocketConfigSchema = z.object({
           depth: z.number().optional(),
           aggregation: z.number().optional(),
           titleMatch: z.number().optional(),
-          freshness: z.number().optional()
+          freshness: z.number().optional(),
+          anchorText: z.number().optional()
         })
         .optional()
     })

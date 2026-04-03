@@ -16,14 +16,25 @@ interface PageVectorDoc {
   metadata: Record<string, unknown>;
 }
 
+interface ChunkVectorDoc {
+  id: string;
+  vector: number[];
+  metadata: Record<string, unknown>;
+}
+
 function createMockStoreWithPages(): {
   store: UpstashSearchStore;
   getPages: () => Array<{ url: string; incomingLinks: number }>;
+  getChunks: () => ChunkVectorDoc[];
 } {
   const pages: PageVectorDoc[] = [];
+  const chunks: ChunkVectorDoc[] = [];
 
   const store = {
-    upsertChunks: vi.fn().mockResolvedValue(undefined),
+    upsertChunks: vi.fn().mockImplementation(async (records: ChunkVectorDoc[]) => {
+      chunks.length = 0;
+      chunks.push(...records);
+    }),
     search: vi.fn().mockResolvedValue([]),
     deleteByIds: vi.fn().mockResolvedValue(undefined),
     deleteScope: vi.fn().mockResolvedValue(undefined),
@@ -47,7 +58,8 @@ function createMockStoreWithPages(): {
       pages.map((p) => ({
         url: p.metadata.url as string,
         incomingLinks: p.metadata.incomingLinks as number
-      }))
+      })),
+    getChunks: () => chunks
   };
 }
 
@@ -129,5 +141,27 @@ describe("IndexPipeline link graph", () => {
     const advancedPage = getPages().find((p) => p.url === "/docs/advanced");
     expect(advancedPage).not.toBeNull();
     expect(advancedPage!.incomingLinks).toBe(1);
+  });
+
+  it("aggregates incoming anchor text on target page chunks", async () => {
+    const { cwd, config } = await createProjectFixture();
+    const { store, getChunks } = createMockStoreWithPages();
+
+    const pipeline = await IndexPipeline.create({
+      cwd,
+      config,
+      store,
+      embedder: createMockEmbedder()
+    });
+
+    await pipeline.run({ changedOnly: true });
+
+    // The "getting-started" page links to "advanced" with anchor text "Advanced"
+    const advancedChunks = getChunks().filter(
+      (c) => (c.metadata.url as string) === "/docs/advanced"
+    );
+    expect(advancedChunks.length).toBeGreaterThan(0);
+    // The anchor text "advanced" should appear on the chunk metadata
+    expect(advancedChunks[0]!.metadata.incomingAnchorText).toBe("advanced");
   });
 });

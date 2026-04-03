@@ -71,6 +71,16 @@ export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig, 
         }
       }
 
+      let anchorTextMatchBoostValue = 0;
+      if (config.ranking.enableAnchorTextBoost && normalizedQuery && config.ranking.weights.anchorText > 0) {
+        const normalizedAnchorText = normalizeForTitleMatch(hit.metadata.incomingAnchorText ?? "");
+        if (normalizedAnchorText.length > 0 && normalizedQuery.length > 0 &&
+            (normalizedAnchorText.includes(normalizedQuery) || normalizedQuery.includes(normalizedAnchorText))) {
+          anchorTextMatchBoostValue = config.ranking.weights.anchorText;
+          score += anchorTextMatchBoostValue;
+        }
+      }
+
       const result: RankedHit = {
         hit,
         finalScore: Number.isFinite(score) ? score : Number.NEGATIVE_INFINITY
@@ -82,7 +92,8 @@ export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig, 
           incomingLinkBoost: incomingLinkBoostValue,
           depthBoost: depthBoostValue,
           titleMatchBoost: titleMatchBoostValue,
-          freshnessBoost: freshnessBoostValue
+          freshnessBoost: freshnessBoostValue,
+          anchorTextMatchBoost: anchorTextMatchBoostValue
         };
       }
 

@@ -28,6 +28,7 @@ interface ChunkVectorMetadata {
   description: string;
   keywords: string[];
   publishedAt?: number | null;
+  incomingAnchorText: string;
   [key: string]: unknown;
 }
 
@@ -142,7 +143,8 @@ export class UpstashSearchStore {
         keywords: doc.metadata?.keywords?.length
           ? doc.metadata.keywords
           : undefined,
-        publishedAt: typeof doc.metadata?.publishedAt === "number" ? doc.metadata.publishedAt : undefined
+        publishedAt: typeof doc.metadata?.publishedAt === "number" ? doc.metadata.publishedAt : undefined,
+        incomingAnchorText: doc.metadata?.incomingAnchorText || undefined
       }
     }));
   }

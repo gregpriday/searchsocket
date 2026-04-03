@@ -90,14 +90,15 @@ describe("extractFromHtml - extended", () => {
     `;
 
     const extracted = extractFromHtml("/test", html, config);
-    expect(extracted?.outgoingLinks).toContain("/docs/a");
-    expect(extracted?.outgoingLinks).toContain("/docs/b");
-    expect(extracted?.outgoingLinks).toContain("/docs/c");
-    expect(extracted?.outgoingLinks).toContain("/docs/d");
-    expect(extracted?.outgoingLinks).toContain("/guides/e");
-    expect(extracted?.outgoingLinks).not.toContain("/docs/d?ref=nav#install");
+    const urls = extracted?.outgoingLinks.map(l => l.url) ?? [];
+    expect(urls).toContain("/docs/a");
+    expect(urls).toContain("/docs/b");
+    expect(urls).toContain("/docs/c");
+    expect(urls).toContain("/docs/d");
+    expect(urls).toContain("/guides/e");
+    expect(urls).not.toContain("/docs/d?ref=nav#install");
     // Should not include anchor or mailto
-    expect(extracted?.outgoingLinks).not.toContain("#anchor");
+    expect(urls).not.toContain("#anchor");
   });
 
   it("resolves relative outgoing links against the current page path", () => {
@@ -114,8 +115,9 @@ describe("extractFromHtml - extended", () => {
     `;
 
     const extracted = extractFromHtml("/docs/getting-started", html, config);
-    expect(extracted?.outgoingLinks).toContain("/docs/advanced");
-    expect(extracted?.outgoingLinks).toContain("/docs/faq");
+    const urls = extracted?.outgoingLinks.map(l => l.url) ?? [];
+    expect(urls).toContain("/docs/advanced");
+    expect(urls).toContain("/docs/faq");
   });
 
   it("extracts tags from first path segment", () => {

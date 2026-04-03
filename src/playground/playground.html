@@ -166,6 +166,7 @@
         html += '<div class="breakdown-row"><span class="breakdown-label">Incoming link boost</span><span class="breakdown-value">' + r.breakdown.incomingLinkBoost.toFixed(6) + '</span></div>';
         html += '<div class="breakdown-row"><span class="breakdown-label">Depth boost</span><span class="breakdown-value">' + r.breakdown.depthBoost.toFixed(6) + '</span></div>';
         html += '<div class="breakdown-row"><span class="breakdown-label">Title match boost</span><span class="breakdown-value">' + r.breakdown.titleMatchBoost.toFixed(6) + '</span></div>';
+        html += '<div class="breakdown-row"><span class="breakdown-label">Anchor text boost</span><span class="breakdown-value">' + (r.breakdown.anchorTextMatchBoost || 0).toFixed(6) + '</span></div>';
         html += '</div>';
       }
 

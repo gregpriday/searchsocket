@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultConfig } from "../src/config/defaults";
-import { extractFromHtml, extractFromMarkdown } from "../src/indexing/extractor";
+import { extractFromHtml, extractFromMarkdown, normalizeAnchorText } from "../src/indexing/extractor";
 
 const config = createDefaultConfig("searchsocket-test");
 
@@ -30,7 +30,7 @@ describe("extractFromHtml", () => {
     expect(extracted?.markdown).toContain("First paragraph");
     expect(extracted?.markdown).toContain("Second paragraph");
     expect(extracted?.markdown).not.toContain("Should not index");
-    expect(extracted?.outgoingLinks).toContain("/docs/next");
+    expect(extracted?.outgoingLinks.some(l => l.url === "/docs/next")).toBe(true);
   });
 
   it("skips noindex pages", () => {
@@ -341,5 +341,97 @@ Content.`;
     const extracted = extractFromMarkdown("/test", md);
     expect(extracted?.description).toBeUndefined();
     expect(extracted?.keywords).toBeUndefined();
+  });
+});
+
+describe("normalizeAnchorText", () => {
+  it("lowercases and trims text", () => {
+    expect(normalizeAnchorText("  Installation Guide  ")).toBe("installation guide");
+  });
+
+  it("collapses whitespace", () => {
+    expect(normalizeAnchorText("get   started   now")).toBe("get started now");
+  });
+
+  it("filters anchors shorter than 3 chars", () => {
+    expect(normalizeAnchorText("go")).toBe("");
+    expect(normalizeAnchorText("ab")).toBe("");
+  });
+
+  it("keeps anchors of exactly 3 chars", () => {
+    expect(normalizeAnchorText("api")).toBe("api");
+  });
+
+  it("filters stop anchors", () => {
+    expect(normalizeAnchorText("here")).toBe("");
+    expect(normalizeAnchorText("Click Here")).toBe("");
+    expect(normalizeAnchorText("read more")).toBe("");
+    expect(normalizeAnchorText("link")).toBe("");
+    expect(normalizeAnchorText("this")).toBe("");
+    expect(normalizeAnchorText("more")).toBe("");
+  });
+
+  it("does not filter non-exact stop anchor matches", () => {
+    expect(normalizeAnchorText("click here for more info")).toBe("click here for more info");
+    expect(normalizeAnchorText("read more about authentication")).toBe("read more about authentication");
+  });
+
+  it("truncates at 100 chars", () => {
+    const long = "a".repeat(120);
+    expect(normalizeAnchorText(long).length).toBe(100);
+  });
+});
+
+describe("anchor text extraction", () => {
+  it("captures anchor text alongside URL", () => {
+    const html = `<html><body><main><h1>Title</h1><a href="/docs/install">Installation Guide</a></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    const link = extracted?.outgoingLinks.find(l => l.url === "/docs/install");
+    expect(link).toBeDefined();
+    expect(link!.anchorText).toBe("installation guide");
+  });
+
+  it("falls back to img alt for image-only links", () => {
+    const html = `<html><body><main><h1>Title</h1><a href="/docs/guide"><img src="x.png" alt="Setup Guide for Beginners"/></a></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    const link = extracted?.outgoingLinks.find(l => l.url === "/docs/guide");
+    expect(link).toBeDefined();
+    expect(link!.anchorText).toBe("setup guide for beginners");
+  });
+
+  it("returns empty anchorText for image link with garbage alt", () => {
+    const html = `<html><body><main><h1>Title</h1><a href="/docs/guide"><img src="x.png" alt="logo"/></a></main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    const link = extracted?.outgoingLinks.find(l => l.url === "/docs/guide");
+    expect(link).toBeDefined();
+    expect(link!.anchorText).toBe("");
+  });
+
+  it("deduplicates same url+anchorText pairs", () => {
+    const html = `<html><body><main>
+      <h1>Title</h1>
+      <a href="/docs/api">API Reference</a>
+      <a href="/docs/api">API Reference</a>
+    </main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    const apiLinks = extracted?.outgoingLinks.filter(l => l.url === "/docs/api");
+    expect(apiLinks?.length).toBe(1);
+  });
+
+  it("keeps different anchors to same URL as separate entries", () => {
+    const html = `<html><body><main>
+      <h1>Title</h1>
+      <a href="/docs/api">API Reference</a>
+      <a href="/docs/api">REST Endpoints</a>
+    </main></body></html>`;
+    const extracted = extractFromHtml("/test", html, config);
+    const apiLinks = extracted?.outgoingLinks.filter(l => l.url === "/docs/api");
+    expect(apiLinks?.length).toBe(2);
+  });
+
+  it("extractFromMarkdown returns empty outgoingLinks array", () => {
+    const md = `---\ntitle: Test\n---\n\n# Hello\n\nContent.`;
+    const extracted = extractFromMarkdown("/test", md);
+    expect(extracted?.outgoingLinks).toEqual([]);
   });
 });
