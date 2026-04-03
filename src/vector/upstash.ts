@@ -76,7 +76,7 @@ export class UpstashSearchStore {
   async upsertChunks(
     chunks: Array<{
       id: string;
-      vector: number[];
+      data: string;
       metadata: Record<string, unknown>;
     }>,
     scope: Scope
@@ -89,7 +89,7 @@ export class UpstashSearchStore {
       await this.chunksNs.upsert(
         batch.map((c) => ({
           id: c.id,
-          vector: c.vector,
+          data: c.data,
           metadata: {
             ...c.metadata,
             projectId: scope.projectId,
@@ -102,7 +102,7 @@ export class UpstashSearchStore {
   }
 
   async search(
-    vector: number[],
+    data: string,
     opts: {
       limit: number;
       filter?: string;
@@ -118,7 +118,7 @@ export class UpstashSearchStore {
     }
 
     const results = await this.chunksNs.query<ChunkVectorMetadata>({
-      vector,
+      data,
       topK: opts.limit,
       includeMetadata: true,
       filter: filterParts.join(" AND ")
@@ -156,7 +156,7 @@ export class UpstashSearchStore {
   }
 
   async searchChunksByUrl(
-    vector: number[],
+    data: string,
     url: string,
     opts: {
       limit: number;
@@ -174,7 +174,7 @@ export class UpstashSearchStore {
     }
 
     const results = await this.chunksNs.query<ChunkVectorMetadata>({
-      vector,
+      data,
       topK: opts.limit,
       includeMetadata: true,
       filter: filterParts.join(" AND ")
@@ -211,8 +211,30 @@ export class UpstashSearchStore {
     }));
   }
 
-  async searchPages(
+  async searchPagesByText(
+    data: string,
+    opts: {
+      limit: number;
+      filter?: string;
+    },
+    scope: Scope
+  ): Promise<PageHit[]> {
+    return this.queryPages({ data }, opts, scope);
+  }
+
+  async searchPagesByVector(
     vector: number[],
+    opts: {
+      limit: number;
+      filter?: string;
+    },
+    scope: Scope
+  ): Promise<PageHit[]> {
+    return this.queryPages({ vector }, opts, scope);
+  }
+
+  private async queryPages(
+    input: { data: string } | { vector: number[] },
     opts: {
       limit: number;
       filter?: string;
@@ -230,7 +252,7 @@ export class UpstashSearchStore {
     let results;
     try {
       results = await this.pagesNs.query<PageVectorMetadata>({
-        vector,
+        ...input,
         topK: opts.limit,
         includeMetadata: true,
         filter: filterParts.join(" AND ")
@@ -453,7 +475,7 @@ export class UpstashSearchStore {
   async upsertPages(
     pages: Array<{
       id: string;
-      vector: number[];
+      data: string;
       metadata: Record<string, unknown>;
     }>,
     scope: Scope
@@ -466,7 +488,7 @@ export class UpstashSearchStore {
       await this.pagesNs.upsert(
         batch.map((p) => ({
           id: p.id,
-          vector: p.vector,
+          data: p.data,
           metadata: {
             ...p.metadata,
             projectId: scope.projectId,
