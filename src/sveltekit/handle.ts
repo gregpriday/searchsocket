@@ -1,8 +1,11 @@
+import { timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
 import nodePath from "node:path";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { loadConfig, mergeConfig } from "../config/load";
 import { isServerless } from "../core/serverless";
 import { SearchSocketError, toErrorPayload } from "../errors";
+import { createServer as createMcpServer } from "../mcp/server";
 import { SearchEngine } from "../search/engine";
 import type { ResolvedSearchSocketConfig, SearchRequest, SearchSocketConfig } from "../types";
 
@@ -51,6 +54,9 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
   let configPromise: Promise<ResolvedSearchSocketConfig> | null = null;
   let apiPath = options.path;
   let llmsServePath: string | null = null;
+  let mcpPath: string | undefined;
+  let mcpApiKey: string | undefined;
+  let mcpEnableJsonResponse = true;
   let rateLimiter: InMemoryRateLimiter | null = null;
   let notConfigured = false;
 
@@ -72,6 +78,9 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
       configPromise = configP.then((config) => {
         apiPath = apiPath ?? config.api.path;
+        mcpPath = config.mcp.handle.path;
+        mcpApiKey = config.mcp.handle.apiKey;
+        mcpEnableJsonResponse = config.mcp.handle.enableJsonResponse;
 
         if (config.llmsTxt.enable) {
           llmsServePath = "/" + config.llmsTxt.outputPath.replace(/^static\//, "");
@@ -123,6 +132,20 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
   return async ({ event, resolve }: { event: any; resolve: (event: any) => Promise<Response> }) => {
     if (apiPath && event.url.pathname !== apiPath && event.url.pathname !== llmsServePath) {
+      if (mcpPath && event.url.pathname === mcpPath) {
+        return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
+      }
+      if (mcpPath) {
+        // Config loaded and path matches neither endpoint
+        return resolve(event);
+      }
+      // Config not yet loaded — if config is pending or available, resolve to learn mcpPath
+      if (configPromise || options.config || options.rawConfig) {
+        await getConfig();
+        if (mcpPath && event.url.pathname === mcpPath) {
+          return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
+        }
+      }
       return resolve(event);
     }
 
@@ -143,6 +166,10 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
       }
     }
 
+    // MCP endpoint handling
+    if (mcpPath && event.url.pathname === mcpPath) {
+      return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
+    }
     const targetPath = apiPath ?? config.api.path;
 
     if (event.url.pathname !== targetPath) {
@@ -268,6 +295,72 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
       );
     }
   };
+}
+
+async function handleMcpRequest(
+  event: any,
+  apiKey: string | undefined,
+  enableJsonResponse: boolean,
+  getEngine: () => Promise<SearchEngine>
+): Promise<Response> {
+  // Auth check
+  if (apiKey) {
+    const authHeader = event.request.headers.get("authorization") ?? "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    const tokenBuf = Buffer.from(token);
+    const keyBuf = Buffer.from(apiKey);
+    if (tokenBuf.length !== keyBuf.length || !timingSafeEqual(tokenBuf, keyBuf)) {
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          error: { code: -32001, message: "Unauthorized" },
+          id: null
+        }),
+        { status: 401, headers: { "content-type": "application/json" } }
+      );
+    }
+  }
+
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse
+  });
+
+  let server: { close(): Promise<void> } | undefined;
+
+  try {
+    const engine = await getEngine();
+    server = createMcpServer(engine);
+
+    await (server as ReturnType<typeof createMcpServer>).connect(transport);
+    const response = await transport.handleRequest(event.request);
+
+    if (enableJsonResponse) {
+      // JSON mode: response is complete, clean up immediately
+      await transport.close();
+      await server.close();
+    }
+    // SSE mode: response body is a ReadableStream — transport and server
+    // will be garbage collected when the stream ends. Closing early would
+    // terminate the stream before the client receives data.
+
+    return response;
+  } catch (error) {
+    try { await transport.close(); } catch {}
+    try { await server?.close(); } catch {}
+
+    return new Response(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: {
+          code: -32603,
+          message: error instanceof Error ? error.message : "Internal server error"
+        },
+        id: null
+      }),
+      { status: 500, headers: { "content-type": "application/json" } }
+    );
+  }
 }
 
 function buildCorsHeaders(request: Request, config: ResolvedSearchSocketConfig): Record<string, string> {

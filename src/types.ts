@@ -108,6 +108,11 @@ export interface SearchSocketConfig {
       port?: number;
       path?: string;
     };
+    handle?: {
+      path?: string;
+      apiKey?: string;
+      enableJsonResponse?: boolean;
+    };
   };
   llmsTxt?: {
     enable?: boolean;
@@ -227,6 +232,11 @@ export interface ResolvedSearchSocketConfig {
     http: {
       port: number;
       path: string;
+    };
+    handle: {
+      path: string;
+      apiKey?: string;
+      enableJsonResponse: boolean;
     };
   };
   llmsTxt: {

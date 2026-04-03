@@ -8,6 +8,32 @@ import { SearchEngine } from "../src/search/engine";
 import { SearchSocketError } from "../src/errors";
 import type { ResolvedSearchSocketConfig } from "../src/types";
 
+let mockTransportHandleRequest = vi.fn().mockResolvedValue(new Response(JSON.stringify({ jsonrpc: "2.0", result: {} }), {
+  status: 200,
+  headers: { "content-type": "application/json" }
+}));
+let mockTransportClose = vi.fn().mockResolvedValue(undefined);
+
+vi.mock("@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js", () => {
+  return {
+    WebStandardStreamableHTTPServerTransport: class {
+      handleRequest = (...args: unknown[]) => mockTransportHandleRequest(...args);
+      close = (...args: unknown[]) => mockTransportClose(...args);
+    }
+  };
+});
+
+vi.mock("../src/mcp/server", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/mcp/server")>();
+  return {
+    ...original,
+    createServer: vi.fn().mockReturnValue({
+      connect: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined)
+    })
+  };
+});
+
 function makeConfig(overrides: Partial<ResolvedSearchSocketConfig> = {}): ResolvedSearchSocketConfig {
   const base = createDefaultConfig("test");
   return {
@@ -54,6 +80,11 @@ function makeEvent(options: {
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.VERCEL;
+  mockTransportHandleRequest = vi.fn().mockResolvedValue(new Response(JSON.stringify({ jsonrpc: "2.0", result: {} }), {
+    status: 200,
+    headers: { "content-type": "application/json" }
+  }));
+  mockTransportClose = vi.fn().mockResolvedValue(undefined);
 });
 
 describe("searchsocketHandle", () => {
@@ -656,5 +687,228 @@ describe("searchsocketHandle llms.txt serving", () => {
     // POST to /llms.txt should not be intercepted - it falls through to the API path check
     // which will also fall through since /llms.txt != /api/search
     expect(resolve).toHaveBeenCalled();
+  });
+});
+
+describe("MCP endpoint", () => {
+  it("routes MCP requests to the MCP handler", async () => {
+    const config = makeConfig();
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn()
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const event = makeEvent({
+      pathname: "/api/mcp",
+      method: "POST",
+      body: { jsonrpc: "2.0", method: "initialize", id: 1 }
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(200);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("passes non-MCP paths through to resolve", async () => {
+    const config = makeConfig();
+    const handle = searchsocketHandle({ config, path: "/api/search" });
+    const resolveResult = new Response("ok");
+    const resolve = vi.fn().mockResolvedValue(resolveResult);
+
+    const event = makeEvent({
+      pathname: "/other",
+      method: "GET"
+    });
+
+    const response = await handle({ event, resolve });
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(await response.text()).toBe("ok");
+  });
+
+  it("returns 401 when API key is configured and Authorization header is missing", async () => {
+    const config = makeConfig();
+    config.mcp.handle.apiKey = "test-secret";
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const event = makeEvent({
+      pathname: "/api/mcp",
+      method: "POST",
+      body: { jsonrpc: "2.0", method: "initialize", id: 1 }
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(401);
+    const body = await response.json();
+    expect(body.error.message).toBe("Unauthorized");
+  });
+
+  it("returns 401 when API key is wrong", async () => {
+    const config = makeConfig();
+    config.mcp.handle.apiKey = "test-secret";
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const event = makeEvent({
+      pathname: "/api/mcp",
+      method: "POST",
+      body: { jsonrpc: "2.0", method: "initialize", id: 1 },
+      headers: { authorization: "Bearer wrong-key" }
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(401);
+  });
+
+  it("accepts requests with correct API key", async () => {
+    const config = makeConfig();
+    config.mcp.handle.apiKey = "test-secret";
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn()
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const event = makeEvent({
+      pathname: "/api/mcp",
+      method: "POST",
+      body: { jsonrpc: "2.0", method: "initialize", id: 1 },
+      headers: { authorization: "Bearer test-secret" }
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(200);
+  });
+
+  it("does not require auth when no API key is configured", async () => {
+    const config = makeConfig();
+    // No apiKey set
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn()
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const event = makeEvent({
+      pathname: "/api/mcp",
+      method: "POST",
+      body: { jsonrpc: "2.0", method: "initialize", id: 1 }
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(200);
+  });
+
+  it("returns 500 when transport throws", async () => {
+    mockTransportHandleRequest = vi.fn().mockRejectedValue(new Error("transport boom"));
+
+    const config = makeConfig();
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn()
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const event = makeEvent({
+      pathname: "/api/mcp",
+      method: "POST",
+      body: { jsonrpc: "2.0", method: "initialize", id: 1 }
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body.error.message).toBe("transport boom");
+  });
+
+  it("memoizes engine across MCP requests", async () => {
+    const config = makeConfig();
+    const createSpy = vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn()
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const event = makeEvent({
+      pathname: "/api/mcp",
+      method: "POST",
+      body: { jsonrpc: "2.0", method: "initialize", id: 1 }
+    });
+
+    await handle({ event, resolve });
+    await handle({ event, resolve });
+
+    expect(createSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes to custom MCP path from config", async () => {
+    const config = makeConfig();
+    config.mcp.handle.path = "/custom/mcp";
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn()
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const event = makeEvent({
+      pathname: "/custom/mcp",
+      method: "POST",
+      body: { jsonrpc: "2.0", method: "initialize", id: 1 }
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(200);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("search endpoint still works alongside MCP", async () => {
+    const config = makeConfig({
+      api: {
+        path: "/api/search",
+        cors: { allowOrigins: [] }
+      }
+    });
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn().mockResolvedValue({
+        q: "test",
+        scope: "main",
+        results: [],
+        meta: { timingsMs: { search: 0, total: 0 } }
+      })
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const searchEvent = makeEvent({
+      pathname: "/api/search",
+      method: "POST",
+      body: { q: "test" }
+    });
+
+    const searchResponse = await handle({ event: searchEvent, resolve });
+    expect(searchResponse.status).toBe(200);
+
+    const mcpEvent = makeEvent({
+      pathname: "/api/mcp",
+      method: "POST",
+      body: { jsonrpc: "2.0", method: "initialize", id: 1 }
+    });
+
+    const mcpResponse = await handle({ event: mcpEvent, resolve });
+    expect(mcpResponse.status).toBe(200);
   });
 });
