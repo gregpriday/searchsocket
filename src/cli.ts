@@ -388,11 +388,25 @@ program
     process.stdout.write("starting searchsocket dev watcher...\n");
     process.stdout.write(`watching:\n${watchPaths.map((entry) => `  - ${entry}`).join("\n")}\n`);
 
+    const upstashUrl = config.upstash.url ?? process.env[config.upstash.urlEnv];
+    const upstashToken = config.upstash.token ?? process.env[config.upstash.tokenEnv];
+    const backendMissing = !upstashUrl || !upstashToken;
+
+    if (backendMissing) {
+      process.stdout.write(
+        `Search backend not configured — set ${config.upstash.urlEnv} and ${config.upstash.tokenEnv} to enable indexing. Watching for file changes only.\n`
+      );
+    }
+
     let running = false;
     let pending = false;
     let timer: NodeJS.Timeout | null = null;
 
     const run = async (): Promise<void> => {
+      if (backendMissing) {
+        return;
+      }
+
       if (running) {
         pending = true;
         return;

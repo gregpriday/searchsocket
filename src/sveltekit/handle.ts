@@ -52,6 +52,7 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
   let apiPath = options.path;
   let llmsServePath: string | null = null;
   let rateLimiter: InMemoryRateLimiter | null = null;
+  let notConfigured = false;
 
   const getConfig = async (): Promise<ResolvedSearchSocketConfig> => {
     if (!configPromise) {
@@ -88,11 +89,30 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
   };
 
   const getEngine = async (): Promise<SearchEngine> => {
+    if (notConfigured) {
+      throw new SearchSocketError(
+        "SEARCH_NOT_CONFIGURED",
+        "Search is not configured. Set the required Upstash environment variables to enable search.",
+        503
+      );
+    }
+
     if (!enginePromise) {
       const config = await getConfig();
       enginePromise = SearchEngine.create({
         cwd: options.cwd,
         config
+      }).catch((error) => {
+        enginePromise = null;
+        if (error instanceof SearchSocketError && error.code === "VECTOR_BACKEND_UNAVAILABLE") {
+          notConfigured = true;
+          throw new SearchSocketError(
+            "SEARCH_NOT_CONFIGURED",
+            "Search is not configured. Set the required Upstash environment variables to enable search.",
+            503
+          );
+        }
+        throw error;
       });
     }
 

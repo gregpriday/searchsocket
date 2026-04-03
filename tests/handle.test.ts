@@ -431,6 +431,60 @@ describe("searchsocketHandle", () => {
     expect(search).toHaveBeenCalledTimes(1);
   });
 
+  it("returns 503 with SEARCH_NOT_CONFIGURED when engine creation throws VECTOR_BACKEND_UNAVAILABLE", async () => {
+    const config = makeConfig();
+    vi.spyOn(SearchEngine, "create").mockRejectedValue(
+      new SearchSocketError("VECTOR_BACKEND_UNAVAILABLE", "Missing Upstash Search credentials", 500)
+    );
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const response = await handle({
+      event: makeEvent({
+        pathname: "/api/search",
+        method: "POST",
+        body: { q: "test" }
+      }),
+      resolve
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "SEARCH_NOT_CONFIGURED"
+      }
+    });
+  });
+
+  it("caches not-configured state and does not retry engine creation", async () => {
+    const config = makeConfig();
+    const createSpy = vi.spyOn(SearchEngine, "create").mockRejectedValue(
+      new SearchSocketError("VECTOR_BACKEND_UNAVAILABLE", "Missing Upstash Search credentials", 500)
+    );
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search",
+      method: "POST",
+      body: { q: "test" }
+    });
+
+    const first = await handle({ event, resolve });
+    const second = await handle({ event, resolve });
+
+    expect(first.status).toBe(503);
+    expect(second.status).toBe(503);
+    expect(createSpy).toHaveBeenCalledTimes(1);
+
+    await expect(second.json()).resolves.toMatchObject({
+      error: {
+        code: "SEARCH_NOT_CONFIGURED"
+      }
+    });
+  });
+
   it("auto-disables rate limiter on serverless", async () => {
     process.env.VERCEL = "1";
 
