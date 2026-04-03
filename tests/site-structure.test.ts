@@ -125,6 +125,36 @@ describe("buildTree", () => {
     expect(root.children[1]!.isIndexed).toBe(true);
   });
 
+  it("handles pathPrefix with trailing slash", () => {
+    const pages = [
+      { url: "/docs", title: "Docs", routeFile: "" },
+      { url: "/docs/api", title: "API", routeFile: "" }
+    ];
+    const withSlash = buildTree(pages, "/docs/");
+    const withoutSlash = buildTree(pages, "/docs");
+    expect(withSlash).toEqual(withoutSlash);
+  });
+
+  it("handles pathPrefix '/' returning root", () => {
+    const pages = [
+      { url: "/", title: "Home", routeFile: "" },
+      { url: "/about", title: "About", routeFile: "" }
+    ];
+    const withPrefix = buildTree(pages, "/");
+    const withoutPrefix = buildTree(pages);
+    expect(withPrefix).toEqual(withoutPrefix);
+  });
+
+  it("handles duplicate URLs without crashing (last write wins)", () => {
+    const root = buildTree([
+      { url: "/about", title: "About v1", routeFile: "v1.svelte" },
+      { url: "/about", title: "About v2", routeFile: "v2.svelte" }
+    ]);
+    expect(root.childCount).toBe(1);
+    expect(root.children[0]!.title).toBe("About v2");
+    expect(root.children[0]!.routeFile).toBe("v2.svelte");
+  });
+
   it("childCount always matches children.length", () => {
     const root = buildTree([
       { url: "/", title: "Home", routeFile: "" },

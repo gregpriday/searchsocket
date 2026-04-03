@@ -379,7 +379,7 @@ export class SearchEngine {
       cursor = result.nextCursor;
 
       if (allPages.length >= maxPages) {
-        truncated = allPages.length > maxPages;
+        truncated = allPages.length > maxPages || !!cursor;
         allPages.length = maxPages;
         break;
       }
