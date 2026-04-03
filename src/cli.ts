@@ -21,7 +21,16 @@ import { createUpstashStore } from "./vector";
 import { sanitizeScopeName } from "./utils/text";
 import type { IndexStats, ResolvedSearchSocketConfig, Scope, ScopeInfo, SearchResult } from "./types";
 import type { UpstashSearchStore } from "./vector/upstash";
-import { ensureMcpJson } from "./init-helpers";
+import * as clack from "@clack/prompts";
+import {
+  ensureMcpJson,
+  injectHooksServerTs,
+  injectViteConfig,
+  writeEnvFile,
+  HOOKS_SNIPPET,
+  HOOKS_SEQUENCE_SNIPPET,
+  VITE_PLUGIN_SNIPPET,
+} from "./init-helpers";
 import { readAnalyticsLog, computeReport } from "./analytics/report";
 import { copyComponent, isValidComponent, listAvailableComponents } from "./add-helpers";
 
@@ -241,6 +250,169 @@ async function runIndexCommand(opts: {
   }
 }
 
+async function runInteractiveInit(cwd: string): Promise<void> {
+  clack.intro("searchsocket setup");
+
+  // Step 1: Config file + state dir + gitignore + MCP
+  const s = clack.spinner();
+  s.start("Creating config files");
+  const configPath = writeMinimalConfig(cwd);
+  ensureStateDir(cwd);
+  ensureGitignore(cwd);
+  ensureMcpJson(cwd);
+  s.stop("Config files created");
+
+  // Step 2: Check for Upstash credentials
+  const hasUrl = Boolean(process.env.UPSTASH_SEARCH_REST_URL);
+  const hasToken = Boolean(process.env.UPSTASH_SEARCH_REST_TOKEN);
+
+  if (!hasUrl || !hasToken) {
+    clack.log.warn("Upstash Search credentials not found in environment.");
+
+    const shouldConfigure = await clack.confirm({
+      message: "Would you like to configure Upstash credentials now?",
+      initialValue: true,
+    });
+
+    if (clack.isCancel(shouldConfigure)) {
+      clack.cancel("Setup cancelled.");
+      process.exit(0);
+    }
+
+    if (shouldConfigure) {
+      const url = hasUrl
+        ? process.env.UPSTASH_SEARCH_REST_URL!
+        : await clack.text({
+            message: "Upstash Search REST URL:",
+            placeholder: "https://your-index.upstash.io",
+            validate: (v) => (v.length === 0 ? "URL is required" : undefined),
+          });
+
+      if (clack.isCancel(url)) {
+        clack.cancel("Setup cancelled.");
+        process.exit(0);
+      }
+
+      const token = hasToken
+        ? process.env.UPSTASH_SEARCH_REST_TOKEN!
+        : await clack.text({
+            message: "Upstash Search REST Token:",
+            placeholder: "AX...",
+            validate: (v) => (v.length === 0 ? "Token is required" : undefined),
+          });
+
+      if (clack.isCancel(token)) {
+        clack.cancel("Setup cancelled.");
+        process.exit(0);
+      }
+
+      writeEnvFile(cwd, url as string, token as string);
+      clack.log.success("Credentials written to .env");
+    }
+  } else {
+    clack.log.success("Upstash credentials found in environment.");
+  }
+
+  // Step 3: Inject hooks.server.ts
+  s.start("Configuring hooks.server.ts");
+  const hookResult = injectHooksServerTs(cwd);
+  s.stop("hooks.server.ts configured");
+
+  switch (hookResult) {
+    case "created":
+      clack.log.success("Created src/hooks.server.ts with searchsocketHandle.");
+      break;
+    case "injected":
+      clack.log.success("Added searchsocketHandle to src/hooks.server.ts.");
+      break;
+    case "composed":
+      clack.log.success("Composed searchsocketHandle with existing handle using sequence().");
+      break;
+    case "already-present":
+      clack.log.info("searchsocketHandle already configured in hooks.server.ts.");
+      break;
+    case "fallback":
+      clack.log.warn("Could not auto-inject hooks.server.ts. Add manually:");
+      clack.log.message(HOOKS_SNIPPET);
+      break;
+  }
+
+  // Step 4: Inject vite config
+  s.start("Configuring Vite plugin");
+  const viteResult = injectViteConfig(cwd);
+  s.stop("Vite plugin configured");
+
+  switch (viteResult) {
+    case "injected":
+      clack.log.success("Added searchsocketVitePlugin to Vite config.");
+      break;
+    case "already-present":
+      clack.log.info("searchsocketVitePlugin already in Vite config.");
+      break;
+    case "no-config":
+      clack.log.warn("No vite.config.ts/js found. Add the plugin manually:");
+      clack.log.message(VITE_PLUGIN_SNIPPET);
+      break;
+    case "fallback":
+      clack.log.warn("Could not auto-inject Vite config. Add manually:");
+      clack.log.message(VITE_PLUGIN_SNIPPET);
+      break;
+  }
+
+  clack.log.info("Run `searchsocket doctor` to verify your setup.");
+  clack.outro("SearchSocket initialized! Run `searchsocket index` to index your site.");
+}
+
+async function runSilentInit(cwd: string): Promise<void> {
+  const configPath = writeMinimalConfig(cwd);
+  const stateDir = ensureStateDir(cwd);
+  ensureGitignore(cwd);
+  ensureMcpJson(cwd);
+
+  process.stdout.write(`created/verified config: ${configPath}\n`);
+  process.stdout.write(`created/verified state dir: ${stateDir}\n`);
+  process.stdout.write("created/verified .mcp.json (MCP server config for Claude Code)\n\n");
+
+  // Attempt auto-injection
+  const hookResult = injectHooksServerTs(cwd);
+  switch (hookResult) {
+    case "created":
+      process.stdout.write("created src/hooks.server.ts with searchsocketHandle\n");
+      break;
+    case "injected":
+      process.stdout.write("added searchsocketHandle to src/hooks.server.ts\n");
+      break;
+    case "composed":
+      process.stdout.write("composed searchsocketHandle with existing handle via sequence()\n");
+      break;
+    case "already-present":
+      process.stdout.write("searchsocketHandle already present in hooks.server.ts\n");
+      break;
+    case "fallback":
+      process.stdout.write("could not auto-inject hooks.server.ts — add manually:\n\n");
+      process.stdout.write(HOOKS_SNIPPET + "\n\n");
+      break;
+  }
+
+  const viteResult = injectViteConfig(cwd);
+  switch (viteResult) {
+    case "injected":
+      process.stdout.write("added searchsocketVitePlugin to Vite config\n");
+      break;
+    case "already-present":
+      process.stdout.write("searchsocketVitePlugin already in Vite config\n");
+      break;
+    case "no-config":
+      process.stdout.write("no vite.config.ts/js found — add plugin manually:\n\n");
+      process.stdout.write(VITE_PLUGIN_SNIPPET + "\n\n");
+      break;
+    case "fallback":
+      process.stdout.write("could not auto-inject Vite config — add manually:\n\n");
+      process.stdout.write(VITE_PLUGIN_SNIPPET + "\n\n");
+      break;
+  }
+}
+
 const program = new Command();
 
 program
@@ -252,29 +424,18 @@ program
 
 program
   .command("init")
-  .description("Create searchsocket.config.ts and .searchsocket state directory")
-  .action(async (_opts, command) => {
+  .description("Initialize SearchSocket in a SvelteKit project")
+  .option("--non-interactive", "skip interactive prompts")
+  .action(async (opts, command) => {
     const root = getRootOptions(command).cwd ?? process.cwd();
     const cwd = path.resolve(root);
+    const isInteractive = Boolean(process.stdout.isTTY) && !opts.nonInteractive;
 
-    const configPath = writeMinimalConfig(cwd);
-    const stateDir = ensureStateDir(cwd);
-    ensureGitignore(cwd);
-    ensureMcpJson(cwd);
-
-    process.stdout.write(`created/verified config: ${configPath}\n`);
-    process.stdout.write(`created/verified state dir: ${stateDir}\n`);
-    process.stdout.write("created/verified .mcp.json (MCP server config for Claude Code)\n\n");
-
-    process.stdout.write("SvelteKit hook snippet:\n\n");
-    process.stdout.write('import { searchsocketHandle } from "searchsocket/sveltekit";\n\n');
-    process.stdout.write("export const handle = searchsocketHandle();\n\n");
-
-    process.stdout.write("Optional build-triggered indexing plugin:\n\n");
-    process.stdout.write('import { searchsocketVitePlugin } from "searchsocket/sveltekit";\n\n');
-    process.stdout.write("// svelte.config.js / vite plugins:\n");
-    process.stdout.write("// searchsocketVitePlugin({ enabled: true, changedOnly: true })\n");
-    process.stdout.write("// or env-driven: SEARCHSOCKET_AUTO_INDEX=1 pnpm build\n");
+    if (isInteractive) {
+      await runInteractiveInit(cwd);
+    } else {
+      await runSilentInit(cwd);
+    }
   });
 
 program
