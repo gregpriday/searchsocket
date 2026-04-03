@@ -84,10 +84,6 @@ export interface SearchSocketConfig {
     model?: string;
     dimensions?: number;
     taskType?: string;
-    apiKeyEnv?: string;
-    images?: {
-      enable?: boolean;
-    };
     batchSize?: number;
   };
   search?: {
@@ -230,10 +226,6 @@ export interface ResolvedSearchSocketConfig {
     model: string;
     dimensions: number;
     taskType: string;
-    apiKeyEnv: string;
-    images: {
-      enable: boolean;
-    };
     batchSize: number;
   };
   search: {

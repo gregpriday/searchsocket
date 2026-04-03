@@ -64,10 +64,6 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       model: "bge-large-en-v1.5",
       dimensions: 1024,
       taskType: "RETRIEVAL_DOCUMENT",
-      apiKeyEnv: "GEMINI_API_KEY",
-      images: {
-        enable: false
-      },
       batchSize: 100
     },
     search: {

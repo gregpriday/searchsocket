@@ -99,12 +99,6 @@ export const searchSocketConfigSchema = z.object({
       model: z.string().optional(),
       dimensions: z.number().int().positive().optional(),
       taskType: z.string().optional(),
-      apiKeyEnv: z.string().min(1).optional(),
-      images: z
-        .object({
-          enable: z.boolean().optional()
-        })
-        .optional(),
       batchSize: z.number().int().positive().optional()
     })
     .optional(),

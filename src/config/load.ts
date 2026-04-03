@@ -132,11 +132,7 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
     },
     embedding: {
       ...defaults.embedding,
-      ...parsed.embedding,
-      images: {
-        ...defaults.embedding.images,
-        ...parsed.embedding?.images
-      }
+      ...parsed.embedding
     },
     search: {
       ...defaults.search,

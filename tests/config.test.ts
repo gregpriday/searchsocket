@@ -42,7 +42,6 @@ describe("createDefaultConfig", () => {
     const config = createDefaultConfig("example");
     expect(config.embedding.model).toBe("bge-large-en-v1.5");
     expect(config.embedding.dimensions).toBe(1024);
-    expect(config.embedding.apiKeyEnv).toBe("GEMINI_API_KEY");
     expect(config.embedding.batchSize).toBe(100);
   });
 
@@ -215,19 +214,17 @@ describe("mergeConfig", () => {
     expect(merged.source.build?.previewTimeout).toBe(30000);
   });
 
-  it("merges embedding overrides with nested images", async () => {
+  it("merges embedding overrides", async () => {
     const dir = await makeTempDir();
     await fs.mkdir(path.join(dir, "build"), { recursive: true });
 
     const merged = mergeConfig(dir, {
-      embedding: { dimensions: 768, batchSize: 50, images: { enable: true } }
+      embedding: { dimensions: 768, batchSize: 50 }
     });
 
     expect(merged.embedding.dimensions).toBe(768);
     expect(merged.embedding.batchSize).toBe(50);
-    expect(merged.embedding.images.enable).toBe(true);
     expect(merged.embedding.model).toBe("bge-large-en-v1.5"); // default preserved
-    expect(merged.embedding.apiKeyEnv).toBe("GEMINI_API_KEY"); // default preserved
   });
 
   it("merges upstash overrides", async () => {
