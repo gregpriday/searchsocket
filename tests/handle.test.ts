@@ -56,6 +56,7 @@ function makeEvent(options: {
   body?: object;
   headers?: Record<string, string>;
   contentLength?: number;
+  searchParams?: Record<string, string | string[]>;
 }) {
   const headers = new Headers(options.headers);
   if (options.contentLength !== undefined) {
@@ -65,8 +66,19 @@ function makeEvent(options: {
   const bodyStr = options.body ? JSON.stringify(options.body) : "";
   void bodyStr;
 
+  const sp = new URLSearchParams();
+  if (options.searchParams) {
+    for (const [k, v] of Object.entries(options.searchParams)) {
+      if (Array.isArray(v)) {
+        for (const val of v) sp.append(k, val);
+      } else {
+        sp.set(k, v);
+      }
+    }
+  }
+
   return {
-    url: { pathname: options.pathname },
+    url: { pathname: options.pathname, searchParams: sp },
     request: {
       method: options.method,
       headers,
@@ -184,7 +196,7 @@ describe("searchsocketHandle", () => {
     const resolve = vi.fn().mockResolvedValue(new Response("ok"));
 
     const response = await handle({
-      event: makeEvent({ pathname: "/api/search", method: "GET" }),
+      event: makeEvent({ pathname: "/api/search", method: "DELETE" }),
       resolve
     });
 
@@ -552,6 +564,360 @@ describe("searchsocketHandle", () => {
     // Both succeed because rate limiter is disabled on serverless
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
+  });
+});
+
+describe("GET /api/search", () => {
+  it("returns search results for valid GET requests", async () => {
+    const config = makeConfig({
+      api: {
+        path: "/api/search",
+        cors: { allowOrigins: ["https://app.example"] }
+      }
+    });
+
+    const search = vi.fn().mockResolvedValue({
+      q: "install",
+      scope: "main",
+      results: [{ url: "/docs/install", title: "Install", score: 0.9 }],
+      meta: { timingsMs: { search: 1, total: 2 } }
+    });
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search",
+      method: "GET",
+      searchParams: { q: "install" },
+      headers: { origin: "https://app.example" }
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://app.example");
+    const body = await response.json();
+    expect(body.q).toBe("install");
+    expect(search).toHaveBeenCalledWith(expect.objectContaining({ q: "install" }));
+  });
+
+  it("passes topK and tags query params to engine", async () => {
+    const config = makeConfig();
+    const search = vi.fn().mockResolvedValue({
+      q: "test",
+      scope: "main",
+      results: [],
+      meta: { timingsMs: { search: 0, total: 0 } }
+    });
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search",
+      method: "GET",
+      searchParams: { q: "test", topK: "5", tags: ["foo", "bar"] }
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(200);
+    expect(search).toHaveBeenCalledWith(
+      expect.objectContaining({ q: "test", topK: 5, tags: ["foo", "bar"] })
+    );
+  });
+
+  it("returns 400 when q param is missing", async () => {
+    const config = makeConfig();
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn()
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search",
+      method: "GET"
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "INVALID_REQUEST" }
+    });
+  });
+
+  it("returns 400 when q param is empty", async () => {
+    const config = makeConfig();
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search",
+      method: "GET",
+      searchParams: { q: "" }
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(400);
+  });
+
+  it("applies rate limiting to GET search", async () => {
+    const config = makeConfig({
+      api: {
+        path: "/api/search",
+        cors: { allowOrigins: [] },
+        rateLimit: { windowMs: 60_000, max: 1 }
+      }
+    });
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn().mockResolvedValue({
+        q: "ok",
+        scope: "main",
+        results: [],
+        meta: { timingsMs: { search: 0, total: 0 } }
+      })
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search",
+      method: "GET",
+      searchParams: { q: "test" }
+    });
+
+    const first = await handle({ event, resolve });
+    const second = await handle({ event, resolve });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+  });
+});
+
+describe("GET /api/search/health", () => {
+  it("returns health status", async () => {
+    const config = makeConfig();
+    const health = vi.fn().mockResolvedValue({ ok: true });
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      health
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search/health",
+      method: "GET"
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
+  it("returns unhealthy status with details", async () => {
+    const config = makeConfig();
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      health: vi.fn().mockResolvedValue({ ok: false, details: "store unreachable" })
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search/health",
+      method: "GET"
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: false, details: "store unreachable" });
+  });
+
+  it("returns 503 when engine is not configured", async () => {
+    const config = makeConfig();
+    vi.spyOn(SearchEngine, "create").mockRejectedValue(
+      new SearchSocketError("VECTOR_BACKEND_UNAVAILABLE", "Missing credentials", 500)
+    );
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search/health",
+      method: "GET"
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "SEARCH_NOT_CONFIGURED" }
+    });
+  });
+});
+
+describe("GET /api/search/pages/:path", () => {
+  it("returns page data for a valid path", async () => {
+    const config = makeConfig();
+    const getPage = vi.fn().mockResolvedValue({
+      url: "/docs/install",
+      frontmatter: { title: "Install" },
+      markdown: "# Install\n\nUse pnpm add searchsocket"
+    });
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      getPage
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search/pages/docs/install",
+      method: "GET"
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.url).toBe("/docs/install");
+    expect(body.markdown).toContain("# Install");
+    expect(getPage).toHaveBeenCalledWith("/docs/install", undefined);
+  });
+
+  it("returns 404 for missing pages", async () => {
+    const config = makeConfig();
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      getPage: vi.fn().mockRejectedValue(
+        new SearchSocketError("INVALID_REQUEST", "Indexed page not found for /missing", 404)
+      )
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search/pages/missing",
+      method: "GET"
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(404);
+  });
+
+  it("handles URL-encoded paths", async () => {
+    const config = makeConfig();
+    const getPage = vi.fn().mockResolvedValue({
+      url: "/docs/getting started",
+      frontmatter: {},
+      markdown: "# Getting Started"
+    });
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      getPage
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search/pages/docs/getting%20started",
+      method: "GET"
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(200);
+    expect(getPage).toHaveBeenCalledWith("/docs/getting started", undefined);
+  });
+
+  it("passes scope query param to getPage", async () => {
+    const config = makeConfig();
+    const getPage = vi.fn().mockResolvedValue({
+      url: "/docs/install",
+      frontmatter: {},
+      markdown: "# Install"
+    });
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      getPage
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search/pages/docs/install",
+      method: "GET",
+      searchParams: { scope: "v2" }
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(200);
+    expect(getPage).toHaveBeenCalledWith("/docs/install", "v2");
+  });
+});
+
+describe("REST API sub-route routing", () => {
+  it("returns 404 for unknown GET sub-routes", async () => {
+    const config = makeConfig();
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search/unknown",
+      method: "GET"
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(404);
+  });
+
+  it("returns 405 for POST to /health", async () => {
+    const config = makeConfig();
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search/health",
+      method: "POST",
+      body: {}
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(405);
+  });
+
+  it("returns 405 for PUT to /api/search", async () => {
+    const config = makeConfig();
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search",
+      method: "PUT",
+      body: {}
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(405);
+  });
+
+  it("handles OPTIONS preflight for sub-routes", async () => {
+    const config = makeConfig({
+      api: {
+        path: "/api/search",
+        cors: { allowOrigins: ["https://app.example"] }
+      }
+    });
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search/health",
+      method: "OPTIONS",
+      headers: { origin: "https://app.example" }
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-methods")).toContain("GET");
   });
 });
 
