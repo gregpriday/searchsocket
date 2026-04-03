@@ -13,6 +13,7 @@ function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): Upst
   search: ReturnType<typeof vi.fn>;
   searchPages: ReturnType<typeof vi.fn>;
   getPage: ReturnType<typeof vi.fn>;
+  listPages: ReturnType<typeof vi.fn>;
   _pages: Map<string, PageRecord>;
 } {
   const pages = new Map<string, PageRecord>();
@@ -30,6 +31,7 @@ function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): Upst
     getPage: vi.fn(async (url: string, scope: { projectId: string; scopeName: string }) => {
       return pages.get(`${scope.projectId}:${scope.scopeName}:${url}`) ?? null;
     }),
+    listPages: vi.fn(async () => ({ pages: [] })),
     deletePages: vi.fn(async () => undefined),
     dropAllIndexes: vi.fn(async () => undefined),
     _pages: pages
@@ -39,6 +41,7 @@ function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): Upst
     search: ReturnType<typeof vi.fn>;
     searchPages: ReturnType<typeof vi.fn>;
     getPage: ReturnType<typeof vi.fn>;
+    listPages: ReturnType<typeof vi.fn>;
     _pages: Map<string, PageRecord>;
   };
 }
@@ -617,5 +620,108 @@ describe("SearchEngine - dual search", () => {
     // /boosted blended: (1-0.3)*0.6 + 0.3*1.0 = 0.42 + 0.3 = 0.72 (plus ranking boosts)
     expect(result.results[0]!.url).toBe("/top");
     expect(result.results[1]!.url).toBe("/boosted");
+  });
+});
+
+describe("SearchEngine - listPages", () => {
+  it("returns empty pages when store has no pages", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    const store = createMockStore();
+
+    const engine = await SearchEngine.create({ cwd, config, store });
+    const result = await engine.listPages();
+
+    expect(result.pages).toEqual([]);
+    expect(result.nextCursor).toBeUndefined();
+  });
+
+  it("returns structured page objects from store", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    const store = createMockStore();
+
+    const mockPages = [
+      { url: "/docs", title: "Docs", description: "Documentation", routeFile: "src/routes/docs/+page.svelte" },
+      { url: "/about", title: "About", description: "About us", routeFile: "src/routes/about/+page.svelte" }
+    ];
+    store.listPages.mockResolvedValueOnce({ pages: mockPages, nextCursor: "abc123" });
+
+    const engine = await SearchEngine.create({ cwd, config, store });
+    const result = await engine.listPages();
+
+    expect(result.pages).toEqual(mockPages);
+    expect(result.nextCursor).toBe("abc123");
+  });
+
+  it("passes pathPrefix, cursor, and limit through to store", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    const store = createMockStore();
+
+    const engine = await SearchEngine.create({ cwd, config, store });
+    await engine.listPages({ pathPrefix: "/docs", cursor: "xyz", limit: 25 });
+
+    expect(store.listPages).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: config.project.id, scopeName: "main" }),
+      { cursor: "xyz", limit: 25, pathPrefix: "/docs" }
+    );
+  });
+
+  it("resolves scope parameter via resolveScope", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    const store = createMockStore();
+
+    const engine = await SearchEngine.create({ cwd, config, store });
+    await engine.listPages({ scope: "staging" });
+
+    expect(store.listPages).toHaveBeenCalledWith(
+      expect.objectContaining({ scopeName: "staging" }),
+      expect.any(Object)
+    );
+  });
+
+  it("omits nextCursor when store signals end of pagination", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    const store = createMockStore();
+    store.listPages.mockResolvedValueOnce({
+      pages: [{ url: "/", title: "Home", description: "", routeFile: "" }]
+    });
+
+    const engine = await SearchEngine.create({ cwd, config, store });
+    const result = await engine.listPages();
+
+    expect(result.pages).toHaveLength(1);
+    expect("nextCursor" in result).toBe(false);
+  });
+
+  it("normalizes pathPrefix by prepending / if missing", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    const store = createMockStore();
+
+    const engine = await SearchEngine.create({ cwd, config, store });
+    await engine.listPages({ pathPrefix: "docs" });
+
+    expect(store.listPages).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ pathPrefix: "/docs" })
+    );
+  });
+
+  it("defaults cursor and limit when not provided", async () => {
+    const cwd = await makeTempCwd();
+    const config = createDefaultConfig("searchsocket-engine-test");
+    const store = createMockStore();
+
+    const engine = await SearchEngine.create({ cwd, config, store });
+    await engine.listPages();
+
+    expect(store.listPages).toHaveBeenCalledWith(
+      expect.any(Object),
+      { cursor: undefined, limit: undefined, pathPrefix: undefined }
+    );
   });
 });

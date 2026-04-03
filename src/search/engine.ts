@@ -249,6 +249,26 @@ export class SearchEngine {
     };
   }
 
+  async listPages(opts?: {
+    pathPrefix?: string;
+    cursor?: string;
+    limit?: number;
+    scope?: string;
+  }): Promise<{
+    pages: Array<{ url: string; title: string; description: string; routeFile: string }>;
+    nextCursor?: string;
+  }> {
+    const resolvedScope = resolveScope(this.config, opts?.scope);
+    const pathPrefix = opts?.pathPrefix
+      ? (opts.pathPrefix.startsWith("/") ? opts.pathPrefix : `/${opts.pathPrefix}`)
+      : undefined;
+    return this.store.listPages(resolvedScope, {
+      cursor: opts?.cursor,
+      limit: opts?.limit,
+      pathPrefix
+    });
+  }
+
   async health(): Promise<{ ok: boolean; details?: string }> {
     return this.store.health();
   }

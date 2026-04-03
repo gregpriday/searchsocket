@@ -80,6 +80,37 @@ function createServer(engine: SearchEngine): McpServer {
     }
   );
 
+  server.registerTool(
+    "list_pages",
+    {
+      description:
+        "List indexed pages with optional path prefix filtering and cursor-based pagination. Returns url, title, description, and routeFile for each page. Use nextCursor to fetch subsequent pages.",
+      inputSchema: {
+        pathPrefix: z.string().optional(),
+        cursor: z.string().optional(),
+        limit: z.number().int().positive().max(200).optional(),
+        scope: z.string().optional()
+      }
+    },
+    async (input) => {
+      const result = await engine.listPages({
+        pathPrefix: input.pathPrefix,
+        cursor: input.cursor,
+        limit: input.limit,
+        scope: input.scope
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }
+        ]
+      };
+    }
+  );
+
   return server;
 }
 

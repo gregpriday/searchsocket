@@ -287,6 +287,48 @@ export class UpstashSearchStore {
     return map;
   }
 
+  async listPages(
+    scope: Scope,
+    opts?: { cursor?: string; limit?: number; pathPrefix?: string }
+  ): Promise<{
+    pages: Array<{ url: string; title: string; description: string; routeFile: string }>;
+    nextCursor?: string;
+  }> {
+    const index = this.pageIndex(scope);
+    const cursor = opts?.cursor ?? "0";
+    const limit = opts?.limit ?? 50;
+
+    try {
+      const rangeOpts: { cursor: string; limit: number; prefix?: string } = { cursor, limit };
+      if (opts?.pathPrefix) {
+        rangeOpts.prefix = opts.pathPrefix;
+      }
+
+      const result = await index.range(rangeOpts);
+
+      const pages = result.documents.map((doc) => ({
+        url: (doc.content.url as string) ?? "",
+        title: (doc.content.title as string) ?? "",
+        description: (doc.content.description as string) ?? "",
+        routeFile: (doc.metadata?.routeFile as string) ?? ""
+      }));
+
+      const response: {
+        pages: Array<{ url: string; title: string; description: string; routeFile: string }>;
+        nextCursor?: string;
+      } = { pages };
+
+      if (result.nextCursor && result.nextCursor !== "0") {
+        response.nextCursor = result.nextCursor;
+      }
+
+      return response;
+    } catch {
+      // Page index may not exist yet
+      return { pages: [] };
+    }
+  }
+
   async upsertPages(pages: PageRecord[], scope: Scope): Promise<void> {
     if (pages.length === 0) return;
 
