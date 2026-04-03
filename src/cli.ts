@@ -19,6 +19,7 @@ import { sanitizeScopeName } from "./utils/text";
 import type { IndexStats, ResolvedSearchSocketConfig, Scope, ScopeInfo } from "./types";
 import type { UpstashSearchStore } from "./vector/upstash";
 import { ensureMcpJson } from "./init-helpers";
+import { readAnalyticsLog, computeReport } from "./analytics/report";
 
 interface RootCommandOptions {
   cwd?: string;
@@ -112,7 +113,8 @@ function ensureGitignore(cwd: string): void {
   const gitignorePath = path.join(cwd, ".gitignore");
   const entries = [
     ".searchsocket/manifest.json",
-    ".searchsocket/registry.json"
+    ".searchsocket/registry.json",
+    ".searchsocket/analytics.jsonl"
   ];
 
   let content = "";
@@ -794,6 +796,64 @@ program
     });
 
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  });
+
+program
+  .command("report")
+  .description("Show search analytics report")
+  .option("--json", "emit report as JSON", false)
+  .action(async (opts, command) => {
+    const rootOpts = getRootOptions(command);
+    const cwd = path.resolve(rootOpts?.cwd ?? process.cwd());
+
+    const config = await loadConfig({ cwd, configPath: rootOpts?.config, allowMissing: true });
+    const logPath = path.join(cwd, config.state.dir, "analytics.jsonl");
+
+    if (!fs.existsSync(logPath)) {
+      process.stdout.write("No analytics data found. Enable analytics in your config and run some searches first.\n");
+      return;
+    }
+
+    const entries = [];
+    for await (const entry of readAnalyticsLog(logPath)) {
+      entries.push(entry);
+    }
+
+    if (entries.length === 0) {
+      process.stdout.write("Analytics log is empty.\n");
+      return;
+    }
+
+    const report = computeReport(entries);
+
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+      return;
+    }
+
+    process.stdout.write("TOP QUERIES\n");
+    for (let i = 0; i < report.topQueries.length; i++) {
+      const { q, count } = report.topQueries[i]!;
+      process.stdout.write(`  ${i + 1}. "${q}" — ${count} searches\n`);
+    }
+
+    process.stdout.write("\nZERO-RESULT QUERIES\n");
+    if (report.zeroResultQueries.length === 0) {
+      process.stdout.write("  (none)\n");
+    } else {
+      for (let i = 0; i < report.zeroResultQueries.length; i++) {
+        const { q, count } = report.zeroResultQueries[i]!;
+        process.stdout.write(`  ${i + 1}. "${q}" — ${count} searches\n`);
+      }
+    }
+
+    process.stdout.write("\nDAILY VOLUME\n");
+    for (const { date, count } of report.dailyVolume) {
+      process.stdout.write(`  ${date}  ${count} searches\n`);
+    }
+
+    process.stdout.write("\nLATENCY (ms)\n");
+    process.stdout.write(`  p50: ${report.latency.p50}   p95: ${report.latency.p95}   p99: ${report.latency.p99}   (from ${report.latency.count} events)\n`);
   });
 
 async function main(): Promise<void> {
