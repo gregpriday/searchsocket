@@ -44,7 +44,6 @@ interface PageVectorMetadata {
   keywords: string[];
   summary: string;
   tags: string[];
-  markdown: string;
   routeFile: string;
   routeResolution: string;
   incomingLinks: number;
@@ -55,6 +54,38 @@ interface PageVectorMetadata {
   contentHash: string;
   publishedAt?: number | null;
   [key: string]: unknown;
+}
+
+/**
+ * Reassemble page markdown from ordered chunks.
+ * Strips the title prefix added by buildEmbeddingText() from each chunk.
+ */
+function reconstructMarkdownFromChunks(
+  chunks: Array<{ chunkText: string; ordinal: number; sectionTitle: string; headingPath: string[] }>,
+  pageTitle: string
+): string {
+  if (chunks.length === 0) return "";
+
+  const parts: string[] = [];
+
+  for (const chunk of chunks) {
+    let text = chunk.chunkText;
+
+    // Strip the prepended title prefix added by buildEmbeddingText().
+    // Format is: "{pageTitle} — {sectionTitle}\n\n{content}" or "{pageTitle}\n\n{content}"
+    const prefixWithSection = `${pageTitle} — ${chunk.sectionTitle}\n\n`;
+    const prefixWithoutSection = `${pageTitle}\n\n`;
+
+    if (chunk.sectionTitle && text.startsWith(prefixWithSection)) {
+      text = text.slice(prefixWithSection.length);
+    } else if (text.startsWith(prefixWithoutSection)) {
+      text = text.slice(prefixWithoutSection.length);
+    }
+
+    parts.push(text.trim());
+  }
+
+  return parts.join("\n\n");
 }
 
 export interface UpstashSearchStoreOptions {
@@ -589,10 +620,14 @@ export class UpstashSearchStore {
       const doc = results[0];
       if (!doc || !doc.metadata) return null;
 
+      // Reconstruct markdown from chunks
+      const chunks = await this.getChunksForPage(url, scope);
+      const markdown = reconstructMarkdownFromChunks(chunks, doc.metadata.title);
+
       return {
         url: doc.metadata.url,
         title: doc.metadata.title,
-        markdown: doc.metadata.markdown,
+        markdown,
         projectId: doc.metadata.projectId,
         scopeName: doc.metadata.scopeName,
         routeFile: doc.metadata.routeFile,
@@ -611,6 +646,52 @@ export class UpstashSearchStore {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Fetch all chunks belonging to a specific page URL, sorted by ordinal.
+   * Used to reconstruct full page markdown from chunk content.
+   */
+  async getChunksForPage(
+    url: string,
+    scope: Scope
+  ): Promise<Array<{ chunkText: string; ordinal: number; sectionTitle: string; headingPath: string[] }>> {
+    const chunks: Array<{ chunkText: string; ordinal: number; sectionTitle: string; headingPath: string[] }> = [];
+    let cursor = "0";
+
+    try {
+      for (;;) {
+        const result = await this.chunksNs.range<ChunkVectorMetadata>({
+          cursor,
+          limit: 100,
+          includeMetadata: true
+        });
+
+        for (const doc of result.vectors) {
+          if (
+            doc.metadata?.projectId === scope.projectId &&
+            doc.metadata?.scopeName === scope.scopeName &&
+            doc.metadata?.url === url
+          ) {
+            chunks.push({
+              chunkText: doc.metadata.chunkText ?? "",
+              ordinal: doc.metadata.ordinal ?? 0,
+              sectionTitle: doc.metadata.sectionTitle ?? "",
+              headingPath: doc.metadata.headingPath
+                ? String(doc.metadata.headingPath).split(" > ").filter(Boolean)
+                : []
+            });
+          }
+        }
+
+        if (!result.nextCursor || result.nextCursor === "0") break;
+        cursor = result.nextCursor;
+      }
+    } catch {
+      // Namespace may not exist yet
+    }
+
+    return chunks.sort((a, b) => a.ordinal - b.ordinal);
   }
 
   async fetchPageWithVector(

@@ -533,7 +533,6 @@ export class IndexPipeline {
             keywords: r.keywords ?? [],
             summary: r.summary ?? "",
             tags: r.tags,
-            markdown: r.markdown,
             routeFile: r.routeFile,
             routeResolution: r.routeResolution,
             incomingLinks: r.incomingLinks,
@@ -560,7 +559,6 @@ export class IndexPipeline {
               keywords: r.keywords ?? [],
               summary: r.summary ?? "",
               tags: r.tags,
-              markdown: r.markdown,
               routeFile: r.routeFile,
               routeResolution: r.routeResolution,
               incomingLinks: r.incomingLinks,
@@ -674,6 +672,8 @@ export class IndexPipeline {
     if (!options.dryRun && changedChunks.length > 0) {
       this.logger.info(`Upserting ${changedChunks.length} chunk${changedChunks.length === 1 ? "" : "s"} to Upstash Vector...`);
 
+      const CHUNK_TEXT_MAX_CHARS = 30_000;
+
       const docs = changedChunks.map((chunk) => {
         const embeddingText = buildEmbeddingText(chunk, this.config.chunking.prependTitle);
         if (embeddingText.length > 2000) {
@@ -681,6 +681,12 @@ export class IndexPipeline {
             `Chunk ${chunk.chunkKey} text is ${embeddingText.length} chars (~${Math.round(embeddingText.length / 4)} tokens), which may exceed the 512-token model limit and be silently truncated.`
           );
         }
+
+        // Hard cap chunkText to stay within Upstash's 48KB metadata limit
+        const cappedText = embeddingText.length > CHUNK_TEXT_MAX_CHARS
+          ? embeddingText.slice(0, CHUNK_TEXT_MAX_CHARS)
+          : embeddingText;
+
         return {
         id: chunk.chunkKey,
         data: embeddingText,
@@ -691,7 +697,7 @@ export class IndexPipeline {
           sectionTitle: chunk.sectionTitle ?? "",
           headingPath: chunk.headingPath.join(" > "),
           snippet: chunk.snippet,
-          chunkText: embeddingText,
+          chunkText: cappedText,
           tags: chunk.tags,
           ordinal: chunk.ordinal,
           contentHash: chunk.contentHash,
