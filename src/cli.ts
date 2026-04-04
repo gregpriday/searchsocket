@@ -220,11 +220,20 @@ async function runIndexCommand(opts: {
     json: opts.json
   });
 
-  const pipeline = await IndexPipeline.create({
-    cwd: opts.cwd,
-    configPath: opts.configPath,
-    logger
-  });
+  let pipeline: IndexPipeline;
+  try {
+    pipeline = await IndexPipeline.create({
+      cwd: opts.cwd,
+      configPath: opts.configPath,
+      logger
+    });
+  } catch (error) {
+    if (error instanceof SearchSocketError && error.code === "VECTOR_BACKEND_UNAVAILABLE") {
+      logger.warn("Search backend not configured — skipping indexing. Set UPSTASH_VECTOR_REST_URL and UPSTASH_VECTOR_REST_TOKEN to enable.");
+      return;
+    }
+    throw error;
+  }
 
   const stats = await pipeline.run({
     scopeOverride: opts.scope,
