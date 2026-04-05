@@ -258,6 +258,57 @@ describe("search tool", () => {
     expect(result.content[0]!.text).toContain("No results found");
     expect(result.content[0]!.text).toContain("nonexistent");
   });
+
+  it("forwards all parameters to engine.search", async () => {
+    const mockResult = { q: "auth", scope: "main", results: [{ url: "/a", title: "A", snippet: "...", score: 0.9, routeFile: "" }], meta: { timingsMs: { search: 5, total: 8 } } };
+    const mockEngine = { search: vi.fn().mockResolvedValue(mockResult) };
+    const handler = getSearchHandler(mockEngine);
+
+    await handler({
+      query: "auth",
+      topK: 5,
+      pathPrefix: "/docs",
+      tags: ["security"],
+      filters: { version: 2 },
+      groupBy: "chunk",
+      scope: "my-scope"
+    });
+
+    expect(mockEngine.search).toHaveBeenCalledWith({
+      q: "auth",
+      topK: 5,
+      pathPrefix: "/docs",
+      tags: ["security"],
+      filters: { version: 2 },
+      groupBy: "chunk",
+      scope: "my-scope"
+    });
+  });
+
+  it("forwards only query when optional params omitted", async () => {
+    const mockResult = { q: "test", scope: "main", results: [{ url: "/a", title: "A", snippet: "...", score: 0.9, routeFile: "" }], meta: { timingsMs: { search: 5, total: 8 } } };
+    const mockEngine = { search: vi.fn().mockResolvedValue(mockResult) };
+    const handler = getSearchHandler(mockEngine);
+
+    await handler({ query: "test" });
+
+    expect(mockEngine.search).toHaveBeenCalledWith({
+      q: "test",
+      topK: undefined,
+      pathPrefix: undefined,
+      tags: undefined,
+      filters: undefined,
+      groupBy: undefined,
+      scope: undefined
+    });
+  });
+
+  it("propagates engine.search errors", async () => {
+    const mockEngine = { search: vi.fn().mockRejectedValue(new Error("Upstash unreachable")) };
+    const handler = getSearchHandler(mockEngine);
+
+    await expect(handler({ query: "fail" })).rejects.toThrow("Upstash unreachable");
+  });
 });
 
 describe("get_page tool", () => {
@@ -315,6 +366,116 @@ describe("get_page tool", () => {
     await handler({ path: "/docs", scope: "my-scope" });
 
     expect(mockEngine.getPage).toHaveBeenCalledWith("/docs", "my-scope");
+  });
+
+  it("returns fallback message when page not found and no suggestions", async () => {
+    const mockEngine = {
+      search: vi.fn().mockResolvedValue({ results: [] }),
+      getPage: vi.fn().mockRejectedValue(new Error("Not found"))
+    };
+
+    const handler = getHandler(mockEngine);
+    const result = await handler({ path: "/nonexistent" });
+
+    expect(result.content[0]!.text).toContain("not found");
+    expect(result.content[0]!.text).toContain("Use search");
+  });
+
+  it("passes scope to fallback search when page not found", async () => {
+    const mockEngine = {
+      search: vi.fn().mockResolvedValue({ results: [{ url: "/docs/auth" }] }),
+      getPage: vi.fn().mockRejectedValue(new Error("Not found"))
+    };
+
+    const handler = getHandler(mockEngine);
+    await handler({ path: "/docs/missing", scope: "my-scope" });
+
+    expect(mockEngine.search).toHaveBeenCalledWith({
+      q: "/docs/missing",
+      topK: 3,
+      scope: "my-scope"
+    });
+  });
+
+  it("description mentions search-first workflow", () => {
+    const mockEngine = { search: vi.fn(), getPage: vi.fn() };
+    const server = createServer(mockEngine as never);
+    const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
+    const call = calls.find((c: unknown[]) => c[0] === "get_page");
+    const config = call![1] as { description: string };
+    expect(config.description).toContain("Do NOT use this for discovery");
+    expect(config.description).toContain("search");
+  });
+});
+
+describe("get_related_pages tool", () => {
+  function getHandler(mockEngine: Record<string, unknown>) {
+    const server = createServer(mockEngine as never);
+    const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
+    const call = calls.find((c: unknown[]) => c[0] === "get_related_pages");
+    expect(call).toBeDefined();
+    return call![2] as (input: Record<string, unknown>) => Promise<{
+      content: Array<{ type: string; text: string }>;
+    }>;
+  }
+
+  it("returns related pages from engine", async () => {
+    const mockResult = {
+      sourceUrl: "/docs/auth",
+      scope: "main",
+      relatedPages: [
+        { url: "/docs/api", title: "API", score: 0.87, relationshipType: "outgoing_link", routeFile: "src/routes/docs/api/+page.svelte" },
+        { url: "/docs/security", title: "Security", score: 0.73, relationshipType: "semantic", routeFile: "src/routes/docs/security/+page.svelte" }
+      ]
+    };
+    const mockEngine = {
+      search: vi.fn(),
+      getRelatedPages: vi.fn().mockResolvedValue(mockResult)
+    };
+
+    const handler = getHandler(mockEngine);
+    const result = await handler({ path: "/docs/auth" });
+    const parsed = JSON.parse(result.content[0]!.text);
+
+    expect(parsed).toEqual(mockResult);
+    expect(mockEngine.getRelatedPages).toHaveBeenCalledWith("/docs/auth", {
+      topK: undefined,
+      scope: undefined
+    });
+  });
+
+  it("forwards topK and scope to engine", async () => {
+    const mockEngine = {
+      search: vi.fn(),
+      getRelatedPages: vi.fn().mockResolvedValue({ sourceUrl: "/a", scope: "s", relatedPages: [] })
+    };
+
+    const handler = getHandler(mockEngine);
+    await handler({ path: "/docs/auth", topK: 5, scope: "my-scope" });
+
+    expect(mockEngine.getRelatedPages).toHaveBeenCalledWith("/docs/auth", {
+      topK: 5,
+      scope: "my-scope"
+    });
+  });
+
+  it("propagates engine errors", async () => {
+    const mockEngine = {
+      search: vi.fn(),
+      getRelatedPages: vi.fn().mockRejectedValue(new Error("Page not found in index"))
+    };
+
+    const handler = getHandler(mockEngine);
+    await expect(handler({ path: "/nonexistent" })).rejects.toThrow("Page not found in index");
+  });
+
+  it("description contains negative constraint", () => {
+    const mockEngine = { search: vi.fn(), getRelatedPages: vi.fn() };
+    const server = createServer(mockEngine as never);
+    const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
+    const call = calls.find((c: unknown[]) => c[0] === "get_related_pages");
+    const config = call![1] as { description: string };
+    expect(config.description).toContain("Do NOT use this for general search");
   });
 });
 
