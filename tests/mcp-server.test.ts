@@ -172,102 +172,32 @@ describe("runMcpServer", () => {
   });
 });
 
-describe("get_site_structure tool", () => {
-  function getHandler(mockEngine: Record<string, unknown>) {
+describe("tool registration", () => {
+  it("registers exactly 3 tools", () => {
+    const mockEngine = { search: vi.fn(), getPage: vi.fn(), getRelatedPages: vi.fn() };
     const server = createServer(mockEngine as never);
     const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
-    const call = calls.find((c: unknown[]) => c[0] === "get_site_structure");
-    expect(call).toBeDefined();
-    return call![2] as (input: Record<string, unknown>) => Promise<{
-      content: Array<{ type: string; text: string }>;
-    }>;
-  }
+    expect(calls.length).toBe(3);
+  });
 
-  it("registers the get_site_structure tool", () => {
-    const mockEngine = { search: vi.fn(), getSiteStructure: vi.fn() };
+  it("registers search, get_page, and get_related_pages", () => {
+    const mockEngine = { search: vi.fn(), getPage: vi.fn(), getRelatedPages: vi.fn() };
     const server = createServer(mockEngine as never);
     const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
     const toolNames = calls.map((c: unknown[]) => c[0]);
-    expect(toolNames).toContain("get_site_structure");
+    expect(toolNames).toContain("search");
+    expect(toolNames).toContain("get_page");
+    expect(toolNames).toContain("get_related_pages");
   });
 
-  it("registers exactly 6 tools", () => {
-    const mockEngine = { search: vi.fn(), getSiteStructure: vi.fn(), getRelatedPages: vi.fn() };
+  it("does not register removed tools", () => {
+    const mockEngine = { search: vi.fn(), getPage: vi.fn(), getRelatedPages: vi.fn() };
     const server = createServer(mockEngine as never);
     const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
-    expect(calls.length).toBe(6);
-  });
-
-  it("returns site structure JSON from engine", async () => {
-    const mockResult = {
-      root: {
-        url: "/",
-        title: "Home",
-        depth: 0,
-        routeFile: "",
-        isIndexed: true,
-        childCount: 1,
-        children: [
-          {
-            url: "/docs",
-            title: "Docs",
-            depth: 1,
-            routeFile: "",
-            isIndexed: true,
-            childCount: 0,
-            children: []
-          }
-        ]
-      },
-      totalPages: 2,
-      truncated: false
-    };
-
-    const mockEngine = {
-      search: vi.fn(),
-      getSiteStructure: vi.fn().mockResolvedValue(mockResult)
-    };
-
-    const handler = getHandler(mockEngine);
-    const result = await handler({});
-    const parsed = JSON.parse(result.content[0]!.text);
-
-    expect(parsed).toEqual(mockResult);
-    expect(mockEngine.getSiteStructure).toHaveBeenCalledWith({
-      pathPrefix: undefined,
-      scope: undefined,
-      maxPages: undefined
-    });
-  });
-
-  it("passes pathPrefix, scope, and maxPages to engine", async () => {
-    const mockEngine = {
-      search: vi.fn(),
-      getSiteStructure: vi.fn().mockResolvedValue({
-        root: { url: "/docs", title: "", depth: 1, routeFile: "", isIndexed: false, childCount: 0, children: [] },
-        totalPages: 0,
-        truncated: false
-      })
-    };
-
-    const handler = getHandler(mockEngine);
-    await handler({ pathPrefix: "/docs", scope: "my-scope", maxPages: 500 });
-
-    expect(mockEngine.getSiteStructure).toHaveBeenCalledWith({
-      pathPrefix: "/docs",
-      scope: "my-scope",
-      maxPages: 500
-    });
-  });
-
-  it("propagates engine errors", async () => {
-    const mockEngine = {
-      search: vi.fn(),
-      getSiteStructure: vi.fn().mockRejectedValue(new Error("Store unavailable"))
-    };
-
-    const handler = getHandler(mockEngine);
-    await expect(handler({})).rejects.toThrow("Store unavailable");
+    const toolNames = calls.map((c: unknown[]) => c[0]);
+    expect(toolNames).not.toContain("find_source_file");
+    expect(toolNames).not.toContain("list_pages");
+    expect(toolNames).not.toContain("get_site_structure");
   });
 });
 
@@ -286,41 +216,22 @@ describe("search tool", () => {
     }>;
   }
 
-  it("description mentions chunks and headingPath", () => {
+  it("description mentions routeFile for editing and get_page for deep-dives", () => {
     const mockEngine = { search: vi.fn() };
     const call = getSearchCall(mockEngine);
     const config = call[1] as { description: string };
-    expect(config.description).toContain("chunks");
-    expect(config.description).toContain("headingPath");
+    expect(config.description).toContain("routeFile");
+    expect(config.description).toContain("get_page");
   });
 
-  it("inputSchema includes maxSubResults", () => {
+  it("description mentions chunk grouping", () => {
     const mockEngine = { search: vi.fn() };
     const call = getSearchCall(mockEngine);
-    const config = call[1] as { inputSchema: Record<string, unknown> };
-    expect(config.inputSchema).toHaveProperty("maxSubResults");
+    const config = call[1] as { description: string };
+    expect(config.description).toContain("chunk");
   });
 
-  it("outputSchema is defined", () => {
-    const mockEngine = { search: vi.fn() };
-    const call = getSearchCall(mockEngine);
-    const config = call[1] as { outputSchema: unknown };
-    expect(config.outputSchema).toBeDefined();
-  });
-
-  it("forwards maxSubResults to engine.search", async () => {
-    const mockResult = { q: "test", scope: "main", results: [], meta: { timingsMs: { search: 10, total: 15 } } };
-    const mockEngine = { search: vi.fn().mockResolvedValue(mockResult) };
-    const handler = getSearchHandler(mockEngine);
-
-    await handler({ query: "test", maxSubResults: 3 });
-
-    expect(mockEngine.search).toHaveBeenCalledWith(
-      expect.objectContaining({ maxSubResults: 3 })
-    );
-  });
-
-  it("returns both content and structuredContent", async () => {
+  it("returns search results as JSON content", async () => {
     const mockResult = {
       q: "test",
       scope: "main",
@@ -335,143 +246,75 @@ describe("search tool", () => {
     expect(result.content).toBeDefined();
     expect(result.content[0]!.type).toBe("text");
     expect(JSON.parse(result.content[0]!.text)).toEqual(mockResult);
-    expect(result.structuredContent).toEqual(mockResult);
+  });
+
+  it("returns helpful message when no results found", async () => {
+    const mockResult = { q: "nonexistent", scope: "main", results: [], meta: { timingsMs: { search: 5, total: 8 } } };
+    const mockEngine = { search: vi.fn().mockResolvedValue(mockResult) };
+    const handler = getSearchHandler(mockEngine);
+
+    const result = await handler({ query: "nonexistent" });
+
+    expect(result.content[0]!.text).toContain("No results found");
+    expect(result.content[0]!.text).toContain("nonexistent");
   });
 });
 
-describe("find_source_file tool", () => {
+describe("get_page tool", () => {
   function getHandler(mockEngine: Record<string, unknown>) {
     const server = createServer(mockEngine as never);
     const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
-    const call = calls.find((c: unknown[]) => c[0] === "find_source_file");
+    const call = calls.find((c: unknown[]) => c[0] === "get_page");
     expect(call).toBeDefined();
     return call![2] as (input: Record<string, unknown>) => Promise<{
       content: Array<{ type: string; text: string }>;
     }>;
   }
 
-  it("registers the find_source_file tool", () => {
-    const mockEngine = { search: vi.fn() };
-    const server = createServer(mockEngine as never);
-    const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
-    const toolNames = calls.map((c: unknown[]) => c[0]);
-    expect(toolNames).toContain("find_source_file");
-  });
-
-  it("returns url, routeFile, sectionTitle, and snippet for a match", async () => {
+  it("returns page content from engine", async () => {
+    const mockPage = {
+      url: "/docs/auth",
+      frontmatter: { title: "Auth", routeFile: "src/routes/docs/auth/+page.svelte" },
+      markdown: "# Auth\n\nContent here."
+    };
     const mockEngine = {
-      search: vi.fn().mockResolvedValue({
-        results: [
-          {
-            url: "/about",
-            title: "About Us",
-            sectionTitle: "Our Mission",
-            snippet: "We build great things.",
-            score: 0.95,
-            routeFile: "src/routes/about/+page.svelte",
-            chunks: [{ text: "chunk1" }]
-          }
-        ]
-      })
+      search: vi.fn(),
+      getPage: vi.fn().mockResolvedValue(mockPage)
     };
 
     const handler = getHandler(mockEngine);
-    const result = await handler({ query: "about us" });
+    const result = await handler({ path: "/docs/auth" });
     const parsed = JSON.parse(result.content[0]!.text);
 
-    expect(parsed).toEqual({
-      url: "/about",
-      routeFile: "src/routes/about/+page.svelte",
-      sectionTitle: "Our Mission",
-      snippet: "We build great things."
-    });
-    expect(parsed).not.toHaveProperty("score");
-    expect(parsed).not.toHaveProperty("title");
-    expect(parsed).not.toHaveProperty("chunks");
-    expect(mockEngine.search).toHaveBeenCalledWith({
-      q: "about us",
-      topK: 1,
-      scope: undefined
-    });
+    expect(parsed).toEqual(mockPage);
+    expect(mockEngine.getPage).toHaveBeenCalledWith("/docs/auth", undefined);
   });
 
-  it("returns error message when no results found", async () => {
-    const mockEngine = {
-      search: vi.fn().mockResolvedValue({ results: [] })
-    };
-
-    const handler = getHandler(mockEngine);
-    const result = await handler({ query: "nonexistent" });
-    const parsed = JSON.parse(result.content[0]!.text);
-
-    expect(parsed).toEqual({
-      error: "No matching content found for the given query."
-    });
-  });
-
-  it("omits sectionTitle when undefined", async () => {
+  it("returns suggestions when page not found", async () => {
     const mockEngine = {
       search: vi.fn().mockResolvedValue({
-        results: [
-          {
-            url: "/home",
-            title: "Home",
-            sectionTitle: undefined,
-            snippet: "Welcome.",
-            score: 0.8,
-            routeFile: "src/routes/+page.svelte"
-          }
-        ]
-      })
+        results: [{ url: "/docs/authentication" }, { url: "/docs/api" }]
+      }),
+      getPage: vi.fn().mockRejectedValue(new Error("Not found"))
     };
 
     const handler = getHandler(mockEngine);
-    const result = await handler({ query: "home" });
-    const parsed = JSON.parse(result.content[0]!.text);
+    const result = await handler({ path: "/docs/auth" });
 
-    expect(parsed).toEqual({
-      url: "/home",
-      routeFile: "src/routes/+page.svelte",
-      snippet: "Welcome."
-    });
-    expect(parsed).not.toHaveProperty("sectionTitle");
+    expect(result.content[0]!.text).toContain("not found");
+    expect(result.content[0]!.text).toContain("/docs/authentication");
   });
 
-  it("passes scope to engine.search when provided", async () => {
+  it("passes scope to engine.getPage", async () => {
     const mockEngine = {
-      search: vi.fn().mockResolvedValue({
-        results: [
-          {
-            url: "/docs",
-            title: "Docs",
-            sectionTitle: "Intro",
-            snippet: "Documentation.",
-            score: 0.9,
-            routeFile: "src/routes/docs/+page.svelte"
-          }
-        ]
-      })
+      search: vi.fn(),
+      getPage: vi.fn().mockResolvedValue({ url: "/docs", frontmatter: {}, markdown: "" })
     };
 
     const handler = getHandler(mockEngine);
-    await handler({ query: "docs", scope: "my-scope" });
+    await handler({ path: "/docs", scope: "my-scope" });
 
-    expect(mockEngine.search).toHaveBeenCalledWith({
-      q: "docs",
-      topK: 1,
-      scope: "my-scope"
-    });
-  });
-
-  it("propagates engine.search errors", async () => {
-    const mockEngine = {
-      search: vi.fn().mockRejectedValue(new Error("Upstash unreachable"))
-    };
-
-    const handler = getHandler(mockEngine);
-    await expect(handler({ query: "fail" })).rejects.toThrow(
-      "Upstash unreachable"
-    );
+    expect(mockEngine.getPage).toHaveBeenCalledWith("/docs", "my-scope");
   });
 });
 

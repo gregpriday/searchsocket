@@ -22,47 +22,25 @@ export interface McpServerOptions {
 export function createServer(engine: SearchEngine): McpServer {
   const server = new McpServer({
     name: "searchsocket-mcp",
-    version: "0.1.0"
+    version: "0.2.0"
   });
 
+  // ---------------------------------------------------------------------------
+  // Tool 1: search — Core discovery tool for both RAG and local file editing
+  // ---------------------------------------------------------------------------
   server.registerTool(
     "search",
     {
       description:
-        "Semantic site search powered by Upstash Search. Returns url, title, snippet, chunkText, score, and routeFile per result. chunkText contains the full raw chunk markdown. When groupBy is 'page' (default), each result includes a chunks array with section-level sub-results containing sectionTitle, headingPath, snippet, and score. Supports optional filters for structured metadata (e.g. {\"version\": 2, \"deprecated\": false}).",
+        "Searches indexed site content using semantic similarity. Returns ranked results with url, title, snippet, chunkText (full section markdown), score, and routeFile (source file path for editing). Each result includes the best-matching section; set groupBy to 'page' (default) for additional chunk sub-results per page. Use routeFile to locate the source file when editing content. If snippets lack detail, call get_page with the result URL to retrieve the full page markdown.",
       inputSchema: {
-        query: z.string().min(1),
-        scope: z.string().optional(),
-        topK: z.number().int().positive().max(100).optional(),
-        pathPrefix: z.string().optional(),
-        tags: z.array(z.string()).optional(),
-        filters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
-        groupBy: z.enum(["page", "chunk"]).optional(),
-        maxSubResults: z.number().int().positive().max(20).optional()
-      },
-      outputSchema: {
-        q: z.string(),
-        scope: z.string(),
-        results: z.array(z.object({
-          url: z.string(),
-          title: z.string(),
-          sectionTitle: z.string().optional(),
-          snippet: z.string(),
-          score: z.number(),
-          routeFile: z.string(),
-          chunks: z.array(z.object({
-            sectionTitle: z.string().optional(),
-            snippet: z.string(),
-            headingPath: z.array(z.string()),
-            score: z.number()
-          })).optional()
-        })),
-        meta: z.object({
-          timingsMs: z.object({
-            search: z.number(),
-            total: z.number()
-          })
-        })
+        query: z.string().min(1).describe("Search query. Use keywords or natural language, not full sentences."),
+        topK: z.number().int().positive().max(100).optional().describe("Number of results to return (default: 10, max: 100)"),
+        pathPrefix: z.string().optional().describe("Filter results to URLs starting with this prefix (e.g. '/docs')"),
+        tags: z.array(z.string()).optional().describe("Filter results to pages matching all specified tags"),
+        filters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional().describe("Filter by structured page metadata (e.g. {\"version\": 2})"),
+        groupBy: z.enum(["page", "chunk"]).optional().describe("'page' (default) groups chunks by page with sub-results; 'chunk' returns individual chunks"),
+        scope: z.string().optional()
       }
     },
     async (input) => {
@@ -73,119 +51,7 @@ export function createServer(engine: SearchEngine): McpServer {
         pathPrefix: input.pathPrefix,
         tags: input.tags,
         filters: input.filters,
-        groupBy: input.groupBy,
-        maxSubResults: input.maxSubResults
-      });
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result, null, 2)
-          }
-        ],
-        structuredContent: result as unknown as Record<string, unknown>
-      };
-    }
-  );
-
-  server.registerTool(
-    "get_page",
-    {
-      description:
-        "Fetch indexed markdown for a specific path or URL, including frontmatter and routeFile mapping.",
-      inputSchema: {
-        pathOrUrl: z.string().min(1),
-        scope: z.string().optional()
-      }
-    },
-    async (input) => {
-      const page = await engine.getPage(input.pathOrUrl, input.scope);
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(page, null, 2)
-          }
-        ]
-      };
-    }
-  );
-
-  server.registerTool(
-    "list_pages",
-    {
-      description:
-        "List indexed pages with optional path prefix filtering and cursor-based pagination. Returns url, title, description, and routeFile for each page. Use nextCursor to fetch subsequent pages.",
-      inputSchema: {
-        pathPrefix: z.string().optional(),
-        cursor: z.string().optional(),
-        limit: z.number().int().positive().max(200).optional(),
-        scope: z.string().optional()
-      }
-    },
-    async (input) => {
-      const result = await engine.listPages({
-        pathPrefix: input.pathPrefix,
-        cursor: input.cursor,
-        limit: input.limit,
-        scope: input.scope
-      });
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result, null, 2)
-          }
-        ]
-      };
-    }
-  );
-
-  server.registerTool(
-    "get_site_structure",
-    {
-      description:
-        "Returns the hierarchical page tree derived from URL paths. Use this to understand site navigation structure, find where pages belong, or scope further operations to a section. Nodes with isIndexed: false are implicit structural parents not directly in the index. Large sites (>2000 pages) return truncated: true.",
-      inputSchema: {
-        pathPrefix: z.string().optional(),
-        scope: z.string().optional(),
-        maxPages: z.number().int().positive().max(2000).optional()
-      }
-    },
-    async (input) => {
-      const result = await engine.getSiteStructure({
-        pathPrefix: input.pathPrefix,
-        scope: input.scope,
-        maxPages: input.maxPages
-      });
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result, null, 2)
-          }
-        ]
-      };
-    }
-  );
-
-  server.registerTool(
-    "find_source_file",
-    {
-      description:
-        "Find the SvelteKit source file for a piece of site content. Use this when you need to locate and edit content on the site. Returns the URL, route file path, section title, and a content snippet.",
-      inputSchema: {
-        query: z.string().min(1),
-        scope: z.string().optional()
-      }
-    },
-    async (input) => {
-      const result = await engine.search({
-        q: input.query,
-        topK: 1,
-        scope: input.scope
+        groupBy: input.groupBy
       });
 
       if (result.results.length === 0) {
@@ -193,40 +59,80 @@ export function createServer(engine: SearchEngine): McpServer {
           content: [
             {
               type: "text",
-              text: JSON.stringify({
-                error: "No matching content found for the given query."
-              })
+              text: `No results found for "${input.query}". Try broader keywords or remove filters.`
             }
           ]
         };
       }
 
-      const match = result.results[0]!;
-      const { url, routeFile, sectionTitle, snippet } = match;
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify({ url, routeFile, sectionTitle, snippet })
+            text: JSON.stringify(result, null, 2)
           }
         ]
       };
     }
   );
 
+  // ---------------------------------------------------------------------------
+  // Tool 2: get_page — Full page retrieval for RAG deep-dives
+  // ---------------------------------------------------------------------------
+  server.registerTool(
+    "get_page",
+    {
+      description:
+        "Retrieves the full markdown content and metadata for a specific page by its URL path. Use this after search when snippets lack the detail needed to answer a question. Returns reconstructed page markdown, frontmatter (title, routeFile, tags, link counts, indexedAt), and the source file path. Do NOT use this for discovery — use search first to find relevant pages.",
+      inputSchema: {
+        path: z.string().min(1).describe("URL path of the page (e.g. '/docs/auth'). Use a URL from search results."),
+        scope: z.string().optional()
+      }
+    },
+    async (input) => {
+      try {
+        const page = await engine.getPage(input.path, input.scope);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(page, null, 2)
+            }
+          ]
+        };
+      } catch {
+        const suggestions = await engine.search({ q: input.path, topK: 3, scope: input.scope });
+        const similar = suggestions.results.map((r) => r.url);
+        return {
+          content: [
+            {
+              type: "text",
+              text: similar.length > 0
+                ? `Page '${input.path}' not found. Similar pages: ${similar.join(", ")}`
+                : `Page '${input.path}' not found. Use search to find the correct URL.`
+            }
+          ]
+        };
+      }
+    }
+  );
+
+  // ---------------------------------------------------------------------------
+  // Tool 3: get_related_pages — Link graph + semantic relationship discovery
+  // ---------------------------------------------------------------------------
   server.registerTool(
     "get_related_pages",
     {
       description:
-        "Find pages related to a given URL using link graph, semantic similarity, and structural proximity. Returns related pages ranked by a composite relatedness score. Use this to discover content connected to a known page.",
+        "Finds pages related to a specific page using link graph analysis, semantic similarity, and URL structure. Returns related pages with relationship type (outgoing_link, incoming_link, sibling, semantic) and relevance score. Do NOT use this for general search — use search instead. Use this only when you already have a specific page URL and need to discover connected content.",
       inputSchema: {
-        pathOrUrl: z.string().min(1),
-        scope: z.string().optional(),
-        topK: z.number().int().positive().max(25).optional()
+        path: z.string().min(1).describe("URL path of the source page (e.g. '/docs/auth'). Use a URL from search results."),
+        topK: z.number().int().positive().max(25).optional().describe("Number of related pages to return (default: 10, max: 25)"),
+        scope: z.string().optional()
       }
     },
     async (input) => {
-      const result = await engine.getRelatedPages(input.pathOrUrl, {
+      const result = await engine.getRelatedPages(input.path, {
         topK: input.topK,
         scope: input.scope
       });
