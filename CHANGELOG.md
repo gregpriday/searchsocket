@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-04-05
+
+### Changed
+
+- **Breaking:** Reduce MCP tool surface from 6 tools to 3 focused tools (`search`, `get_page`, `get_related_pages`)
+- Remove `find_source_file` tool (redundant — `search` already returns `routeFile` in every result)
+- Remove `list_pages` tool (LLMs should search, not browse; filesystem handles enumeration locally)
+- Remove `get_site_structure` tool (same reasoning; too much context for LLM consumption)
+- Rename `pathOrUrl` parameter to `path` in `get_page` and `get_related_pages` for LLM usability
+- Rewrite all tool descriptions with cross-references, negative constraints, and parameter examples
+- Add smart error recovery to `get_page` — suggests similar pages when requested page not found
+- Return human-readable "no results" message from `search` instead of empty JSON
+- Remove `outputSchema` from search tool to reduce token overhead in tool definitions
+
 ## [0.6.3] - 2026-04-04
 
 ### Changed
