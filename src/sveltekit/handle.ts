@@ -469,6 +469,38 @@ async function handleMcpRequest(
   enableJsonResponse: boolean,
   getEngine: () => Promise<SearchEngine>
 ): Promise<Response> {
+  const method = event.request.method;
+
+  // Only POST is supported — reject GET (SSE streams) and DELETE (session teardown)
+  // with 405 so MCP clients stop retrying.
+  if (method === "GET") {
+    return new Response(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: {
+          code: -32000,
+          message: "SSE transport is not supported. Use POST with Streamable HTTP."
+        },
+        id: null
+      }),
+      { status: 405, headers: { "content-type": "application/json", allow: "POST" } }
+    );
+  }
+
+  if (method === "DELETE") {
+    return new Response(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: {
+          code: -32000,
+          message: "Session management is not supported. This server is stateless."
+        },
+        id: null
+      }),
+      { status: 405, headers: { "content-type": "application/json", allow: "POST" } }
+    );
+  }
+
   // Auth check
   if (apiKey) {
     const authHeader = event.request.headers.get("authorization") ?? "";
