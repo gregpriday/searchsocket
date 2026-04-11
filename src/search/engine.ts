@@ -166,23 +166,51 @@ export interface SearchEngineOptions {
 export class SearchEngine {
   private readonly cwd: string;
   private readonly config: ResolvedSearchSocketConfig;
-  private readonly store: UpstashSearchStore;
+  private readonly store: UpstashSearchStore | null;
 
   private constructor(options: {
     cwd: string;
     config: ResolvedSearchSocketConfig;
-    store: UpstashSearchStore;
+    store: UpstashSearchStore | null;
   }) {
     this.cwd = options.cwd;
     this.config = options.config;
     this.store = options.store;
   }
 
+  private requireStore(): UpstashSearchStore {
+    if (!this.store) {
+      throw new SearchSocketError(
+        "SEARCH_NOT_CONFIGURED",
+        "Search is not configured. Set the required Upstash environment variables to enable search.",
+        503
+      );
+    }
+    return this.store;
+  }
+
+  isConfigured(): boolean {
+    return this.store !== null;
+  }
+
   static async create(options: SearchEngineOptions = {}): Promise<SearchEngine> {
     const cwd = path.resolve(options.cwd ?? process.cwd());
     const config = options.config ?? (await loadConfig({ cwd, configPath: options.configPath }));
 
-    const store = options.store ?? await createUpstashStore(config);
+    let store: UpstashSearchStore | null;
+    if (options.store !== undefined) {
+      store = options.store;
+    } else {
+      try {
+        store = await createUpstashStore(config);
+      } catch (error) {
+        if (error instanceof SearchSocketError && error.code === "VECTOR_BACKEND_UNAVAILABLE") {
+          store = null;
+        } else {
+          throw error;
+        }
+      }
+    }
 
     return new SearchEngine({
       cwd,
@@ -260,7 +288,7 @@ export class SearchEngine {
       const fetchMultiplier = (pathPrefix || filterTags) ? 2 : 1;
       const pageLimit = Math.max(topK * 2, 20);
 
-      const pageHits = await this.store.searchPagesByText(
+      const pageHits = await this.requireStore().searchPagesByText(
         queryText,
         { limit: pageLimit * fetchMultiplier, filter: metaFilter },
         resolvedScope
@@ -277,7 +305,7 @@ export class SearchEngine {
 
       // 3. For each top page, find best-matching chunks within that page
       const chunkPromises = topPages.map((page) =>
-        this.store.searchChunksByUrl(
+        this.requireStore().searchChunksByUrl(
           queryText,
           page.url,
           { limit: maxSubResults, filter: metaFilter },
@@ -306,7 +334,7 @@ export class SearchEngine {
       const candidateK = Math.max(50, topK);
       const fetchMultiplier = (pathPrefix || filterTags) ? 2 : 1;
 
-      const hits = await this.store.search(
+      const hits = await this.requireStore().search(
         queryText,
         { limit: candidateK * fetchMultiplier, filter: metaFilter },
         resolvedScope
@@ -471,7 +499,7 @@ export class SearchEngine {
   }> {
     const resolvedScope = resolveScope(this.config, scope);
     const urlPath = this.resolveInputPath(pathOrUrl);
-    const page = await this.store.getPage(urlPath, resolvedScope);
+    const page = await this.requireStore().getPage(urlPath, resolvedScope);
 
     if (!page) {
       throw new SearchSocketError("INVALID_REQUEST", `Indexed page not found for ${urlPath}`, 404);
@@ -507,7 +535,7 @@ export class SearchEngine {
     const pathPrefix = opts?.pathPrefix
       ? (opts.pathPrefix.startsWith("/") ? opts.pathPrefix : `/${opts.pathPrefix}`)
       : undefined;
-    return this.store.listPages(resolvedScope, {
+    return this.requireStore().listPages(resolvedScope, {
       cursor: opts?.cursor,
       limit: opts?.limit,
       pathPrefix
@@ -559,7 +587,7 @@ export class SearchEngine {
     const topK = Math.min(opts?.topK ?? 10, 25);
 
     // Fetch source page with its vector
-    const source = await this.store.fetchPageWithVector(urlPath, resolvedScope);
+    const source = await this.requireStore().fetchPageWithVector(urlPath, resolvedScope);
     if (!source) {
       throw new SearchSocketError("INVALID_REQUEST", `Indexed page not found for ${urlPath}`, 404);
     }
@@ -567,7 +595,7 @@ export class SearchEngine {
     const sourceOutgoing = new Set(source.metadata.outgoingLinkUrls ?? []);
 
     // ANN query for semantically similar pages (using stored vector)
-    const semanticHits = await this.store.searchPagesByVector(
+    const semanticHits = await this.requireStore().searchPagesByVector(
       source.vector,
       { limit: 50 },
       resolvedScope
@@ -594,7 +622,7 @@ export class SearchEngine {
       (u) => u !== urlPath && !semanticScoreMap.has(u)
     );
     const fetchedPages = missingUrls.length > 0
-      ? await this.store.fetchPagesBatch(missingUrls, resolvedScope)
+      ? await this.requireStore().fetchPagesBatch(missingUrls, resolvedScope)
       : [];
 
     // Build metadata map from semantic hits + fetched pages
@@ -610,7 +638,7 @@ export class SearchEngine {
     // Batch-fetch semantic hits to get their outgoingLinkUrls
     const semanticUrls = filteredHits.map((h) => h.url);
     if (semanticUrls.length > 0) {
-      const semanticPageData = await this.store.fetchPagesBatch(semanticUrls, resolvedScope);
+      const semanticPageData = await this.requireStore().fetchPagesBatch(semanticUrls, resolvedScope);
       for (const p of semanticPageData) {
         const existing = metaMap.get(p.url);
         if (existing) {
@@ -655,6 +683,9 @@ export class SearchEngine {
   }
 
   async health(): Promise<{ ok: boolean; details?: string }> {
+    if (!this.store) {
+      return { ok: false, details: "Search is not configured. Set the required Upstash environment variables to enable search." };
+    }
     return this.store.health();
   }
 
