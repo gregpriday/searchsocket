@@ -5,7 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.7.0] - 2026-04-05
+## [0.7.0] - 2026-04-11
+
+### Fixed
+
+- Reject GET and DELETE requests to MCP endpoint with 405 to prevent SSE reconnect storms on serverless
+- Allow `SearchEngine` to operate without Upstash credentials — returns typed `SEARCH_NOT_CONFIGURED` error instead of crashing
 
 ### Changed
 
