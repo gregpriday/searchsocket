@@ -3,11 +3,16 @@ import { IndexPipeline } from "../indexing/pipeline";
 import { Logger } from "../core/logger";
 import type { IndexingHooks } from "../types";
 
+interface MinimalResolvedConfig {
+  build?: { ssr?: unknown };
+}
+
 interface MinimalVitePlugin {
   name: string;
   apply?: "build" | "serve";
   enforce?: "pre" | "post";
   config?: () => Record<string, unknown>;
+  configResolved?: (config: MinimalResolvedConfig) => void;
   closeBundle?: () => Promise<void> | void;
 }
 
@@ -53,12 +58,24 @@ function shouldRunAutoIndex(options: SearchSocketAutoIndexOptions): boolean {
 export function searchsocketVitePlugin(options: SearchSocketAutoIndexOptions = {}): MinimalVitePlugin {
   let executed = false;
   let running = false;
+  let isSsrBuild = false;
 
   return {
     name: "searchsocket:auto-index",
     apply: "build",
     enforce: "post",
+    configResolved(config) {
+      isSsrBuild = Boolean(config.build?.ssr);
+    },
     async closeBundle() {
+      // SvelteKit splits `vite build` into two passes (client then SSR), and
+      // its adapter only runs during the SSR pass. If we ran on the client
+      // pass we'd see an empty `.vercel/output/` (adapter hasn't run yet),
+      // fall back to vite preview, and crash. Mirror SvelteKit's own guard.
+      if (!isSsrBuild) {
+        return;
+      }
+
       if (executed || running) {
         return;
       }
