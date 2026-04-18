@@ -6,6 +6,7 @@ import type { IndexingHooks } from "../types";
 interface MinimalVitePlugin {
   name: string;
   apply?: "build" | "serve";
+  enforce?: "pre" | "post";
   config?: () => Record<string, unknown>;
   closeBundle?: () => Promise<void> | void;
 }
@@ -55,6 +56,8 @@ export function searchsocketVitePlugin(options: SearchSocketAutoIndexOptions = {
 
   return {
     name: "searchsocket:auto-index",
+    apply: "build",
+    enforce: "post",
     async closeBundle() {
       if (executed || running) {
         return;

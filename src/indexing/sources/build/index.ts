@@ -158,6 +158,14 @@ export async function loadBuildPages(
       logger.info(`Detected ${detected.adapter} build output at ${detected.relativePath}; indexing prerendered HTML directly.`);
       return loadPrerenderedPages(cwd, detected.absolutePath, maxPages);
     }
+    if (!detected) {
+      logger.info(
+        `No adapter build output detected in ${cwd}; falling back to vite preview. ` +
+          `Expected one of: .vercel/output/config.json, .svelte-kit/cloudflare/_worker.js, build/handler.js, .netlify/server, or ${config.source.staticOutputDir}/index.html.`
+      );
+    } else {
+      logger.info(`Detected node build output at ${detected.relativePath}; using vite preview.`);
+    }
   }
 
   // Discovery mode: BFS crawl from seed URLs instead of manifest parsing
