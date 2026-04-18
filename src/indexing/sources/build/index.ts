@@ -5,6 +5,8 @@ import { normalizeUrlPath, joinUrl } from "../../../utils/path";
 import type { PageSourceRecord, ResolvedSearchSocketConfig } from "../../../types";
 import { parseManifest, expandRoutes, isExcluded } from "./manifest-parser";
 import { startPreviewServer, type PreviewServer } from "./preview-server";
+import { detectBuildOutput } from "./detect-output";
+import { loadPrerenderedPages } from "./prerendered-fallback";
 
 const logger = new Logger();
 
@@ -144,6 +146,18 @@ export async function loadBuildPages(
   const buildConfig = config.source.build;
   if (!buildConfig) {
     throw new Error("build source config is missing");
+  }
+
+  // Prerendered-output fallback: most non-node adapters (vercel, cloudflare,
+  // netlify, static) don't produce a vite-previewable server bundle. Detect
+  // the adapter's prerendered HTML directory via marker files and read it
+  // directly — no preview server, works on any CI that ran `vite build`.
+  if (!buildConfig.discover) {
+    const detected = await detectBuildOutput(cwd, config.source.staticOutputDir);
+    if (detected && detected.adapter !== "node") {
+      logger.info(`Detected ${detected.adapter} build output at ${detected.relativePath}; indexing prerendered HTML directly.`);
+      return loadPrerenderedPages(cwd, detected.absolutePath, maxPages);
+    }
   }
 
   // Discovery mode: BFS crawl from seed URLs instead of manifest parsing

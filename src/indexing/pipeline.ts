@@ -12,6 +12,7 @@ import { loadBuildPages } from "./sources/build";
 import { loadContentFilesPages } from "./sources/content-files";
 import { loadCrawledPages } from "./sources/crawl";
 import { loadStaticOutputPages } from "./sources/static-output";
+import { detectBuildOutput } from "./sources/build/detect-output";
 import { loadRobotsTxtFromDir, fetchRobotsTxt, isBlockedByRobots } from "./robots";
 import { findPageWeight } from "../search/ranking";
 import { matchUrlPatterns } from "../utils/pattern";
@@ -218,6 +219,14 @@ export class IndexPipeline {
         robotsRules = await loadRobotsTxtFromDir(
           path.resolve(this.cwd, this.config.source.build.outputDir)
         );
+        // Non-node adapters (vercel, cloudflare, etc.) write robots.txt into
+        // their own output directory — consult the detector as a fallback.
+        if (!robotsRules) {
+          const detected = await detectBuildOutput(this.cwd, this.config.source.staticOutputDir);
+          if (detected) {
+            robotsRules = await loadRobotsTxtFromDir(detected.absolutePath);
+          }
+        }
       } else if (sourceMode === "crawl" && this.config.source.crawl) {
         robotsRules = await fetchRobotsTxt(this.config.source.crawl.baseUrl);
       }
