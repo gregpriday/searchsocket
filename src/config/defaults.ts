@@ -91,7 +91,9 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       path: "/api/search",
       cors: {
         allowOrigins: []
-      }
+      },
+      allowedScopes: [],
+      exposeInternalFields: false
     },
     mcp: {
       enable: process.env.NODE_ENV !== "production",

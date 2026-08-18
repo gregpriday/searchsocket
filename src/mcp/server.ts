@@ -1,3 +1,5 @@
+declare const __SEARCHSOCKET_VERSION__: string | undefined;
+
 import { createHash, timingSafeEqual } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -8,6 +10,13 @@ import { z } from "zod";
 import { SearchEngine } from "../search/engine";
 import { loadConfig } from "../config/load";
 import type { ResolvedSearchSocketConfig } from "../types";
+
+/**
+ * Reported to MCP clients as the server version. Replaced at build time with
+ * the package version by tsup's `define`.
+ */
+export const PACKAGE_VERSION: string =
+  typeof __SEARCHSOCKET_VERSION__ === "string" ? __SEARCHSOCKET_VERSION__ : "0.0.0-dev";
 
 export interface McpServerOptions {
   cwd?: string;
@@ -22,7 +31,9 @@ export interface McpServerOptions {
 export function createServer(engine: SearchEngine): McpServer {
   const server = new McpServer({
     name: "searchsocket-mcp",
-    version: "0.2.0"
+    // Was hardcoded at "0.2.0" and drifted from the package for five releases,
+    // so clients could not tell which version they were talking to.
+    version: PACKAGE_VERSION
   });
 
   // ---------------------------------------------------------------------------

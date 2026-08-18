@@ -215,6 +215,12 @@ function preprocessImages(
  * Exclusions are authoritative removal signals: in a complete run the page
  * genuinely should not be there, so deleting its old records is correct.
  */
+/**
+ * Origin used to resolve relative hrefs. Any href resolving to it came from a
+ * relative or root-relative link and is therefore same-site by construction.
+ */
+const SYNTHETIC_ORIGIN = "https://searchsocket.local";
+
 export type ExclusionReason = "noindex" | "zero-weight";
 
 /**
@@ -240,7 +246,19 @@ export function extractFromHtmlResult(
 ): ExtractionResult {
   const $ = load(html);
   const normalizedUrl = normalizeUrlPath(url);
-  const pageBaseUrl = new URL(`https://searchsocket.local${normalizedUrl}`);
+  const pageBaseUrl = new URL(`${SYNTHETIC_ORIGIN}${normalizedUrl}`);
+
+  // Origins that count as "this site". A relative or root-relative href
+  // resolves against the synthetic origin; an absolute href must match the
+  // configured base URL to be treated as internal.
+  const internalOrigins = new Set<string>([SYNTHETIC_ORIGIN]);
+  if (config.project.baseUrl) {
+    try {
+      internalOrigins.add(new URL(config.project.baseUrl).origin);
+    } catch {
+      // A malformed baseUrl simply contributes no extra origin.
+    }
+  }
 
   const title =
     $("meta[property='og:title']").attr("content")?.trim() ||
@@ -335,6 +353,13 @@ export function extractFromHtmlResult(
     try {
       const parsed = new URL(href, pageBaseUrl);
       if (!["http:", "https:"].includes(parsed.protocol)) {
+        return;
+      }
+
+      // Only the pathname used to be kept, so `https://other.example/docs`
+      // was recorded as an internal link to the local `/docs` — inflating its
+      // incoming-link count and its ranking with someone else's links.
+      if (!internalOrigins.has(parsed.origin)) {
         return;
       }
 

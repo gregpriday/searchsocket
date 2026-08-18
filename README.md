@@ -27,7 +27,7 @@ SearchSocket extracts content from your SvelteKit site, converts it to markdown,
 - **Scroll-to-text** — auto-scroll to the matching section when a user clicks a search result, with CSS Highlight API and Text Fragment support
 - **SvelteKit integration** — server hook for the search API, Vite plugin for build-triggered indexing
 - **Svelte 5 components** — reactive `createSearch` store and `<SearchSocket>` metadata component
-- **MCP server** — six tools for Claude Code, Claude Desktop, and other MCP clients (stdio + HTTP)
+- **MCP server** — three tools for Claude Code, Claude Desktop, and other MCP clients (stdio + HTTP)
 - **llms.txt generation** — auto-generate LLM-friendly site indexes during indexing
 - **Four source modes** — index from static output, build manifest, a running server, or raw markdown files
 - **CLI** — init, index, search, dev, status, doctor, clean, prune, test, mcp, add
@@ -584,11 +584,8 @@ SearchSocket includes an MCP server that gives Claude Code, Claude Desktop, and 
 
 | Tool | Description |
 |------|-------------|
-| `search` | Semantic search with filtering, grouping, and reranking |
+| `search` | Semantic search with filtering and section sub-results |
 | `get_page` | Retrieve full page markdown with frontmatter |
-| `list_pages` | Cursor-paginated page listing |
-| `get_site_structure` | Hierarchical page tree |
-| `find_source_file` | Locate the SvelteKit source file for content |
 | `get_related_pages` | Find related pages by links, semantics, and structure |
 
 ### Connecting to your deployed site

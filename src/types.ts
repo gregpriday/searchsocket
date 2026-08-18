@@ -118,6 +118,16 @@ export interface SearchSocketConfig {
     cors?: {
       allowOrigins?: string[];
     };
+    /**
+     * Scopes a browser request may select with `?scope=`. Empty (the default)
+     * means the caller always gets the server's configured scope.
+     */
+    allowedScopes?: string[];
+    /**
+     * Include source file paths and full section text in browser responses.
+     * Off by default.
+     */
+    exposeInternalFields?: boolean;
     rateLimit?: {
       windowMs?: number;
       max?: number;
@@ -256,6 +266,10 @@ export interface ResolvedSearchSocketConfig {
     cors: {
       allowOrigins: string[];
     };
+    /** Scopes a browser request may select. Empty means none. */
+    allowedScopes: string[];
+    /** Expose routeFile and chunkText to browser callers. */
+    exposeInternalFields: boolean;
     rateLimit?: {
       windowMs: number;
       max: number;

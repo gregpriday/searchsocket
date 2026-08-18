@@ -7,7 +7,7 @@ import { isServerless } from "../core/serverless";
 import { SearchSocketError, toErrorPayload } from "../errors";
 import { createServer as createMcpServer } from "../mcp/server";
 import { SearchEngine } from "../search/engine";
-import type { ResolvedSearchSocketConfig, SearchRequest, SearchSocketConfig } from "../types";
+import type { ResolvedSearchSocketConfig, SearchRequest, SearchResult, SearchSocketConfig } from "../types";
 
 interface RateBucket {
   count: number;
@@ -79,7 +79,10 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
       configPromise = configP.then((config) => {
         apiPath = apiPath ?? config.api.path;
-        mcpPath = config.mcp.handle.path;
+        // `mcp.enable` was documented as the switch for this endpoint but was
+        // never read, so the MCP route was mounted regardless — including on
+        // deployments that had deliberately turned it off.
+        mcpPath = config.mcp.enable ? config.mcp.handle.path : undefined;
         mcpApiKey = config.mcp.handle.apiKey;
         mcpEnableJsonResponse = config.mcp.handle.enableJsonResponse;
 
@@ -187,7 +190,12 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
       } catch {
         return resolve(event);
       }
-      const scope = event.url.searchParams?.get("scope") ?? undefined;
+      let scope: string | undefined;
+      try {
+        scope = resolveRequestedScope(event.url.searchParams?.get("scope"), config);
+      } catch {
+        return resolve(event);
+      }
       try {
         const engine = await getEngine();
         const page = await engine.getPage(rawPath, scope);
@@ -276,7 +284,8 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
       return withCors(
         new Response(JSON.stringify(toErrorPayload(new SearchSocketError("INVALID_REQUEST", "Method not allowed", 405))), {
           status: 405,
-          headers: { "content-type": "application/json" }
+          // RFC 9110 requires Allow on a 405.
+          headers: { "content-type": "application/json", allow: "GET, POST, OPTIONS" }
         }),
         event.request,
         config
@@ -297,6 +306,55 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
       );
     }
   };
+}
+
+
+/**
+ * Resolve the scope a browser request is permitted to search.
+ *
+ * A caller-supplied `?scope=` used to be passed through unchecked, so any
+ * visitor could read a preview, staging, or unpublished branch scope simply by
+ * naming it. A scope is now only honoured when the deployment explicitly lists
+ * it in `api.allowedScopes`; otherwise the request gets the server's own scope.
+ */
+function resolveRequestedScope(
+  requested: string | null | undefined,
+  config: ResolvedSearchSocketConfig
+): string | undefined {
+  if (requested === null || requested === undefined || requested === "") return undefined;
+  if (config.api.allowedScopes.includes(requested)) return requested;
+
+  throw new SearchSocketError(
+    "INVALID_REQUEST",
+    `Scope "${requested}" is not selectable from this endpoint.`,
+    403
+  );
+}
+
+/**
+ * Strip fields a public search response should not carry.
+ *
+ * `routeFile` is a path inside the author's repository and `chunkText` is the
+ * full text of a section rather than a snippet. Both are useful to an MCP
+ * client editing the site and neither belongs in a public search box, so they
+ * are opt-in via `api.exposeInternalFields`.
+ */
+function toPublicResults(
+  results: SearchResult[],
+  config: ResolvedSearchSocketConfig
+): SearchResult[] {
+  if (config.api.exposeInternalFields) return results;
+
+  return results.map((result) => {
+    const { routeFile: _routeFile, chunkText: _chunkText, breakdown: _breakdown, ...rest } = result;
+    return {
+      ...rest,
+      chunks: result.chunks?.map((chunk) => {
+        const { chunkText: _chunkChunkText, ...chunkRest } = chunk;
+        return chunkRest;
+      })
+    } as SearchResult;
+  });
 }
 
 function isApiPath(pathname: string, apiPath: string): boolean {
@@ -326,8 +384,8 @@ async function handleGetSearch(
     searchRequest.topK = parsed;
   }
 
-  const scope = params.get("scope");
-  if (scope !== null) searchRequest.scope = scope;
+  const scope = resolveRequestedScope(params.get("scope"), config);
+  if (scope !== undefined) searchRequest.scope = scope;
 
   const pathPrefix = params.get("pathPrefix");
   if (pathPrefix !== null) searchRequest.pathPrefix = pathPrefix;
@@ -356,9 +414,9 @@ async function handleGetSearch(
   const result = await engine.search(searchRequest);
 
   return withCors(
-    new Response(JSON.stringify(result), {
+    new Response(JSON.stringify({ ...result, results: toPublicResults(result.results, config) }), {
       status: 200,
-      headers: { "content-type": "application/json" }
+      headers: { "content-type": "application/json", "cache-control": "no-store" }
     }),
     event.request,
     config
@@ -376,7 +434,7 @@ async function handleGetHealth(
   return withCors(
     new Response(JSON.stringify(result), {
       status: 200,
-      headers: { "content-type": "application/json" }
+      headers: { "content-type": "application/json", "cache-control": "no-store" }
     }),
     event.request,
     config
@@ -397,14 +455,14 @@ async function handleGetPage(
     throw new SearchSocketError("INVALID_REQUEST", "Malformed page path", 400);
   }
 
-  const scope = event.url.searchParams?.get("scope") ?? undefined;
+  const scope = resolveRequestedScope(event.url.searchParams?.get("scope"), config);
   const engine = await getEngine();
   const result = await engine.getPage(pagePath, scope);
 
   return withCors(
     new Response(JSON.stringify(result), {
       status: 200,
-      headers: { "content-type": "application/json" }
+      headers: { "content-type": "application/json", "cache-control": "no-store" }
     }),
     event.request,
     config
@@ -417,6 +475,19 @@ async function handlePostSearch(
   getEngine: () => Promise<SearchEngine>,
   bodyLimit: number
 ): Promise<Response> {
+  // Require a JSON content type. Without this the endpoint accepts a form
+  // POST, which browsers send cross-origin without a preflight — so a CORS
+  // policy that denies the origin never gets consulted.
+  const contentType = event.request.headers.get("content-type") ?? "";
+  const mediaType = contentType.split(";")[0]!.trim().toLowerCase();
+  if (mediaType && mediaType !== "application/json") {
+    throw new SearchSocketError(
+      "INVALID_REQUEST",
+      "Content-Type must be application/json",
+      415
+    );
+  }
+
   const contentLength = Number(event.request.headers.get("content-length") ?? 0);
   if (contentLength > bodyLimit) {
     throw new SearchSocketError("INVALID_REQUEST", "Request body too large", 413);
@@ -451,12 +522,18 @@ async function handlePostSearch(
 
   const engine = await getEngine();
   const searchRequest = body as SearchRequest;
+  // Same scope policy as GET: the body is no more trustworthy than the query
+  // string, and previously a POST could name any scope it liked.
+  const requestedScope = resolveRequestedScope(searchRequest.scope, config);
+  if (requestedScope === undefined) delete searchRequest.scope;
+  else searchRequest.scope = requestedScope;
+
   const result = await engine.search(searchRequest);
 
   return withCors(
-    new Response(JSON.stringify(result), {
+    new Response(JSON.stringify({ ...result, results: toPublicResults(result.results, config) }), {
       status: 200,
-      headers: { "content-type": "application/json" }
+      headers: { "content-type": "application/json", "cache-control": "no-store" }
     }),
     event.request,
     config
@@ -574,10 +651,14 @@ function buildCorsHeaders(request: Request, config: ResolvedSearchSocketConfig):
     return {};
   }
 
+  const wildcard = allowOrigins.includes("*");
   return {
-    "access-control-allow-origin": allowOrigins.includes("*") ? "*" : origin,
+    "access-control-allow-origin": wildcard ? "*" : origin,
     "access-control-allow-methods": "GET, POST, OPTIONS",
-    "access-control-allow-headers": "content-type"
+    "access-control-allow-headers": "content-type",
+    // Required when the origin is reflected: without it a shared cache can
+    // serve one origin's allow-origin header to a different origin.
+    ...(wildcard ? {} : { vary: "Origin" })
   };
 }
 

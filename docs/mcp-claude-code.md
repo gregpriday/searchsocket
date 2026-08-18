@@ -115,11 +115,16 @@ By default, Claude Code prompts for approval when an MCP tool is invoked. To ski
 
 ## Available MCP tools
 
-Once connected, Claude Code has access to six tools:
+Three focused tools. Earlier versions documented six; `list_pages`,
+`get_site_structure`, and `find_source_file` no longer exist — `search` with a
+`pathPrefix` covers listing, and its `routeFile` field covers source lookup.
 
 ### `search`
 
-Semantic search across indexed content. Returns ranked results with URL, title, snippet, score, and `routeFile` (the SvelteKit source file path). When `groupBy` is `"page"` (default), results include a `chunks` array with section-level sub-results.
+Semantic search across indexed content. Returns ranked results with URL, title,
+snippet, score, and `routeFile` (the SvelteKit source file path). The
+highest-ranked results also carry a `chunks` array of section-level sub-results;
+lower-ranked results carry a page summary only.
 
 Parameters:
 - `query` (string, required) — search query
@@ -127,51 +132,30 @@ Parameters:
 - `topK` (number, 1-100) — max results
 - `pathPrefix` (string) — filter by URL prefix (e.g. `"/docs"`)
 - `tags` (string[]) — filter by tags
-- `filters` (object) — structured metadata filters (e.g. `{"version": 2}`)
+- `filters` (object) — structured metadata filters (e.g. `{"version": 2}`).
+  Values may not contain a quote or backslash; Upstash's filter syntax defines
+  no way to escape them, so such values are rejected with a 400.
 - `groupBy` (`"page"` | `"chunk"`) — result grouping mode
-- `maxSubResults` (number, 1-20) — max chunks per page result
 
 ### `get_page`
 
-Fetch the full indexed markdown for a specific page, including frontmatter and `routeFile` mapping.
+Fetch the full indexed markdown for a specific page, including frontmatter and
+`routeFile` mapping.
 
 Parameters:
-- `pathOrUrl` (string, required) — page path or URL
-- `scope` (string) — index scope
-
-### `list_pages`
-
-List all indexed pages with cursor-based pagination. Returns URL, title, description, and `routeFile` for each page.
-
-Parameters:
-- `pathPrefix` (string) — filter by URL prefix
-- `cursor` (string) — pagination cursor from previous response
-- `limit` (number, 1-200) — page size
-- `scope` (string) — index scope
-
-### `get_site_structure`
-
-Returns the hierarchical page tree derived from URL paths. Useful for understanding site navigation and scoping further operations.
-
-Parameters:
-- `pathPrefix` (string) — filter to a subtree
-- `scope` (string) — index scope
-- `maxPages` (number, 1-2000) — limit for large sites
-
-### `find_source_file`
-
-Find the SvelteKit source file for a piece of site content. Returns the URL, route file path, section title, and a content snippet. Use this when you need to locate and edit content.
-
-Parameters:
-- `query` (string, required) — search query describing the content
+- `path` (string, required) — URL path of the page, e.g. `/docs/auth`. This was
+  called `pathOrUrl` in earlier versions.
 - `scope` (string) — index scope
 
 ### `get_related_pages`
 
-Find pages related to a given URL using link graph, semantic similarity, and structural proximity. Returns related pages ranked by a composite relatedness score.
+Find pages related to a given URL using link graph, semantic similarity, and
+structural proximity. Returns related pages ranked by a composite relatedness
+score.
 
 Parameters:
-- `pathOrUrl` (string, required) — the page URL to find related content for
+- `path` (string, required) — the page URL to find related content for. This was
+  called `pathOrUrl` in earlier versions.
 - `scope` (string) — index scope
 - `topK` (number, 1-25) — max related pages to return
 
@@ -205,4 +189,4 @@ After configuring `.mcp.json`, restart Claude Code and verify the tools are avai
 claude mcp list
 ```
 
-You should see `searchsocket` listed with all six tools. You can then use natural language to search your site content directly from Claude Code — for example, "search my docs for authentication" or "find the source file for the getting started page".
+You should see `searchsocket` listed with its three tools. You can then use natural language to search your site content directly from Claude Code — for example, "search my docs for authentication" or "find the source file for the getting started page".

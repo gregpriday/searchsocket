@@ -145,6 +145,18 @@ export const searchSocketConfigSchema = z.object({
           allowOrigins: z.array(z.string()).optional()
         })
         .optional(),
+      /**
+       * Scopes a browser request may select with `?scope=`. Empty (the default)
+       * means the caller cannot choose at all and always gets the server's
+       * configured scope.
+       */
+      allowedScopes: z.array(z.string()).optional(),
+      /**
+       * Include internal fields — source file paths and full section text — in
+       * browser search responses. Off by default: these are useful to an editing
+       * agent and are not something a public search box should disclose.
+       */
+      exposeInternalFields: z.boolean().optional(),
       rateLimit: z
         .object({
           windowMs: z.number().int().positive().optional(),

@@ -136,7 +136,9 @@ describe("searchsocketHandle", () => {
         path: "/api/search",
         cors: {
           allowOrigins: ["https://app.example"]
-        }
+        },
+        allowedScopes: [],
+        exposeInternalFields: false
       }
     });
 
@@ -241,6 +243,8 @@ describe("searchsocketHandle", () => {
         cors: {
           allowOrigins: []
         },
+        allowedScopes: [],
+        exposeInternalFields: false,
         rateLimit: {
           windowMs: 60_000,
           max: 1
@@ -285,7 +289,9 @@ describe("searchsocketHandle", () => {
         path: "/api/search",
         cors: {
           allowOrigins: ["https://allowed.example"]
-        }
+        },
+        allowedScopes: [],
+        exposeInternalFields: false
       }
     });
 
@@ -546,6 +552,8 @@ describe("searchsocketHandle", () => {
       api: {
         path: "/api/search",
         cors: { allowOrigins: [] },
+      allowedScopes: [],
+      exposeInternalFields: false,
         rateLimit: { windowMs: 60_000, max: 1 }
       }
     });
@@ -572,7 +580,9 @@ describe("GET /api/search", () => {
     const config = makeConfig({
       api: {
         path: "/api/search",
-        cors: { allowOrigins: ["https://app.example"] }
+        cors: { allowOrigins: ["https://app.example"] },
+      allowedScopes: [],
+      exposeInternalFields: false
       }
     });
 
@@ -671,6 +681,8 @@ describe("GET /api/search", () => {
       api: {
         path: "/api/search",
         cors: { allowOrigins: [] },
+      allowedScopes: [],
+      exposeInternalFields: false,
         rateLimit: { windowMs: 60_000, max: 1 }
       }
     });
@@ -831,8 +843,29 @@ describe("GET /api/search/pages/:path", () => {
     expect(getPage).toHaveBeenCalledWith("/docs/getting started", undefined);
   });
 
-  it("passes scope query param to getPage", async () => {
+  it("refuses a scope the deployment has not allowlisted", async () => {
+    // A caller-supplied ?scope= was passed straight through, so any visitor
+    // could read a preview or staging scope by naming it.
     const config = makeConfig();
+    const getPage = vi.fn();
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({ getPage } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search/pages/docs/install",
+      method: "GET",
+      searchParams: { scope: "v2" }
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(403);
+    expect(getPage).not.toHaveBeenCalled();
+  });
+
+  it("passes an allowlisted scope through to getPage", async () => {
+    const config = makeConfig({ api: { allowedScopes: ["v2"] } } as Partial<ResolvedSearchSocketConfig>);
     const getPage = vi.fn().mockResolvedValue({
       url: "/docs/install",
       frontmatter: {},
@@ -903,7 +936,9 @@ describe("REST API sub-route routing", () => {
     const config = makeConfig({
       api: {
         path: "/api/search",
-        cors: { allowOrigins: ["https://app.example"] }
+        cors: { allowOrigins: ["https://app.example"] },
+      allowedScopes: [],
+      exposeInternalFields: false
       }
     });
 
@@ -1115,7 +1150,9 @@ describe("searchsocketHandle markdown variant serving", () => {
     const event = makeEvent({ pathname: "/docs/api.md", method: "GET", searchParams: { scope: "v2" } });
 
     await handle({ event, resolve });
-    expect(mockGetPage).toHaveBeenCalledWith("/docs/api", "v2");
+    // Not allowlisted, so the request falls through rather than serving
+    // another scope's content.
+    expect(mockGetPage).not.toHaveBeenCalled();
   });
 
   it("falls through when serveMarkdownVariants is false", async () => {
@@ -1478,7 +1515,9 @@ describe("MCP endpoint", () => {
     const config = makeConfig({
       api: {
         path: "/api/search",
-        cors: { allowOrigins: [] }
+        cors: { allowOrigins: [] },
+      allowedScopes: [],
+      exposeInternalFields: false
       }
     });
 

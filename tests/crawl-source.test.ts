@@ -3,6 +3,33 @@ import { gzipSync } from "node:zlib";
 import { createDefaultConfig } from "../src/config/defaults";
 import { loadCrawledPages } from "../src/indexing/sources/crawl";
 
+
+/**
+ * A mock Response with the fields `safeFetch` reads: status, headers, and a
+ * real body. The crawler now enforces timeouts, size caps, content types, and
+ * a same-origin redirect policy, so a `{ ok, text }` stub is no longer enough.
+ */
+function mockResponse(
+  body: string | Buffer,
+  init: { status?: number; contentType?: string; location?: string } = {}
+): Response {
+  const buffer = typeof body === "string" ? Buffer.from(body, "utf8") : body;
+  const headers = new Headers();
+  headers.set("content-type", init.contentType ?? "text/html; charset=utf-8");
+  headers.set("content-length", String(buffer.byteLength));
+  if (init.location) headers.set("location", init.location);
+
+  const status = init.status ?? 200;
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: status === 200 ? "OK" : "Error",
+    headers,
+    text: async () => buffer.toString("utf8"),
+    arrayBuffer: async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+  } as unknown as Response;
+}
+
 describe("loadCrawledPages", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -19,10 +46,7 @@ describe("loadCrawledPages", () => {
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: string | URL | Request) => {
       const url = String(input);
-      return {
-        ok: true,
-        text: async () => `<html><body><main><h1>${url}</h1></main></body></html>`
-      } as Response;
+      return mockResponse(`<html><body><main><h1>${url}</h1></main></body></html>`);
     });
 
     const pages = (await loadCrawledPages(config)).records;
@@ -41,10 +65,7 @@ describe("loadCrawledPages", () => {
     const seen = new Set<string>();
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: string | URL | Request) => {
       seen.add(String(input));
-      return {
-        ok: true,
-        text: async () => `<html><body><main><h1>${String(input)}</h1></main></body></html>`
-      } as Response;
+      return mockResponse(`<html><body><main><h1>${String(input)}</h1></main></body></html>`);
     });
 
     const pages = (await loadCrawledPages(config)).records;
@@ -65,21 +86,15 @@ describe("loadCrawledPages", () => {
       const url = String(input);
 
       if (url === "https://example.com/sitemap.xml") {
-        return {
-          ok: true,
-          text: async () => `
+        return mockResponse(`
             <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
               <url><loc>/docs</loc></url>
               <url><loc>/blog/intro</loc></url>
             </urlset>
-          `
-        } as Response;
+          `);
       }
 
-      return {
-        ok: true,
-        text: async () => `<html><body><main><h1>${url}</h1></main></body></html>`
-      } as Response;
+      return mockResponse(`<html><body><main><h1>${url}</h1></main></body></html>`);
     });
 
     const pages = (await loadCrawledPages(config)).records;
@@ -99,39 +114,30 @@ describe("loadCrawledPages", () => {
       const url = String(input);
 
       if (url === "https://example.com/sitemap-index.xml") {
-        return {
-          ok: true,
-          text: async () => `
+        return mockResponse(`
             <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
               <sitemap><loc>/sitemap-a.xml</loc></sitemap>
               <sitemap><loc>https://example.com/sitemap-b.xml</loc></sitemap>
             </sitemapindex>
-          `
-        } as Response;
+          `);
       }
 
       if (url === "https://example.com/sitemap-a.xml") {
-        return {
-          ok: true,
-          text: async () => `
+        return mockResponse(`
             <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
               <url><loc>https://example.com/docs</loc></url>
               <url><loc>https://example.com/shared</loc></url>
             </urlset>
-          `
-        } as Response;
+          `);
       }
 
       if (url === "https://example.com/sitemap-b.xml") {
-        return {
-          ok: true,
-          text: async () => `
+        return mockResponse(`
             <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
               <url><loc>https://example.com/shared</loc></url>
               <url><loc>https://example.com/fails</loc></url>
             </urlset>
-          `
-        } as Response;
+          `);
       }
 
       if (url.endsWith("/fails")) {
@@ -142,10 +148,7 @@ describe("loadCrawledPages", () => {
         } as Response;
       }
 
-      return {
-        ok: true,
-        text: async () => `<html><body><main><h1>${url}</h1></main></body></html>`
-      } as Response;
+      return mockResponse(`<html><body><main><h1>${url}</h1></main></body></html>`);
     });
 
     const pages = (await loadCrawledPages(config)).records;
@@ -171,16 +174,10 @@ describe("loadCrawledPages", () => {
           </urlset>
         `;
         const gz = gzipSync(Buffer.from(xml, "utf8"));
-        return {
-          ok: true,
-          arrayBuffer: async () => gz
-        } as unknown as Response;
+        return mockResponse(gz, { contentType: "application/gzip" });
       }
 
-      return {
-        ok: true,
-        text: async () => `<html><body><main><h1>${url}</h1></main></body></html>`
-      } as Response;
+      return mockResponse(`<html><body><main><h1>${url}</h1></main></body></html>`);
     });
 
     const pages = (await loadCrawledPages(config)).records;
@@ -197,10 +194,7 @@ describe("loadCrawledPages", () => {
     };
 
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: string | URL | Request) => {
-      return {
-        ok: true,
-        text: async () => `<html><body><main><h1>${String(input)}</h1></main></body></html>`
-      } as Response;
+      return mockResponse(`<html><body><main><h1>${String(input)}</h1></main></body></html>`);
     });
 
     const pages = (await loadCrawledPages(config, -10)).records;
@@ -228,32 +222,23 @@ describe("loadCrawledPages", () => {
           throw new Error("cyclic sitemap recursion was not stopped");
         }
 
-        return {
-          ok: true,
-          text: async () => `
+        return mockResponse(`
             <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
               <sitemap><loc>/sitemap.xml</loc></sitemap>
               <sitemap><loc>/leaf.xml</loc></sitemap>
             </sitemapindex>
-          `
-        } as Response;
+          `);
       }
 
       if (url === "https://example.com/leaf.xml") {
-        return {
-          ok: true,
-          text: async () => `
+        return mockResponse(`
             <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
               <url><loc>https://example.com/docs</loc></url>
             </urlset>
-          `
-        } as Response;
+          `);
       }
 
-      return {
-        ok: true,
-        text: async () => "<html><body><main><h1>docs</h1></main></body></html>"
-      } as Response;
+      return mockResponse("<html><body><main><h1>docs</h1></main></body></html>");
     });
 
     const pages = (await loadCrawledPages(config)).records;
@@ -276,33 +261,24 @@ describe("loadCrawledPages", () => {
       const url = String(input);
 
       if (url === "https://example.com/index.xml") {
-        return {
-          ok: true,
-          text: async () => `
+        return mockResponse(`
             <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
               <sitemap><loc>/child.xml</loc></sitemap>
               <sitemap><loc>https://example.com/child.xml</loc></sitemap>
             </sitemapindex>
-          `
-        } as Response;
+          `);
       }
 
       if (url === "https://example.com/child.xml") {
         childFetches += 1;
-        return {
-          ok: true,
-          text: async () => `
+        return mockResponse(`
             <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
               <url><loc>https://example.com/docs</loc></url>
             </urlset>
-          `
-        } as Response;
+          `);
       }
 
-      return {
-        ok: true,
-        text: async () => "<html><body><main>Docs</main></body></html>"
-      } as Response;
+      return mockResponse("<html><body><main>Docs</main></body></html>");
     });
 
     const pages = (await loadCrawledPages(config)).records;
@@ -321,10 +297,7 @@ describe("loadCrawledPages", () => {
 
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: string | URL | Request) => {
       expect(String(input)).toBe("https://example.com/");
-      return {
-        ok: true,
-        text: async () => "<html><body><main><h1>Home</h1></main></body></html>"
-      } as Response;
+      return mockResponse("<html><body><main><h1>Home</h1></main></body></html>");
     });
 
     const pages = (await loadCrawledPages(config)).records;
@@ -344,10 +317,7 @@ describe("loadCrawledPages", () => {
     const seen: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: string | URL | Request) => {
       seen.push(String(input));
-      return {
-        ok: true,
-        text: async () => "<html><body><main><h1>ok</h1></main></body></html>"
-      } as Response;
+      return mockResponse("<html><body><main><h1>ok</h1></main></body></html>");
     });
 
     const pages = (await loadCrawledPages(config, 1.9)).records;
@@ -370,22 +340,16 @@ describe("loadCrawledPages", () => {
       requested.push(url);
 
       if (url === "https://example.com/sitemap.xml") {
-        return {
-          ok: true,
-          text: async () => `
+        return mockResponse(`
             <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
               <url><loc>https://example.com/docs</loc></url>
               <url><loc>ftp://example.com/private</loc></url>
               <url><loc>mailto:admin@example.com</loc></url>
             </urlset>
-          `
-        } as Response;
+          `);
       }
 
-      return {
-        ok: true,
-        text: async () => "<html><body><main>ok</main></body></html>"
-      } as Response;
+      return mockResponse("<html><body><main>ok</main></body></html>");
     });
 
     const pages = (await loadCrawledPages(config)).records;

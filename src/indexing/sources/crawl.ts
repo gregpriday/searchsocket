@@ -25,18 +25,89 @@ function isSitemapIndex(xml: string): boolean {
   return $("sitemapindex").length > 0;
 }
 
-async function fetchSitemapXml(url: string): Promise<string> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch sitemap ${url}: ${res.status} ${res.statusText}`);
+
+/** Wall-clock limit for a single request, so a hung server cannot stall a run. */
+const REQUEST_TIMEOUT_MS = 30_000;
+/** Largest response body accepted, so one huge document cannot exhaust memory. */
+const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
+/** Bounds a sitemap-index fan-out, including a maliciously deep or wide one. */
+const MAX_SITEMAPS = 50;
+
+const USER_AGENT = "Searchsocket";
+
+/**
+ * Fetch with a timeout, a size cap, and a same-origin redirect policy.
+ *
+ * Plain `fetch()` follows redirects anywhere, so a sitemap entry — content the
+ * crawler does not control — could redirect the crawl to an internal address
+ * and have the response indexed. Redirects are followed manually and only
+ * within the site's own origin.
+ */
+async function safeFetch(
+  url: string,
+  allowedOrigin: string,
+  accept: string
+): Promise<{ body: Buffer; contentType: string }> {
+  let current = url;
+
+  for (let redirects = 0; redirects <= 5; redirects += 1) {
+    const target = new URL(current);
+    if (target.origin !== allowedOrigin) {
+      throw new Error(`Refusing to fetch ${target.origin}: outside the configured crawl origin`);
+    }
+    if (target.protocol !== "http:" && target.protocol !== "https:") {
+      throw new Error(`Unsupported scheme ${target.protocol}`);
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(current, {
+        redirect: "manual",
+        signal: controller.signal,
+        headers: { "user-agent": USER_AGENT, accept }
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location) throw new Error(`Redirect from ${current} had no Location header`);
+      current = new URL(location, current).href;
+      continue;
+    }
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${current}: ${response.status} ${response.statusText}`);
+    }
+
+    const declaredLength = Number(response.headers.get("content-length") ?? 0);
+    if (declaredLength > MAX_RESPONSE_BYTES) {
+      throw new Error(`Response from ${current} exceeds ${MAX_RESPONSE_BYTES} bytes`);
+    }
+
+    const body = Buffer.from(await response.arrayBuffer());
+    // Checked again against the real body: Content-Length can be absent or lie.
+    if (body.byteLength > MAX_RESPONSE_BYTES) {
+      throw new Error(`Response from ${current} exceeds ${MAX_RESPONSE_BYTES} bytes`);
+    }
+
+    return { body, contentType: response.headers.get("content-type") ?? "" };
   }
+
+  throw new Error(`Too many redirects fetching ${url}`);
+}
+
+async function fetchSitemapXml(url: string, allowedOrigin: string): Promise<string> {
+  const { body } = await safeFetch(url, allowedOrigin, "application/xml,text/xml");
 
   if (url.endsWith(".gz")) {
-    const buffer = Buffer.from(await res.arrayBuffer());
-    return gunzipSync(buffer).toString("utf8");
+    return gunzipSync(body).toString("utf8");
   }
 
-  return res.text();
+  return body.toString("utf8");
 }
 
 function resolveSitemapUrl(baseUrl: string, candidate: string): string {
@@ -82,8 +153,13 @@ async function parseSitemapFromUrl(url: string, baseUrl: string, visitedSitemaps
     return [];
   }
 
+  if (visitedSitemaps.size >= MAX_SITEMAPS) {
+    logger.warn(`Sitemap limit of ${MAX_SITEMAPS} reached; skipping ${resolved}`);
+    return [];
+  }
+
   visitedSitemaps.add(resolved);
-  const xml = await fetchSitemapXml(resolved);
+  const xml = await fetchSitemapXml(resolved, new URL(baseUrl).origin);
   return parseSitemap(xml, baseUrl, visitedSitemaps);
 }
 
@@ -113,6 +189,7 @@ export async function loadCrawledPages(
     throw new Error("crawl source config is missing");
   }
 
+  const baseOrigin = new URL(crawlConfig.baseUrl).origin;
   const routes = await resolveRoutes(config);
   // Deterministic order before limiting — see static-output for why.
   routes.sort();
@@ -123,15 +200,15 @@ export async function loadCrawledPages(
     selected.map((route) =>
       concurrencyLimit(async (): Promise<PageSourceRecord> => {
         const url = joinUrl(crawlConfig.baseUrl, route);
-        const response = await fetch(url);
+        const { body, contentType } = await safeFetch(url, baseOrigin, "text/html");
 
-        if (!response.ok) {
-          throw new Error(`Failed to fetch route ${route}: ${response.status} ${response.statusText}`);
+        if (contentType && !contentType.includes("text/html")) {
+          throw new Error(`Route ${route} returned ${contentType}, expected text/html`);
         }
 
         return {
           url: normalizeUrlPath(route),
-          html: await response.text(),
+          html: body.toString("utf8"),
           sourcePath: url,
           outgoingLinks: []
         };
