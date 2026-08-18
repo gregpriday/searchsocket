@@ -27,6 +27,9 @@
     "dist",
     "!dist/**/*.map",
     "src/svelte",
+    "src/types.ts",
+    "src/utils/structured-meta.ts",
+    "LICENSE",
     "README.md"
   ],
   "bin": {
