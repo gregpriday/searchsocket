@@ -48,7 +48,8 @@ git config (`git config --get-regexp '^gitflow\.'`).
 - Releases are cut from a `release/*` branch, not from `develop` or `main` directly:
   ```bash
   git switch -c release/0.8.0 develop
-  npm version minor --no-git-tag-version   # bump + update CHANGELOG.md
+  npm version minor --no-git-tag-version   # bumps package.json only
+  # edit CHANGELOG.md by hand, then:
   git commit -am "chore: prepare for v0.8.0 release"
   # merge release/0.8.0 into main, then tag main:
   git switch main && git merge --no-ff release/0.8.0
@@ -60,7 +61,7 @@ git config (`git config --get-regexp '^gitflow\.'`).
 - The workflow runs: pnpm install, typecheck, build, test, then `pnpm publish --provenance --access public`
 - Trusted publisher is configured on NPM to accept the `publish.yml` workflow from `gregpriday/searchsocket`
 - Update CHANGELOG.md with each release
-- You can automate the release process by running the custom `/release` command.
+- Run the `/release` skill (`.claude/skills/release/SKILL.md`) to drive the whole process — it covers the validation gate, the `npm pack` check for the raw-source `./svelte` subpath, both merges, and the failure/rollback paths.
 
 ## CI
 
