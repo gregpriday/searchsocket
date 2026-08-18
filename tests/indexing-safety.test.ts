@@ -31,6 +31,9 @@ function createStatefulMockStore() {
   const pageHashes = new Map<string, { contentHash: string; custom: boolean }>();
   const chunkIds = new Set<string>();
   const chunkHashes = new Map<string, string>();
+  // Provenance per chunk, so the store mock can answer the same question the
+  // real one does — otherwise the custom-chunk protection is never exercised.
+  const chunkCustom = new Map<string, boolean>();
 
   const store = {
     getPageHashes: vi.fn(async () => new Map(pageHashes)),
@@ -46,7 +49,7 @@ function createStatefulMockStore() {
       for (const id of ids) pageHashes.delete(id);
     }),
     deletePages: vi.fn(async () => pageHashes.clear()),
-    scanChunkIds: vi.fn(async () => new Set(chunkIds)),
+    scanChunkIds: vi.fn(async () => new Map([...chunkIds].map((k) => [k, chunkCustom.get(k) === true]))),
     fetchContentHashesForKeys: vi.fn(async (keys: string[]) => {
       const out = new Map<string, string>();
       for (const key of keys) {
@@ -55,16 +58,18 @@ function createStatefulMockStore() {
       }
       return out;
     }),
-    upsertChunks: vi.fn(async (docs: Array<{ id: string; metadata: { contentHash?: string } }>) => {
+    upsertChunks: vi.fn(async (docs: Array<{ id: string; metadata: { contentHash?: string; custom?: boolean } }>) => {
       for (const doc of docs) {
         chunkIds.add(doc.id);
         chunkHashes.set(doc.id, doc.metadata.contentHash ?? "");
+        chunkCustom.set(doc.id, doc.metadata.custom === true);
       }
     }),
     deleteByIds: vi.fn(async (ids: string[]) => {
       for (const id of ids) {
         chunkIds.delete(id);
         chunkHashes.delete(id);
+        chunkCustom.delete(id);
       }
     }),
     listPages: vi.fn(async (): Promise<PageRecord[]> => [])
@@ -366,6 +371,15 @@ describe("mutation ordering and custom-record authority", () => {
     await (await IndexPipeline.create({ cwd, config, store })).run({ changedOnly: true });
     await fs.rm(path.join(cwd, "build", "docs", "beta"), { recursive: true, force: true });
 
+    // Also change a surviving page, so the run genuinely upserts as well as
+    // deletes. Without a real upsert the ordering assertion passes vacuously.
+    await fs.writeFile(
+      path.join(cwd, "build", "docs", "alpha", "index.html"),
+      "<html><head><title>Alpha</title></head><body><main><h1>Alpha</h1>" +
+        "<p>Alpha content, revised.</p></main></body></html>",
+      "utf8"
+    );
+
     const order: string[] = [];
     for (const name of ["upsertPages", "upsertChunks", "deletePagesByIds", "deleteByIds"] as const) {
       vi.mocked(store[name]).mockClear();
@@ -379,7 +393,10 @@ describe("mutation ordering and custom-record authority", () => {
     const firstDelete = order.findIndex((op) => op.startsWith("delete"));
     const lastUpsert = order.map((op) => op.startsWith("upsert")).lastIndexOf(true);
 
-    expect(firstDelete).toBeGreaterThan(-1);
+    expect(order).toContain("upsertPages");
+    expect(order).toContain("upsertChunks");
+    expect(order.some((op) => op.startsWith("delete"))).toBe(true);
+    expect(lastUpsert).toBeGreaterThan(-1);
     expect(lastUpsert).toBeLessThan(firstDelete);
   });
 
@@ -408,6 +425,32 @@ describe("mutation ordering and custom-record authority", () => {
     expect(stats.pagesDeleted).toBe(0);
     expect(store.deletePagesByIds).not.toHaveBeenCalled();
     expect(pageHashes.has("/from-cms/post")).toBe(true);
+  });
+
+  it("does not delete a custom record's chunks when the run supplies none", async () => {
+    // Protecting only the page vector left the page present but its sections
+    // deleted, so get_page returned empty markdown and the record vanished
+    // from section search.
+    const { cwd, config } = await createFixture(THREE_PAGES);
+    const { store, chunkIds } = createStatefulMockStore();
+
+    await (await IndexPipeline.create({ cwd, config, store })).run({
+      changedOnly: true,
+      customRecords: [
+        { url: "/from-cms/post", title: "CMS post", content: "Body text from the CMS." }
+      ]
+    });
+    const chunksAfterFirst = new Set(chunkIds);
+    expect(chunksAfterFirst.size).toBeGreaterThan(0);
+
+    vi.mocked(store.deleteByIds).mockClear();
+    const stats = await (await IndexPipeline.create({ cwd, config, store })).run({
+      changedOnly: true
+    });
+
+    expect(stats.deletes).toBe(0);
+    expect(store.deleteByIds).not.toHaveBeenCalled();
+    expect(new Set(chunkIds)).toEqual(chunksAfterFirst);
   });
 
   it("deletes a custom record when the run explicitly supplies an empty set", async () => {

@@ -44,7 +44,7 @@ export function createServer(engine: SearchEngine): McpServer {
     "search",
     {
       description:
-        "Searches indexed site content using semantic similarity. Returns ranked results with url, title, snippet, chunkText (full section markdown), score, and routeFile (source file path for editing). The highest-ranked results include their best-matching sections; lower-ranked results carry a page summary only. Set groupBy to 'chunk' to search sections directly. Use routeFile to locate the source file when editing content. If snippets lack detail, call get_page with the result URL for the page's indexed markdown.",
+        "Searches indexed site content using semantic similarity. Returns ranked results with url, title, snippet, chunkText (the matched section's indexed text, capped in length), score, and routeFile (source file path for editing). The highest-ranked results include their best-matching sections; lower-ranked results carry a page summary only. Set groupBy to 'chunk' to search sections directly. Use routeFile, when present, to locate the source file for editing; custom-record results have none. If snippets lack detail, call get_page with the result URL for the page's indexed markdown.",
       inputSchema: {
         query: z.string().min(1).describe("Search query. Use keywords or natural language, not full sentences."),
         topK: z.number().int().positive().max(100).optional().describe("Number of results to return (default: 10, max: 100)"),
@@ -116,13 +116,21 @@ export function createServer(engine: SearchEngine): McpServer {
         // Only a genuine miss falls back to suggestions. A backend outage or a
         // rejected scope reported as "page not found" sent the client looking
         // for a spelling mistake instead of surfacing the real failure.
-        if (error instanceof SearchSocketError && error.code !== "INVALID_REQUEST") {
+        // Suggestions are only meaningful for a genuine miss. Anything else —
+        // a backend outage, a refused scope, an unexpected throw — is reported
+        // as what it is, rather than sending the client hunting for a typo.
+        const isNotFound =
+          error instanceof SearchSocketError && error.code === "INVALID_REQUEST" && error.status === 404;
+        if (!isNotFound) {
           return {
             isError: true,
             content: [
               {
                 type: "text",
-                text: `Could not retrieve '${input.path}': ${error.code}. This is a backend or configuration failure, not a missing page.`
+                text:
+                  `Could not retrieve '${input.path}': ` +
+                  `${error instanceof SearchSocketError ? error.code : "INTERNAL_ERROR"}. ` +
+                  "This is a backend or configuration failure, not a missing page."
               }
             ]
           };
@@ -244,7 +252,9 @@ async function startHttpServer(serverFactory: () => McpServer, config: ResolvedS
           jsonrpc: "2.0",
           error: {
             code: -32603,
-            message: error instanceof Error ? error.message : "Internal server error"
+            // Not the raw exception: it can carry a credential or an internal
+            // path, and this response goes to the client.
+            message: "Internal server error"
           },
           id: null
         });

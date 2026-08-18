@@ -42,7 +42,7 @@ function createStatefulMockStore(): {
       }
       return filtered;
     }),
-    scanChunkIds: vi.fn().mockImplementation(async () => new Set(hashes.keys())),
+    scanChunkIds: vi.fn().mockImplementation(async () => new Map([...hashes.keys()].map((k) => [k, false]))),
     upsertPages: vi.fn().mockResolvedValue(undefined),
     getPage: vi.fn().mockResolvedValue(null),
     deletePages: vi.fn().mockResolvedValue(undefined),

@@ -29,7 +29,7 @@ function createMockStore(hits: VectorHit[] = [], pageHits: PageHit[] = []): Upst
     health: vi.fn(async () => ({ ok: true })),
     getContentHashes: vi.fn(async () => new Map<string, string>()),
     fetchContentHashesForKeys: vi.fn(async () => new Map<string, string>()),
-    scanChunkIds: vi.fn(async () => new Set<string>()),
+    scanChunkIds: vi.fn(async () => new Map<string, boolean>()),
     upsertPages: vi.fn(async () => undefined),
     getPage: vi.fn(async () => null),
     listPages: vi.fn(async () => ({ pages: [] })),

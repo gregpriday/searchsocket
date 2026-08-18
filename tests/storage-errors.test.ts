@@ -232,7 +232,7 @@ describe("an absent namespace is still treated as empty", () => {
     const { store } = createStore({ fail: missing });
 
     expect(await store.getPageHashes(scope)).toEqual(new Map());
-    expect(await store.scanChunkIds(scope)).toEqual(new Set());
+    expect(await store.scanChunkIds(scope)).toEqual(new Map());
     expect(await store.listPages(scope)).toEqual({ pages: [] });
     expect(await store.getPage("/docs", scope)).toBeNull();
     expect(await store.fetchPagesBatch(["/a"], scope)).toEqual([]);

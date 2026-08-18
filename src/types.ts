@@ -389,6 +389,8 @@ export interface Chunk {
   publishedAt?: number;
   incomingAnchorText?: string;
   meta?: Record<string, string | number | boolean | string[]>;
+  /** True when this chunk belongs to a caller-supplied CustomRecord. */
+  custom?: boolean;
 }
 
 export interface VectorHit {

@@ -40,7 +40,7 @@ function createMockStoreWithPages(): {
     listScopes: vi.fn().mockResolvedValue([]),
     getContentHashes: vi.fn().mockResolvedValue(new Map()),
     fetchContentHashesForKeys: vi.fn().mockResolvedValue(new Map()),
-    scanChunkIds: vi.fn().mockResolvedValue(new Set()),
+    scanChunkIds: vi.fn().mockResolvedValue(new Map()),
     upsertPages: vi.fn().mockImplementation(async (records: PageVectorDoc[]) => {
       pages.length = 0;
       pages.push(...records);

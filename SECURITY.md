@@ -35,7 +35,7 @@ interchangeable.
 
 **Privileged** — the MCP endpoint and the standalone MCP server:
 
-- Return repository paths, full page markdown, and any scope the caller names.
+- Return repository paths, a page's indexed markdown, and any scope the caller names.
 - The SvelteKit MCP route requires `mcp.handle.apiKey` or
   `mcp.handle.apiKeyEnv`. Without one it answers 503 rather than serving
   unauthenticated.

@@ -44,7 +44,7 @@ function createStatefulMockStore(): {
       }
       return filtered;
     }),
-    scanChunkIds: vi.fn().mockImplementation(async () => new Set(chunkHashes.keys())),
+    scanChunkIds: vi.fn().mockImplementation(async () => new Map([...chunkHashes.keys()].map((k) => [k, false]))),
     upsertPages: vi.fn().mockImplementation(async (pages: Array<{ id: string; data: string; metadata: Record<string, unknown> }>) => {
       for (const page of pages) {
         const contentHash = page.metadata.contentHash as string;

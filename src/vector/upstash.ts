@@ -45,6 +45,7 @@ function clampInt(value: number | undefined, fallback: number, min: number, max:
 interface ChunkVectorMetadata {
   projectId: string;
   scopeName: string;
+  custom?: boolean;
   /** Identity-layout version; see INDEX_SCHEMA_VERSION. */
   schemaVersion?: number;
   /** Logical chunk key, i.e. the record ID minus its scope prefix. */
@@ -715,8 +716,14 @@ export class UpstashSearchStore {
    * Scan all IDs in the chunks namespace for this scope.
    * Used for deletion detection (finding stale chunk keys).
    */
-  async scanChunkIds(scope: Scope): Promise<Set<string>> {
-    const ids = new Set<string>();
+  /**
+   * Logical chunk keys in this scope, each with whether it belongs to a
+   * caller-supplied custom record. The pipeline needs the provenance: a run
+   * that supplies no custom records must leave their chunks alone, exactly as
+   * it leaves their page records alone.
+   */
+  async scanChunkIds(scope: Scope): Promise<Map<string, boolean>> {
+    const ids = new Map<string, boolean>();
     let cursor = "0";
 
     try {
@@ -732,7 +739,7 @@ export class UpstashSearchStore {
         for (const doc of result.vectors) {
           if (!recordBelongsToScope(doc.metadata, scope)) continue;
           const key = logicalKeyFromId(String(doc.id), scope, "chunk");
-          if (key !== null) ids.add(key);
+          if (key !== null) ids.set(key, doc.metadata?.custom === true);
         }
         if (!result.nextCursor || result.nextCursor === "0") break;
         cursor = result.nextCursor;
@@ -980,7 +987,8 @@ export class UpstashSearchStore {
 
   /**
    * Fetch all chunks belonging to a specific page URL, sorted by ordinal.
-   * Used to reconstruct full page markdown from chunk content.
+   * Used to reassemble an approximation of page markdown; see
+   * reconstructMarkdownFromChunks for why it is not canonical.
    */
   async getChunksForPage(
     url: string,

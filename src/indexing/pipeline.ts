@@ -87,6 +87,10 @@ export function buildPageContentHash(page: IndexedPage): string {
     String(page.outgoingLinks),
     String(page.publishedAt ?? ""),
     page.incomingAnchorText ?? "",
+    // Provenance is persisted, so a page that changes from custom-supplied to
+    // site-owned (or back) must be re-upserted even if its text is identical —
+    // otherwise the stored flag stays stale and protects the wrong records.
+    page.custom ? "custom" : "site",
     // Weight affects ranking and is persisted in page metadata, so it must
     // change the hash. Without it, editing searchsocket-weight="1" to "2"
     // left the hash identical, the upsert was skipped, and search kept
@@ -415,6 +419,12 @@ export class IndexPipeline {
           accepted = extracted;
         }
 
+        // Provenance is the pipeline's to assert, not the hook's. A hook that
+        // returns a freshly constructed page would otherwise drop the marker,
+        // and the record would lose the protection that keeps a site-only run
+        // from deleting it.
+        accepted.custom = true;
+
         extractedPages.push(accepted);
         this.logger.event("page_extracted", { url: accepted.url, custom: true });
       }
@@ -712,7 +722,17 @@ export class IndexPipeline {
     // Uses range() scan which may include extra IDs, but deletion of
     // non-existent IDs is safe and idempotent.
     const existingChunkIds = await this.store.scanChunkIds(scope);
-    const staleChunkCandidates = [...existingChunkIds].filter((chunkKey) => !currentChunkMap.has(chunkKey));
+    const staleChunkCandidates = [...existingChunkIds.entries()]
+      .filter(([chunkKey, isCustom]) => {
+        if (currentChunkMap.has(chunkKey)) return false;
+        // Same rule as pages: a run not told about custom records has no
+        // opinion on them. Protecting only the page record left the page
+        // present but its chunks deleted, so `get_page` returned empty
+        // markdown and the record vanished from section search.
+        if (isCustom && options.customRecords === undefined) return false;
+        return true;
+      })
+      .map(([chunkKey]) => chunkKey);
 
     // --- Deletion safety gate ---
     // Everything above only computed a plan. Deleting the difference between
@@ -902,6 +922,7 @@ export class IndexPipeline {
           keywords: chunk.keywords ?? [],
           publishedAt: chunk.publishedAt ?? null,
           incomingAnchorText: chunk.incomingAnchorText ?? "",
+          custom: chunk.custom ?? false,
           ...(chunk.meta && Object.keys(chunk.meta).length > 0 ? { meta: chunk.meta } : {})
         }
       };

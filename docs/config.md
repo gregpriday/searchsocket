@@ -146,7 +146,7 @@ now produces a migration error. Tune ranking through `ranking.weights`.
 - `mcp.enable` (default `NODE_ENV !== "production"`) — mount the MCP endpoint on
   the SvelteKit handle.
 - `mcp.handle.apiKey` / `mcp.handle.apiKeyEnv` — **required** for the endpoint to
-  serve anything. MCP returns repository paths, full page markdown, and any
+  serve anything. MCP returns repository paths, a page's indexed markdown, and any
   scope the caller names, so without a key the route answers 503.
 - `mcp.access` (default `private`) — governs the **standalone** MCP server only:
   whether it binds to loopback or all interfaces. It has no effect on the
@@ -180,7 +180,7 @@ now produces a migration error. Tune ranking through `ranking.weights`.
 - `mcp.enable` (default `NODE_ENV !== "production"`) — mount the MCP endpoint on
   the SvelteKit handle.
 - `mcp.handle.apiKey` / `mcp.handle.apiKeyEnv` — **required** for the endpoint to
-  serve anything. MCP returns repository paths, full page markdown, and any
+  serve anything. MCP returns repository paths, a page's indexed markdown, and any
   scope the caller names, so without a key the route answers 503.
 - `mcp.access` (default `private`) — governs the **standalone** MCP server only:
   whether it binds to loopback or all interfaces. It has no effect on the
@@ -323,7 +323,29 @@ await pipeline.run({
 });
 ```
 
-Custom records receive the same `transformPage` hook treatment as regular pages, and are tagged with their URL path segments automatically.
+Custom records receive the same `transformPage` hook treatment as regular pages,
+and are tagged with their URL path segments automatically. `metadata` becomes
+filterable page metadata, the same as `searchsocket:` meta tags on a real page.
+
+### Deletion semantics
+
+Each run's `customRecords` is treated as the complete set from its caller, so a
+record present last run and absent this run is removed — the same rule the site
+source follows.
+
+Omitting the option entirely is different from passing an empty array:
+
+```ts
+await pipeline.run({});                     // says nothing; existing custom records are kept
+await pipeline.run({ customRecords: [] });  // asserts there are none; existing ones are removed
+```
+
+This matters because custom records live in the same index as site pages. A
+plain `searchsocket index` — from the CLI or the Vite plugin — passes no
+`customRecords`, and previously deleted every one of them as "no longer
+present". A provider that merely failed to run once took its content with it.
+To remove custom records, call `run()` programmatically with an explicit list
+(or an empty one).
 
 ## Environment Variables
 

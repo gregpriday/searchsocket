@@ -362,6 +362,7 @@ export function chunkPage(
       keywords: page.keywords,
       publishedAt: page.publishedAt,
       incomingAnchorText: page.incomingAnchorText,
+      custom: page.custom,
       meta: page.meta
     };
 
@@ -422,6 +423,7 @@ export function chunkPage(
       keywords: page.keywords,
       publishedAt: page.publishedAt,
       incomingAnchorText: page.incomingAnchorText,
+      custom: page.custom,
       meta: page.meta
     };
 

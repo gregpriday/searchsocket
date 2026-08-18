@@ -551,4 +551,8 @@ Retrieve indexed markdown for a specific page:
 GET /api/pages/docs/getting-started
 ```
 
-Returns the full page content as markdown with frontmatter.
+Returns the page's indexed markdown with frontmatter.
+
+The markdown is reassembled from the indexed chunks, so it is complete enough to
+read but is not byte-exact source: it can contain overlap between adjacent
+sections, and a very long page may be truncated at the storage metadata cap.

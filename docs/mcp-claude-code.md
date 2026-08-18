@@ -35,7 +35,7 @@ export const handle = searchsocketHandle({
       handle: {
         path: '/api/mcp',            // default
         // Required. Without a key the endpoint answers 503 — it exposes
-        // repository paths, full page markdown, and arbitrary scopes.
+        // repository paths, indexed page markdown, and arbitrary scopes.
         apiKeyEnv: 'SEARCHSOCKET_MCP_API_KEY',
         enableJsonResponse: true     // default, required for serverless
       }

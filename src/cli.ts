@@ -1393,8 +1393,25 @@ async function main(): Promise<void> {
   // Resolve --cwd before loading .env. Loading from process.cwd() first meant
   // `searchsocket --cwd ../site index` read the wrong directory's credentials —
   // or none at all, and then reported the backend as unconfigured.
-  const cwdIndex = process.argv.findIndex((arg) => arg === "--cwd" || arg === "-C");
-  const cwdArg = cwdIndex !== -1 ? process.argv[cwdIndex + 1] : undefined;
+  // Commander accepts --cwd path, --cwd=path, -C path, and -Cpath, so all four
+  // must be recognised here or `.env` is read from the wrong directory for the
+  // forms this misses.
+  let cwdArg: string | undefined;
+  for (let i = 0; i < process.argv.length; i += 1) {
+    const arg = process.argv[i]!;
+    if (arg === "--cwd" || arg === "-C") {
+      cwdArg = process.argv[i + 1];
+      break;
+    }
+    if (arg.startsWith("--cwd=")) {
+      cwdArg = arg.slice("--cwd=".length);
+      break;
+    }
+    if (arg.startsWith("-C") && arg.length > 2) {
+      cwdArg = arg.slice(2);
+      break;
+    }
+  }
   const envDir = cwdArg ? path.resolve(process.cwd(), cwdArg) : process.cwd();
 
   dotenvConfig({ path: path.resolve(envDir, ".env") });

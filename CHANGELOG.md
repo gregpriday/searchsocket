@@ -68,10 +68,10 @@ observably wrong, not merely untidy. See
 - `search.dualSearch`, `search.pageSearchWeight`, `ranking.aggregationCap`,
   `ranking.aggregationDecay`, `ranking.minChunkScoreRatio`,
   `ranking.weights.aggregation`, `embedding.batchSize`,
-  `embedding.images.enable` — all tunable, none had any runtime effect. Setting
-  one now produces a migration error.
+  `embedding.images.enable`, `chunking.weightHeadings` — all tunable, none had
+  any runtime effect. Setting one now produces a migration error.
 - `UpstashSearchStore` from the package root.
-- Node 20 support; the floor is Node 22.
+- Node 20 support; the floor is Node 22.12.
 
 ### Changed
 

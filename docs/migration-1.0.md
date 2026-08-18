@@ -94,6 +94,7 @@ replacement rather than being silently ignored:
 | `ranking.weights.aggregation` | nothing — chunk aggregation is gone |
 | `embedding.batchSize` | `upstash.batchSize` |
 | `embedding.images.enable` | nothing — SearchSocket is text-only |
+| `chunking.weightHeadings` | `chunking.prependTitle` |
 
 The same keys are also rejected in `rankingOverrides` on a search request, which
 previously stripped them silently.
@@ -107,7 +108,7 @@ Two changes, both of which can take a working deployment offline if ignored:
    endpoint without setting the flag will lose it. Set `mcp.enable: true`.
 2. The endpoint's auth check was wrapped in `if (apiKey)`, so a deployment
    without a configured key served MCP to anyone. MCP is privileged — its tools
-   return repository paths, full page markdown, and any scope the caller names —
+   return repository paths, a page's indexed markdown, and any scope the caller names —
    so it now refuses to serve at all (503) without a key. Set
    `mcp.handle.apiKey`, or the new `mcp.handle.apiKeyEnv` to read it from the
    environment rather than committing it.
@@ -143,8 +144,9 @@ and the result types (`SearchResult`, `PageRecord`, `RelatedPagesResult`,
 `RunWarning`, …) are now exported instead, so consumer code can name what public
 methods return without importing from internal paths.
 
-**Node 22 is the minimum.** Node 20 reached end of life in March 2026. CI tests
-22 and 24.
+**Node 22.12 is the minimum.** Node 20 reached end of life in March 2026, and the
+CommonJS build requires an ESM-only dependency, which needs unflagged
+`require(ESM)` — available from 22.12. CI tests 22 and 24.
 
 **Filter values may not contain a quote or backslash.** Upstash Vector's filter
 syntax documents single-quoted string literals but defines no escape sequence for

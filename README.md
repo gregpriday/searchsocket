@@ -6,7 +6,7 @@
 
 Semantic site search and MCP retrieval for SvelteKit content projects. Index your site, search it from the browser or AI tools, and scroll users to the exact content they're looking for.
 
-**Requirements**: Node.js >= 20.19 | **Backend**: [Upstash Vector](https://upstash.com/docs/vector/overall/getstarted) | **License**: MIT
+**Requirements**: Node.js >= 22.12 | **Backend**: [Upstash Vector](https://upstash.com/docs/vector/overall/getstarted) | **License**: MIT
 
 ## How it works
 

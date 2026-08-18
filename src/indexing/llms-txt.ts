@@ -61,7 +61,10 @@ export function generateLlmsTxt(
 }
 
 /**
- * Generate the content of an llms-full.txt file with full page markdown.
+ * Generate the content of an llms-full.txt file.
+ *
+ * Uses the markdown extracted during the run, not the lossy chunk
+ * reconstruction that `getPage` performs, so this output is complete.
  */
 export function generateLlmsFullTxt(
   pages: IndexedPage[],
