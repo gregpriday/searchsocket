@@ -210,11 +210,34 @@ function preprocessImages(
   });
 }
 
-export function extractFromHtml(
+/**
+ * Why a page was deliberately kept out of the index.
+ * Exclusions are authoritative removal signals: in a complete run the page
+ * genuinely should not be there, so deleting its old records is correct.
+ */
+export type ExclusionReason = "noindex" | "zero-weight";
+
+/**
+ * Why extraction could not produce a page.
+ * Failures are NOT removal signals — a selector regression or malformed input
+ * must never be mistaken for "the author deleted this page", or one bad
+ * `mainSelector` change would wipe the entire index.
+ */
+export interface ExtractionFailure {
+  reason: "empty-content";
+  detail: string;
+}
+
+export type ExtractionResult =
+  | { status: "indexed"; page: ExtractedPage }
+  | { status: "excluded"; reason: ExclusionReason }
+  | { status: "failed"; error: ExtractionFailure };
+
+export function extractFromHtmlResult(
   url: string,
   html: string,
   config: ResolvedSearchSocketConfig
-): ExtractedPage | null {
+): ExtractionResult {
   const $ = load(html);
   const normalizedUrl = normalizeUrlPath(url);
   const pageBaseUrl = new URL(`https://searchsocket.local${normalizedUrl}`);
@@ -229,12 +252,12 @@ export function extractFromHtml(
   if (config.extract.respectRobotsNoindex) {
     const robots = $("meta[name='robots']").attr("content") ?? "";
     if (/\bnoindex\b/i.test(robots)) {
-      return null;
+      return { status: "excluded", reason: "noindex" };
     }
   }
 
   if ($(`[${config.extract.noindexAttr}]`).length > 0) {
-    return null;
+    return { status: "excluded", reason: "noindex" };
   }
 
   // Read per-page search weight from <meta name="searchsocket-weight" content="...">
@@ -249,12 +272,12 @@ export function extractFromHtml(
 
   // If weight is 0, skip indexing entirely — save extraction/chunking/embedding cost
   if (weight === 0) {
-    return null;
+    return { status: "excluded", reason: "zero-weight" };
   }
 
   // Check for searchsocket:noindex meta tag (emitted by <SearchSocket noindex />)
   if ($('meta[name="searchsocket:noindex"]').attr("content") === "true") {
-    return null;
+    return { status: "excluded", reason: "noindex" };
   }
 
   // Reserved searchsocket: meta names that are not user metadata
@@ -357,7 +380,15 @@ export function extractFromHtml(
   const markdown = normalizeMarkdown(turndown.turndown(root.html() ?? ""));
 
   if (!normalizeText(markdown)) {
-    return null;
+    // Not an exclusion: the page exists but nothing survived extraction.
+    // Most often a mainSelector/dropSelectors regression.
+    return {
+      status: "failed",
+      error: {
+        reason: "empty-content",
+        detail: `no text extracted using mainSelector "${config.extract.mainSelector}"`
+      }
+    };
   }
 
   const tags = normalizeUrlPath(url)
@@ -376,24 +407,42 @@ export function extractFromHtml(
   }
 
   return {
-    url: normalizeUrlPath(url),
-    title,
-    markdown,
-    outgoingLinks,
-    noindex: false,
-    tags,
-    description,
-    keywords,
-    weight,
-    publishedAt,
-    meta: Object.keys(meta).length > 0 ? meta : undefined
+    status: "indexed",
+    page: {
+      url: normalizeUrlPath(url),
+      title,
+      markdown,
+      outgoingLinks,
+      noindex: false,
+      tags,
+      description,
+      keywords,
+      weight,
+      publishedAt,
+      meta: Object.keys(meta).length > 0 ? meta : undefined
+    }
   };
 }
 
-export function extractFromMarkdown(url: string, markdown: string, title?: string): ExtractedPage | null {
+/**
+ * Convenience wrapper collapsing every non-indexed outcome to `null`.
+ * The pipeline must use {@link extractFromHtmlResult} instead — it needs to
+ * tell an intentional exclusion apart from a failure before deciding whether
+ * stale records may be deleted.
+ */
+export function extractFromHtml(
+  url: string,
+  html: string,
+  config: ResolvedSearchSocketConfig
+): ExtractedPage | null {
+  const result = extractFromHtmlResult(url, html, config);
+  return result.status === "indexed" ? result.page : null;
+}
+
+export function extractFromMarkdownResult(url: string, markdown: string, title?: string): ExtractionResult {
   // Check for <!-- noindex --> comments outside fenced code blocks.
   if (hasTopLevelNoindexComment(markdown)) {
-    return null;
+    return { status: "excluded", reason: "noindex" };
   }
 
   // Parse frontmatter and check for noindex flag
@@ -402,7 +451,7 @@ export function extractFromMarkdown(url: string, markdown: string, title?: strin
 
   const searchsocketMeta = frontmatter.searchsocket as Record<string, unknown> | undefined;
   if (frontmatter.noindex === true || searchsocketMeta?.noindex === true) {
-    return null;
+    return { status: "excluded", reason: "noindex" };
   }
 
   // Read per-page weight from frontmatter: searchsocket.weight or weight
@@ -412,7 +461,7 @@ export function extractFromMarkdown(url: string, markdown: string, title?: strin
     mdWeight = rawWeight;
   }
   if (mdWeight === 0) {
-    return null;
+    return { status: "excluded", reason: "zero-weight" };
   }
 
   // Read structured metadata from searchsocket.meta in frontmatter
@@ -438,7 +487,10 @@ export function extractFromMarkdown(url: string, markdown: string, title?: strin
   const content = parsed.content;
   const normalized = normalizeMarkdown(content);
   if (!normalizeText(normalized)) {
-    return null;
+    return {
+      status: "failed",
+      error: { reason: "empty-content", detail: "markdown body is empty after normalization" }
+    };
   }
 
   const resolvedTitle = title ?? (typeof frontmatter.title === "string" ? frontmatter.title : undefined) ?? normalizeUrlPath(url);
@@ -455,19 +507,33 @@ export function extractFromMarkdown(url: string, markdown: string, title?: strin
   const publishedAt = extractPublishedAtFromFrontmatter(frontmatter);
 
   return {
-    url: normalizeUrlPath(url),
-    title: resolvedTitle,
-    markdown: normalized,
-    outgoingLinks: [],
-    noindex: false,
-    tags: normalizeUrlPath(url)
-      .split("/")
-      .filter(Boolean)
-      .slice(0, 1),
-    description: fmDescription,
-    keywords: fmKeywords,
-    weight: mdWeight,
-    publishedAt,
-    meta: mdMeta
+    status: "indexed",
+    page: {
+      url: normalizeUrlPath(url),
+      title: resolvedTitle,
+      markdown: normalized,
+      outgoingLinks: [],
+      noindex: false,
+      tags: normalizeUrlPath(url)
+        .split("/")
+        .filter(Boolean)
+        .slice(0, 1),
+      description: fmDescription,
+      keywords: fmKeywords,
+      weight: mdWeight,
+      publishedAt,
+      meta: mdMeta
+    }
   };
+}
+
+/**
+ * Convenience wrapper collapsing every non-indexed outcome to `null`.
+ * The pipeline must use {@link extractFromMarkdownResult} instead — it needs to
+ * tell an intentional exclusion apart from a failure before deciding whether
+ * stale records may be deleted.
+ */
+export function extractFromMarkdown(url: string, markdown: string, title?: string): ExtractedPage | null {
+  const result = extractFromMarkdownResult(url, markdown, title);
+  return result.status === "indexed" ? result.page : null;
 }

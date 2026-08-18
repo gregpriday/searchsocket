@@ -28,7 +28,7 @@ describe("loadStaticOutputPages", () => {
     config.source.mode = "static-output";
     config.source.staticOutputDir = "build";
 
-    const pages = await loadStaticOutputPages(cwd, config);
+    const pages = (await loadStaticOutputPages(cwd, config)).records;
     const byUrl = new Map(pages.map((page) => [page.url, page]));
 
     expect(byUrl.get("/")?.sourcePath).toBe("build/index.html");
@@ -44,7 +44,7 @@ describe("loadStaticOutputPages", () => {
     config.source.mode = "static-output";
     config.source.staticOutputDir = "build";
 
-    const pages = await loadStaticOutputPages(cwd, config, 0);
+    const pages = (await loadStaticOutputPages(cwd, config, 0)).records;
     expect(pages).toEqual([]);
   });
 
@@ -57,7 +57,7 @@ describe("loadStaticOutputPages", () => {
     config.source.mode = "static-output";
     config.source.staticOutputDir = "build";
 
-    const pages = await loadStaticOutputPages(cwd, config, -1);
+    const pages = (await loadStaticOutputPages(cwd, config, -1)).records;
     expect(pages).toEqual([]);
   });
 });

@@ -4,6 +4,7 @@ import pLimit from "p-limit";
 import { Logger } from "../../core/logger";
 import type { PageSourceRecord, ResolvedSearchSocketConfig } from "../../types";
 import { ensureLeadingSlash, joinUrl, normalizeUrlPath } from "../../utils/path";
+import { applyMaxPages, sourceResult, type SourceFailure, type SourceLoadResult } from "./result";
 
 const logger = new Logger();
 
@@ -106,15 +107,16 @@ async function resolveRoutes(config: ResolvedSearchSocketConfig): Promise<string
 export async function loadCrawledPages(
   config: ResolvedSearchSocketConfig,
   maxPages?: number
-): Promise<PageSourceRecord[]> {
+): Promise<SourceLoadResult> {
   const crawlConfig = config.source.crawl;
   if (!crawlConfig) {
     throw new Error("crawl source config is missing");
   }
 
   const routes = await resolveRoutes(config);
-  const maxCount = typeof maxPages === "number" ? Math.max(0, Math.floor(maxPages)) : undefined;
-  const selected = typeof maxCount === "number" ? routes.slice(0, maxCount) : routes;
+  // Deterministic order before limiting — see static-output for why.
+  routes.sort();
+  const { selected, limitedBy } = applyMaxPages(routes, maxPages);
 
   const concurrencyLimit = pLimit(8);
   const results = await Promise.allSettled(
@@ -138,6 +140,7 @@ export async function loadCrawledPages(
   );
 
   const pages: PageSourceRecord[] = [];
+  const failures: SourceFailure[] = [];
   for (let i = 0; i < results.length; i += 1) {
     const result = results[i];
     if (!result) continue;
@@ -145,9 +148,19 @@ export async function loadCrawledPages(
       pages.push(result.value);
     } else {
       const route = selected[i] ?? "unknown";
-      logger.warn(`Skipping route ${route}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+      const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      // A failed fetch is not evidence the page is gone. Recording it here
+      // makes the whole run deletion-ineligible rather than silently
+      // presenting a partial crawl as an authoritative snapshot.
+      failures.push({ target: route, reason });
+      logger.warn(`Skipping route ${route}: ${reason}`);
     }
   }
 
-  return pages;
+  return sourceResult({
+    records: pages,
+    discoveredCount: routes.length,
+    failures,
+    limitedBy
+  });
 }

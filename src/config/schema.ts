@@ -102,6 +102,17 @@ export const searchSocketConfigSchema = z.object({
       batchSize: z.number().int().positive().optional()
     })
     .optional(),
+  indexing: z
+    .object({
+      /**
+       * Refuse to delete when a run would remove more than this fraction of
+       * the existing pages, unless --accept-large-deletion is passed.
+       * A sudden mass deletion is far more often a broken source config than
+       * a genuinely emptied site.
+       */
+      maxDeletionRatio: z.number().min(0).max(1).optional()
+    })
+    .optional(),
   search: z
     .object({
       dualSearch: z.boolean().optional(),

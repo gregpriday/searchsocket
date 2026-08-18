@@ -7,6 +7,7 @@ import { parseManifest, expandRoutes, isExcluded } from "./manifest-parser";
 import { startPreviewServer, type PreviewServer } from "./preview-server";
 import { detectBuildOutput } from "./detect-output";
 import { loadPrerenderedPages } from "./prerendered-fallback";
+import { applyMaxPages, sourceResult, type SourceFailure, type SourceLoadResult } from "../result";
 
 const logger = new Logger();
 
@@ -47,7 +48,7 @@ async function discoverPages(
   server: PreviewServer,
   buildConfig: NonNullable<ResolvedSearchSocketConfig["source"]["build"]>,
   pipelineMaxPages?: number
-): Promise<PageSourceRecord[]> {
+): Promise<SourceLoadResult> {
   const { seedUrls, maxDepth, exclude } = buildConfig;
   const baseOrigin = new URL(server.baseUrl).origin;
 
@@ -58,9 +59,13 @@ async function discoverPages(
     effectiveMax = Math.min(effectiveMax, floored);
   }
 
-  if (effectiveMax === 0) return [];
+  if (effectiveMax === 0) {
+    return sourceResult({ records: [], discoveredCount: 0, limitedBy: "max-pages" });
+  }
 
   const visited = new Set<string>();
+  const failures: SourceFailure[] = [];
+  let depthTruncated = false;
   const pages: PageSourceRecord[] = [];
   const queue: Array<{ url: string; depth: number }> = [];
   const limit = pLimit(8);
@@ -87,11 +92,13 @@ async function discoverPages(
 
           if (!response.ok) {
             logger.warn(`Skipping ${item.url}: ${response.status} ${response.statusText}`);
+            failures.push({ target: item.url, reason: `${response.status} ${response.statusText}` });
             return null;
           }
 
           const contentType = response.headers.get("content-type") ?? "";
           if (!contentType.includes("text/html")) {
+            // Not a page — a deliberate skip, not a failure.
             return null;
           }
 
@@ -99,12 +106,22 @@ async function discoverPages(
 
           // Extract and queue new links if not at max depth
           if (item.depth < maxDepth) {
-            const links = extractLinksFromHtml(html, item.url, baseOrigin);
+            // Sorted so the queue order does not depend on which concurrent
+            // fetch resolved first — otherwise a run that stops at maxPages
+            // indexes a different subset each time.
+            const links = extractLinksFromHtml(html, item.url, baseOrigin).sort();
             for (const link of links) {
               if (!visited.has(link) && !isExcluded(link, exclude)) {
                 visited.add(link);
                 queue.push({ url: link, depth: item.depth + 1 });
               }
+            }
+          } else {
+            // Stopped following links here; pages beyond maxDepth were never
+            // observed, so this run cannot claim a complete view of the site.
+            const links = extractLinksFromHtml(html, item.url, baseOrigin);
+            if (links.some((link) => !visited.has(link) && !isExcluded(link, exclude))) {
+              depthTruncated = true;
             }
           }
 
@@ -118,14 +135,22 @@ async function discoverPages(
       )
     );
 
-    for (const result of results) {
-      if (result.status === "fulfilled" && result.value) {
-        pages.push(result.value);
+    for (let i = 0; i < results.length; i += 1) {
+      const result = results[i];
+      if (!result) continue;
+      if (result.status === "fulfilled") {
+        if (result.value) pages.push(result.value);
+      } else {
+        const target = batch[i]?.url ?? "unknown";
+        const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        failures.push({ target, reason });
+        logger.warn(`Skipping ${target}: ${reason}`);
       }
     }
   }
 
-  if (pages.length >= effectiveMax && queue.length > 0) {
+  const hitMaxPages = pages.length >= effectiveMax && queue.length > 0;
+  if (hitMaxPages) {
     logger.warn(`Discovery crawl reached maxPages limit (${effectiveMax}), ${queue.length} URLs not visited.`);
   }
 
@@ -135,14 +160,19 @@ async function discoverPages(
     urlsSkipped: queue.length
   });
 
-  return pages;
+  return sourceResult({
+    records: pages,
+    discoveredCount: visited.size,
+    failures,
+    limitedBy: hitMaxPages ? "max-pages" : depthTruncated ? "max-depth" : undefined
+  });
 }
 
 export async function loadBuildPages(
   cwd: string,
   config: ResolvedSearchSocketConfig,
   maxPages?: number
-): Promise<PageSourceRecord[]> {
+): Promise<SourceLoadResult> {
   const buildConfig = config.source.build;
   if (!buildConfig) {
     throw new Error("build source config is missing");
@@ -187,8 +217,11 @@ export async function loadBuildPages(
     expandedRoutes: expanded.length
   });
 
-  const maxCount = typeof maxPages === "number" ? Math.max(0, Math.floor(maxPages)) : undefined;
-  const selected = typeof maxCount === "number" ? expanded.slice(0, maxCount) : expanded;
+  // Deterministic order before limiting: manifest expansion order depends on
+  // param-value iteration, so an unsorted slice indexes a different subset on
+  // each limited run.
+  expanded.sort((a, b) => a.url.localeCompare(b.url));
+  const { selected, limitedBy } = applyMaxPages(expanded, maxPages);
 
   const server = await startPreviewServer(cwd, { previewTimeout: buildConfig.previewTimeout }, logger);
 
@@ -217,6 +250,7 @@ export async function loadBuildPages(
     );
 
     const pages: PageSourceRecord[] = [];
+    const failures: SourceFailure[] = [];
     for (let i = 0; i < results.length; i += 1) {
       const result = results[i];
       if (!result) continue;
@@ -224,13 +258,18 @@ export async function loadBuildPages(
         pages.push(result.value);
       } else {
         const route = selected[i]?.url ?? "unknown";
-        logger.warn(
-          `Skipping build route ${route}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
-        );
+        const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        failures.push({ target: route, reason });
+        logger.warn(`Skipping build route ${route}: ${reason}`);
       }
     }
 
-    return pages;
+    return sourceResult({
+      records: pages,
+      discoveredCount: expanded.length,
+      failures,
+      limitedBy
+    });
   } finally {
     await server.shutdown();
   }

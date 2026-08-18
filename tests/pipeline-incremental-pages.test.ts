@@ -209,7 +209,7 @@ describe("IndexPipeline incremental pages", () => {
     expect(deletedIds).toContain("/docs/beta");
   });
 
-  it("uses deletePages (reset) under force mode", async () => {
+  it("re-upserts every page under force mode without wiping the index first", async () => {
     const { cwd, config } = await createFixture({
       "docs/alpha": { title: "Alpha", body: "Alpha content here." }
     });
@@ -226,9 +226,34 @@ describe("IndexPipeline incremental pages", () => {
     const pipeline2 = await IndexPipeline.create({ cwd, config, store });
     const stats2 = await pipeline2.run({ force: true });
 
-    expect(store.deletePages).toHaveBeenCalledTimes(1);
+    // Force used to call deletePages() first, leaving the index empty for the
+    // duration of the re-upsert — a crash in between served an empty index.
+    // Force now means "re-upsert everything regardless of hash".
+    expect(store.deletePages).not.toHaveBeenCalled();
     expect(store.upsertPages).toHaveBeenCalled();
     expect(stats2.pagesChanged).toBe(1); // force treats all as changed
+  });
+
+  it("still removes pages that disappeared, under force mode", async () => {
+    const { cwd, config } = await createFixture({
+      "docs/alpha": { title: "Alpha", body: "Alpha content here." },
+      "docs/beta": { title: "Beta", body: "Beta content here." }
+    });
+    const { store } = createStatefulMockStore();
+
+    const pipeline1 = await IndexPipeline.create({ cwd, config, store });
+    await pipeline1.run({ changedOnly: true });
+
+    // Remove one page from the source
+    await fs.rm(path.join(cwd, "build", "docs", "beta", "index.html"), { force: true });
+
+    vi.mocked(store.deletePagesByIds).mockClear();
+    const pipeline2 = await IndexPipeline.create({ cwd, config, store });
+    const stats2 = await pipeline2.run({ force: true });
+
+    expect(stats2.deletionEligible).toBe(true);
+    expect(stats2.pagesDeleted).toBe(1);
+    expect(store.deletePagesByIds).toHaveBeenCalledWith(["/docs/beta"], expect.anything());
   });
 
   it("does not write pages on dry run", async () => {

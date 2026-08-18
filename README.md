@@ -745,10 +745,33 @@ pnpm searchsocket index --force            # full re-index
 pnpm searchsocket index --source build     # override source mode
 pnpm searchsocket index --scope staging    # override scope
 pnpm searchsocket index --dry-run          # preview without writing
-pnpm searchsocket index --max-pages 10     # limit for testing
+pnpm searchsocket index --max-pages 10     # limit for testing (never deletes)
 pnpm searchsocket index --verbose          # detailed output
 pnpm searchsocket index --json             # machine-readable output
 ```
+
+
+#### Deletion safety
+
+An indexing run removes stale records only when it observed the complete source
+of truth. A run truncated by `--max-pages`/`--max-chunks`, one that failed to
+fetch or extract a page, or one whose source unexpectedly returned nothing is
+reported as `deletionEligible: false` and deletes nothing — the stale records
+are left in place rather than risking the loss of a valid index.
+
+Two further guards need an explicit opt-in:
+
+```bash
+# The source legitimately produced zero pages and you want the index emptied
+pnpm searchsocket index --allow-empty
+
+# The run would remove more than indexing.maxDeletionRatio (default 50%)
+pnpm searchsocket index --accept-large-deletion
+```
+
+`searchsocket index` exits 5 when no vector backend is configured. Pass
+`--allow-unconfigured` to skip indexing without failing (the Vite plugin already
+behaves this way).
 
 ### `searchsocket search`
 
@@ -812,23 +835,45 @@ Reports pass/fail per assertion and Mean Reciprocal Rank (MRR) across all querie
 
 ### `searchsocket clean`
 
-Delete local state and optionally remote indexes.
+Delete local state and optionally remote indexes. Remote deletion is a dry run
+until you pass `--apply`.
 
 ```bash
-pnpm searchsocket clean                    # local state only
-pnpm searchsocket clean --remote           # also delete remote scope
-pnpm searchsocket clean --scope staging    # specific scope
+pnpm searchsocket clean                                  # local state only
+pnpm searchsocket clean --remote --scope staging         # show the plan
+pnpm searchsocket clean --remote --scope staging --apply # delete that scope
+pnpm searchsocket clean --keep-local --remote --scope staging --apply
 ```
+
+Dropping every scope in the project needs an explicit confirmation token:
+
+```bash
+pnpm searchsocket clean --remote --all-scopes --apply --confirm-project my-site
+```
+
+`--scope` applies to the remote deletion only. Without `--remote` the command
+just removes the local state directory.
 
 ### `searchsocket prune`
 
-List and delete stale scopes. Compares against git branches to find orphaned scopes.
+List and delete stale scopes. Compares against remote git branches to find
+orphaned scopes.
 
 ```bash
-pnpm searchsocket prune                       # dry-run (default)
-pnpm searchsocket prune --apply               # actually delete
-pnpm searchsocket prune --older-than 30d      # only scopes older than 30 days
+pnpm searchsocket prune                                  # dry-run (default)
+pnpm searchsocket prune --apply                          # delete orphaned scopes
+pnpm searchsocket prune --older-than 30d --apply         # orphaned AND inactive 30d
+pnpm searchsocket prune --older-than 30d --match any --apply  # orphaned OR inactive
+pnpm searchsocket prune --protect staging,demo --apply   # never touch these
 ```
+
+Prune fails closed. It refuses to run when the remote branch list cannot be
+trusted — a shallow clone, a repository with no remotes, or an empty
+`--scopes-file` — because every scope would otherwise look orphaned. In CI,
+check out with full history (`actions/checkout` with `fetch-depth: 0`) or pass
+`--scopes-file`. Scopes with no recorded index timestamp are skipped by
+`--older-than` rather than assumed old, and the current scope plus `main` are
+always protected.
 
 ### `searchsocket mcp`
 

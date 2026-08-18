@@ -134,6 +134,10 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
       ...defaults.embedding,
       ...parsed.embedding
     },
+    indexing: {
+      ...defaults.indexing,
+      ...parsed.indexing
+    },
     search: {
       ...defaults.search,
       ...parsed.search

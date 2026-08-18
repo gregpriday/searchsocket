@@ -86,6 +86,13 @@ export interface SearchSocketConfig {
     taskType?: string;
     batchSize?: number;
   };
+  indexing?: {
+    /**
+     * Refuse deletions removing more than this fraction of existing pages
+     * unless explicitly accepted. Default 0.5.
+     */
+    maxDeletionRatio?: number;
+  };
   search?: {
     dualSearch?: boolean;
     pageSearchWeight?: number;
@@ -227,6 +234,9 @@ export interface ResolvedSearchSocketConfig {
     dimensions: number;
     taskType: string;
     batchSize: number;
+  };
+  indexing: {
+    maxDeletionRatio: number;
   };
   search: {
     dualSearch: boolean;
@@ -518,6 +528,20 @@ export interface SearchResponse {
   };
 }
 
+/**
+ * Why an indexing run could not claim a complete view of the source.
+ * Any warning present makes the run deletion-ineligible.
+ */
+export interface RunWarning {
+  kind:
+    | "source-limited"
+    | "source-failure"
+    | "chunks-limited"
+    | "extraction-failure"
+    | "hook-failure";
+  detail: string;
+}
+
 export interface IndexStats {
   pagesProcessed: number;
   pagesChanged: number;
@@ -529,6 +553,18 @@ export interface IndexStats {
   routeExact: number;
   routeBestEffort: number;
   stageTimingsMs: Record<string, number>;
+  /**
+   * Whether this run observed the complete source of truth and was therefore
+   * allowed to delete records missing from it. False means stale records were
+   * intentionally left in place.
+   */
+  deletionEligible: boolean;
+  /** Every reason the run's view of the source may be partial. */
+  warnings: RunWarning[];
+  /**
+   * Destructive operations performed or refused, for machine-readable output.
+   */
+  dangerousOperations: string[];
 }
 
 export interface IndexingHooks {
@@ -557,6 +593,17 @@ export interface IndexOptions {
   maxChunks?: number;
   verbose?: boolean;
   customRecords?: CustomRecord[];
+  /**
+   * Permit deletion when a complete run legitimately produced zero pages.
+   * Without this an unexpectedly empty source deletes nothing, because the far
+   * more common cause is a broken source config rather than an emptied site.
+   */
+  allowEmpty?: boolean;
+  /**
+   * Permit a deletion that would remove more than
+   * `indexing.maxDeletionRatio` of the existing pages.
+   */
+  acceptLargeDeletion?: boolean;
 }
 
 export interface SearchRuntimeOptions {

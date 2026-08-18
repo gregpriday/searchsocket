@@ -83,6 +83,19 @@ function printIndexSummary(stats: IndexStats): void {
   process.stdout.write(`documents upserted: ${stats.documentsUpserted}\n`);
   process.stdout.write(`deletes: ${stats.deletes}\n`);
   process.stdout.write(`route mapping: ${stats.routeExact} exact, ${stats.routeBestEffort} best-effort\n`);
+  process.stdout.write(`deletion eligible: ${stats.deletionEligible ? "yes" : "no"}\n`);
+  if (stats.warnings.length > 0) {
+    process.stdout.write(`warnings (${stats.warnings.length}):\n`);
+    for (const warning of stats.warnings) {
+      process.stdout.write(`  ${warning.kind}: ${warning.detail}\n`);
+    }
+  }
+  if (stats.dangerousOperations.length > 0) {
+    process.stdout.write("destructive operations:\n");
+    for (const op of stats.dangerousOperations) {
+      process.stdout.write(`  ${op}\n`);
+    }
+  }
   process.stdout.write("stage timings (ms):\n");
   for (const [stage, ms] of Object.entries(stats.stageTimingsMs)) {
     process.stdout.write(`  ${stage}: ${ms}\n`);
@@ -153,31 +166,66 @@ function readScopesFromFile(filePath: string): Set<string> {
   );
 }
 
-function readRemoteGitBranches(cwd: string): Set<string> {
-  try {
-    const output = execSync("git branch -r --format='%(refname:short)'", {
+/**
+ * The set of branch names that exist on remotes, used by `prune` to decide
+ * which scopes are orphaned.
+ *
+ * Returns `null` — not an empty set — whenever the inventory cannot be trusted.
+ * A shallow clone, a missing remote, or a git failure all yield a short or
+ * empty branch list, and treating that as "these are all the branches" marks
+ * every live scope orphaned and deletes it.
+ */
+function readRemoteGitBranches(cwd: string): Set<string> | null {
+  const git = (args: string): string =>
+    execSync(`git ${args}`, {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"]
     });
 
-    const scopes = output
+  try {
+    // A shallow checkout does not have the full ref set. `actions/checkout`
+    // defaults to fetch-depth: 1, so this is the common CI case.
+    if (git("rev-parse --is-shallow-repository").trim() === "true") {
+      process.stderr.write(
+        "warning: repository is a shallow clone, so its branch list is incomplete.\n"
+      );
+      return null;
+    }
+
+    const remotes = git("remote")
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => line.replace(/^origin\//, ""));
+      .filter(Boolean);
 
-    if (scopes.length <= 1) {
-      process.stdout.write(
-        "warning: git branch -r returned 1 or fewer branches. " +
-          "If running in CI, ensure the checkout step uses fetch-depth: 0 " +
-          "to avoid accidentally pruning active branch scopes.\n"
-      );
+    if (remotes.length === 0) {
+      process.stderr.write("warning: repository has no configured remotes.\n");
+      return null;
+    }
+
+    const scopes = git("branch -r --format='%(refname:short)'")
+      .split(/\r?\n/)
+      .map((line) => line.trim().replace(/^'|'$/g, ""))
+      .filter(Boolean)
+      // Drop the symbolic remote HEAD ("origin/HEAD -> origin/main", printed
+      // as a bare remote name). Counting it inflated the branch total and let
+      // a one-branch shallow inventory look plausible.
+      .filter((line) => line.includes("/"))
+      // Strip whichever remote the ref belongs to, not just "origin/".
+      .map((line) => {
+        const remote = remotes.find((r) => line.startsWith(`${r}/`));
+        return remote ? line.slice(remote.length + 1) : line;
+      })
+      .filter((name) => name !== "HEAD");
+
+    if (scopes.length === 0) {
+      process.stderr.write("warning: no remote branches found.\n");
+      return null;
     }
 
     return new Set(scopes);
   } catch {
-    return new Set();
+    return null;
   }
 }
 
@@ -200,6 +248,16 @@ function getRootOptions(command: Command): RootCommandOptions {
   return optsFn.call(maybeParent) as RootCommandOptions;
 }
 
+/**
+ * Stable process exit codes. Machine consumers (CI, the prune workflow) branch
+ * on these, so the meanings must not be reassigned.
+ */
+const EXIT_OPERATIONAL_FAILURE = 1;
+const EXIT_INVALID_USAGE = 2;
+const EXIT_QUALITY_GATE = 3;
+const EXIT_DESTRUCTIVE_REFUSED = 4;
+const EXIT_BACKEND_UNAVAILABLE = 5;
+
 async function runIndexCommand(opts: {
   cwd: string;
   configPath?: string;
@@ -213,6 +271,14 @@ async function runIndexCommand(opts: {
   quiet?: boolean;
   verbose?: boolean;
   json?: boolean;
+  allowEmpty?: boolean;
+  acceptLargeDeletion?: boolean;
+  /**
+   * Treat a missing backend as a skip rather than a failure. The Vite plugin
+   * sets this so an unconfigured local build still succeeds; an explicit
+   * `searchsocket index` must fail instead of silently doing nothing.
+   */
+  allowUnconfigured?: boolean;
 }): Promise<void> {
   const logger = new Logger({
     quiet: opts.quiet,
@@ -229,7 +295,17 @@ async function runIndexCommand(opts: {
     });
   } catch (error) {
     if (error instanceof SearchSocketError && error.code === "VECTOR_BACKEND_UNAVAILABLE") {
-      logger.warn("Search backend not configured — skipping indexing. Set UPSTASH_VECTOR_REST_URL and UPSTASH_VECTOR_REST_TOKEN to enable.");
+      if (opts.allowUnconfigured) {
+        logger.warn("Search backend not configured — skipping indexing. Set UPSTASH_VECTOR_REST_URL and UPSTASH_VECTOR_REST_TOKEN to enable.");
+        return;
+      }
+      // An explicit index run that indexes nothing must not report success:
+      // CI would treat a missing credential as a green deploy.
+      logger.error(
+        "Search backend not configured. Set UPSTASH_VECTOR_REST_URL and UPSTASH_VECTOR_REST_TOKEN, " +
+          "or pass --allow-unconfigured to skip indexing without failing."
+      );
+      process.exitCode = EXIT_BACKEND_UNAVAILABLE;
       return;
     }
     throw error;
@@ -243,7 +319,9 @@ async function runIndexCommand(opts: {
     sourceOverride: opts.source,
     maxPages: opts.maxPages,
     maxChunks: opts.maxChunks,
-    verbose: opts.verbose
+    verbose: opts.verbose,
+    allowEmpty: opts.allowEmpty,
+    acceptLargeDeletion: opts.acceptLargeDeletion
   });
 
   if (opts.json) {
@@ -458,6 +536,9 @@ program
   .option("--quiet", "suppress all output except errors and warnings", false)
   .option("--verbose", "verbose output", false)
   .option("--json", "emit JSON logs and summary", false)
+  .option("--allow-empty", "permit deleting all records when the source legitimately produced zero pages", false)
+  .option("--accept-large-deletion", "permit a deletion exceeding indexing.maxDeletionRatio", false)
+  .option("--allow-unconfigured", "exit 0 instead of failing when no vector backend is configured", false)
   .action(async (opts, command) => {
     const rootOpts = getRootOptions(command);
     const cwd = path.resolve(rootOpts?.cwd ?? process.cwd());
@@ -474,7 +555,10 @@ program
       maxChunks: opts.maxChunks ? parsePositiveInt(opts.maxChunks, "--max-chunks") : undefined,
       quiet: opts.quiet,
       verbose: opts.verbose,
-      json: opts.json
+      json: opts.json,
+      allowEmpty: opts.allowEmpty,
+      acceptLargeDeletion: opts.acceptLargeDeletion,
+      allowUnconfigured: opts.allowUnconfigured
     });
   });
 
@@ -670,24 +754,70 @@ program
 
 program
   .command("clean")
-  .description("Delete local state and optionally delete remote indexes for a scope")
-  .option("--scope <name>", "scope override")
-  .option("--remote", "delete remote scope indexes", false)
+  .description("Delete local state and optionally delete remote indexes (dry-run by default for remote)")
+  .option("--scope <name>", "scope to delete remotely (defaults to the resolved scope)")
+  .option("--remote", "delete remote indexes for a single scope", false)
+  .option("--all-scopes", "delete every scope in the project (requires --confirm-project)", false)
+  .option("--confirm-project <id>", "confirmation token for --all-scopes; must equal the project id")
+  .option("--apply", "actually perform remote deletions", false)
+  .option("--keep-local", "do not delete the local state directory", false)
   .action(async (opts, command) => {
     const rootOpts = getRootOptions(command);
     const cwd = path.resolve(rootOpts?.cwd ?? process.cwd());
 
     const config = await loadConfig({ cwd, configPath: rootOpts?.config });
 
-    const statePath = path.join(cwd, config.state.dir);
-    await fsp.rm(statePath, { recursive: true, force: true });
-    process.stdout.write(`deleted local state directory: ${statePath}\n`);
+    if (opts.allScopes && !opts.remote) {
+      process.stderr.write("error: --all-scopes requires --remote\n");
+      process.exitCode = EXIT_INVALID_USAGE;
+      return;
+    }
 
-    if (opts.remote) {
+    if (!opts.keepLocal) {
+      const statePath = path.join(cwd, config.state.dir);
+      await fsp.rm(statePath, { recursive: true, force: true });
+      process.stdout.write(`deleted local state directory: ${statePath}\n`);
+    }
+
+    if (!opts.remote) return;
+
+    // --all-scopes is the only path that may touch scopes other than the one
+    // named. Previously `clean --remote --scope foo` resolved the scope flag
+    // and then dropped the entire project regardless.
+    if (opts.allScopes) {
+      if (opts.confirmProject !== config.project.id) {
+        process.stderr.write(
+          `error: --all-scopes deletes every scope in project "${config.project.id}". ` +
+            `Re-run with --confirm-project ${config.project.id} to acknowledge.\n`
+        );
+        process.exitCode = EXIT_DESTRUCTIVE_REFUSED;
+        return;
+      }
+
+      process.stdout.write(`plan: drop ALL scopes in project ${config.project.id}\n`);
+      if (!opts.apply) {
+        process.stdout.write("dry-run only. pass --apply to delete.\n");
+        return;
+      }
+
       const store = await createUpstashStore(config);
       await store.dropAllIndexes(config.project.id);
       process.stdout.write(`dropped all remote indexes for project ${config.project.id}\n`);
+      return;
     }
+
+    const scope = resolveScope(config, opts.scope);
+    process.stdout.write(
+      `plan: delete remote records for project ${scope.projectId}, scope ${scope.scopeName}\n`
+    );
+    if (!opts.apply) {
+      process.stdout.write("dry-run only. pass --apply to delete.\n");
+      return;
+    }
+
+    const store = await createUpstashStore(config);
+    await store.deleteScope(scope);
+    process.stdout.write(`deleted remote records for scope ${scope.scopeName}\n`);
   });
 
 program
@@ -696,6 +826,12 @@ program
   .option("--apply", "apply deletions", false)
   .option("--scopes-file <path>", "file containing active scopes")
   .option("--older-than <duration>", "ttl cutoff like 30d")
+  .option(
+    "--match <mode>",
+    "when both --scopes-file/git branches and --older-than are given: 'any' or 'all'",
+    "all"
+  )
+  .option("--protect <names>", "comma-separated scopes that must never be pruned")
   .action(async (opts, command) => {
     const rootOpts = getRootOptions(command);
     const cwd = path.resolve(rootOpts?.cwd ?? process.cwd());
@@ -718,49 +854,102 @@ program
 
     process.stdout.write(`using Upstash Vector\n`);
 
+    if (opts.match !== "any" && opts.match !== "all") {
+      process.stderr.write(`error: --match must be "any" or "all", got "${opts.match}"\n`);
+      process.exitCode = EXIT_INVALID_USAGE;
+      return;
+    }
+
+    // Scopes that must survive regardless of any rule: the scope this checkout
+    // resolves to, the conventional production scope, and anything the caller
+    // explicitly protected.
+    const protectedScopes = new Set<string>(["main", baseScope.scopeName]);
+    if (typeof opts.protect === "string") {
+      for (const name of opts.protect.split(",").map((n: string) => n.trim()).filter(Boolean)) {
+        protectedScopes.add(config.scope.sanitize ? sanitizeScopeName(name) : name);
+      }
+    }
+
     let keepScopes = new Set<string>();
     if (opts.scopesFile) {
       keepScopes = readScopesFromFile(path.resolve(cwd, opts.scopesFile));
+      if (keepScopes.size === 0) {
+        // An empty keep-list would mark every scope orphaned.
+        process.stderr.write(
+          `error: scopes file ${opts.scopesFile} listed no scopes. Refusing to treat every scope as orphaned.\n`
+        );
+        process.exitCode = EXIT_DESTRUCTIVE_REFUSED;
+        return;
+      }
     } else {
-      keepScopes = readRemoteGitBranches(cwd);
+      const branches = readRemoteGitBranches(cwd);
+      if (branches === null) {
+        // Fail closed: the branch inventory could not be established, so every
+        // scope would look orphaned.
+        process.stderr.write(
+          "error: could not establish a trustworthy remote branch list. " +
+            "Refusing to prune. Use --scopes-file to supply the active scopes explicitly, " +
+            "or check out with full history (actions/checkout with fetch-depth: 0).\n"
+        );
+        process.exitCode = EXIT_DESTRUCTIVE_REFUSED;
+        return;
+      }
+      keepScopes = branches;
     }
 
-    if (config.scope.sanitize && keepScopes.size > 0) {
+    if (config.scope.sanitize) {
       keepScopes = new Set([...keepScopes].map(sanitizeScopeName));
     }
 
-    const olderThanMs = opts.olderThan ? parseDurationMs(opts.olderThan) : undefined;
+    let olderThanMs: number | undefined;
+    if (opts.olderThan) {
+      olderThanMs = parseDurationMs(opts.olderThan);
+      if (!Number.isFinite(olderThanMs) || olderThanMs <= 0) {
+        process.stderr.write(`error: could not parse --older-than "${opts.olderThan}"\n`);
+        process.exitCode = EXIT_INVALID_USAGE;
+        return;
+      }
+    }
     const now = Date.now();
 
+    const skipped: string[] = [];
     const stale = scopes.filter((entry) => {
-      if (entry.scopeName === "main") {
+      if (protectedScopes.has(entry.scopeName)) {
         return false;
       }
 
-      let staleByList = false;
-      if (keepScopes.size > 0) {
-        staleByList = !keepScopes.has(entry.scopeName);
-      }
+      const staleByList = !keepScopes.has(entry.scopeName);
 
       let staleByTtl = false;
-      if (olderThanMs && entry.lastIndexedAt !== "unknown") {
-        staleByTtl = now - Date.parse(entry.lastIndexedAt) > olderThanMs;
+      if (olderThanMs !== undefined) {
+        if (entry.lastIndexedAt === "unknown") {
+          // No trustworthy timestamp. Treating unknown as "old" would delete
+          // scopes purely because their age could not be established.
+          skipped.push(
+            `${entry.scopeName}: no recorded indexedAt, cannot evaluate --older-than`
+          );
+          return false;
+        }
+        const parsed = Date.parse(entry.lastIndexedAt);
+        if (Number.isNaN(parsed)) {
+          skipped.push(`${entry.scopeName}: unparseable indexedAt "${entry.lastIndexedAt}"`);
+          return false;
+        }
+        staleByTtl = now - parsed > olderThanMs;
       }
 
-      if (keepScopes.size > 0 && olderThanMs) {
-        return staleByList || staleByTtl;
-      }
+      if (olderThanMs === undefined) return staleByList;
 
-      if (keepScopes.size > 0) {
-        return staleByList;
-      }
-
-      if (olderThanMs) {
-        return staleByTtl;
-      }
-
-      return false;
+      // Default "all": a scope must be BOTH orphaned and inactive. The old
+      // behaviour was an implicit OR, which deleted an active branch's scope
+      // merely for being old.
+      return opts.match === "any" ? staleByList || staleByTtl : staleByList && staleByTtl;
     });
+
+    if (skipped.length > 0) {
+      process.stdout.write(`skipped ${skipped.length} scope(s) with unusable timestamps:\n`);
+      for (const line of skipped) process.stdout.write(`  - ${line}\n`);
+    }
 
     if (stale.length === 0) {
       process.stdout.write("no stale scopes found\n");

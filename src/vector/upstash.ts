@@ -7,6 +7,7 @@ import type {
   ScopeInfo,
   VectorHit
 } from "../types";
+import { SearchSocketError } from "../errors";
 
 /** Flat metadata stored alongside each chunk vector in Upstash Vector */
 interface ChunkVectorMetadata {
@@ -92,6 +93,17 @@ export interface UpstashSearchStoreOptions {
   index: Index;
   pagesNamespace: string;
   chunksNamespace: string;
+}
+
+/**
+ * Distinguish "this namespace has never been written to" from every other
+ * backend failure. Only the former may be treated as empty state — an auth
+ * error, timeout, or rate limit reported as "no records" can drive a caller
+ * into deleting a perfectly healthy index.
+ */
+export function isMissingNamespaceError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /namespace .*(not found|does not exist)|no such namespace/i.test(message);
 }
 
 export class UpstashSearchStore {
@@ -362,12 +374,16 @@ export class UpstashSearchStore {
 
   async listScopes(projectId: string): Promise<ScopeInfo[]> {
     const scopeMap = new Map<string, number>();
+    // Latest `indexedAt` actually observed on a page record for each scope.
+    // Previously this method stamped `new Date()` on every scope, which made
+    // every scope look freshly indexed and rendered TTL pruning meaningless.
+    const lastIndexed = new Map<string, string>();
 
     for (const ns of [this.chunksNs, this.pagesNs]) {
       let cursor = "0";
       try {
         for (;;) {
-          const result = await ns.range<ChunkVectorMetadata>({
+          const result = await ns.range<ChunkVectorMetadata & { indexedAt?: string }>({
             cursor,
             limit: 100,
             includeMetadata: true
@@ -376,20 +392,40 @@ export class UpstashSearchStore {
             if (doc.metadata?.projectId === projectId) {
               const scopeName = doc.metadata.scopeName ?? "";
               scopeMap.set(scopeName, (scopeMap.get(scopeName) ?? 0) + 1);
+
+              const indexedAt = doc.metadata.indexedAt;
+              if (typeof indexedAt === "string" && !Number.isNaN(Date.parse(indexedAt))) {
+                const current = lastIndexed.get(scopeName);
+                if (!current || Date.parse(indexedAt) > Date.parse(current)) {
+                  lastIndexed.set(scopeName, indexedAt);
+                }
+              }
             }
           }
           if (!result.nextCursor || result.nextCursor === "0") break;
           cursor = result.nextCursor;
         }
-      } catch {
-        // Namespace may not exist yet
+      } catch (error) {
+        // A namespace that has never been written to is genuinely absent and
+        // contributes nothing. Any other failure means this listing is
+        // incomplete, and callers such as `prune` make deletion decisions from
+        // it — so surface it rather than reporting a truncated scope list.
+        if (!isMissingNamespaceError(error)) {
+          throw new SearchSocketError(
+            "VECTOR_BACKEND_UNAVAILABLE",
+            `Failed to list scopes for project "${projectId}": ${error instanceof Error ? error.message : String(error)}`,
+            { cause: error }
+          );
+        }
       }
     }
 
     return [...scopeMap.entries()].map(([scopeName, count]) => ({
       projectId,
       scopeName,
-      lastIndexedAt: new Date().toISOString(),
+      // "unknown" is truthful: no page record in this scope carried a
+      // parseable indexedAt. Callers must not treat it as "old".
+      lastIndexedAt: lastIndexed.get(scopeName) ?? "unknown",
       documentCount: count
     }));
   }

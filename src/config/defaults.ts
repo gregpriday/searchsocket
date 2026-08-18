@@ -66,6 +66,9 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       taskType: "RETRIEVAL_DOCUMENT",
       batchSize: 100
     },
+    indexing: {
+      maxDeletionRatio: 0.5
+    },
     search: {
       dualSearch: true,
       pageSearchWeight: 0.3

@@ -25,7 +25,7 @@ describe("loadCrawledPages", () => {
       } as Response;
     });
 
-    const pages = await loadCrawledPages(config);
+    const pages = (await loadCrawledPages(config)).records;
     expect(pages.map((page) => page.url)).toEqual(["/docs", "/docs/getting-started"]);
   });
 
@@ -47,7 +47,7 @@ describe("loadCrawledPages", () => {
       } as Response;
     });
 
-    const pages = await loadCrawledPages(config);
+    const pages = (await loadCrawledPages(config)).records;
     expect(pages.map((page) => page.url).sort()).toEqual(["/blog", "/docs"]);
     expect(seen).toEqual(new Set(["https://example.com/docs", "https://example.com/blog"]));
   });
@@ -82,7 +82,7 @@ describe("loadCrawledPages", () => {
       } as Response;
     });
 
-    const pages = await loadCrawledPages(config);
+    const pages = (await loadCrawledPages(config)).records;
     expect(pages.map((page) => page.url).sort()).toEqual(["/blog/intro", "/docs"]);
   });
 
@@ -148,7 +148,7 @@ describe("loadCrawledPages", () => {
       } as Response;
     });
 
-    const pages = await loadCrawledPages(config);
+    const pages = (await loadCrawledPages(config)).records;
     expect(pages.map((page) => page.url).sort()).toEqual(["/docs", "/shared"]);
   });
 
@@ -183,7 +183,7 @@ describe("loadCrawledPages", () => {
       } as Response;
     });
 
-    const pages = await loadCrawledPages(config);
+    const pages = (await loadCrawledPages(config)).records;
     expect(pages.map((page) => page.url)).toEqual(["/docs"]);
   });
 
@@ -203,7 +203,7 @@ describe("loadCrawledPages", () => {
       } as Response;
     });
 
-    const pages = await loadCrawledPages(config, -10);
+    const pages = (await loadCrawledPages(config, -10)).records;
     expect(pages).toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -256,7 +256,7 @@ describe("loadCrawledPages", () => {
       } as Response;
     });
 
-    const pages = await loadCrawledPages(config);
+    const pages = (await loadCrawledPages(config)).records;
     expect(pages.map((page) => page.url)).toEqual(["/docs"]);
     expect(sitemapFetches).toBe(1);
   });
@@ -305,7 +305,7 @@ describe("loadCrawledPages", () => {
       } as Response;
     });
 
-    const pages = await loadCrawledPages(config);
+    const pages = (await loadCrawledPages(config)).records;
     expect(pages.map((page) => page.url)).toEqual(["/docs"]);
     expect(childFetches).toBe(1);
   });
@@ -327,7 +327,7 @@ describe("loadCrawledPages", () => {
       } as Response;
     });
 
-    const pages = await loadCrawledPages(config);
+    const pages = (await loadCrawledPages(config)).records;
     expect(pages.map((page) => page.url)).toEqual(["/"]);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
@@ -350,7 +350,7 @@ describe("loadCrawledPages", () => {
       } as Response;
     });
 
-    const pages = await loadCrawledPages(config, 1.9);
+    const pages = (await loadCrawledPages(config, 1.9)).records;
     expect(pages.map((page) => page.url)).toEqual(["/a"]);
     expect(seen).toEqual(["https://example.com/a"]);
   });
@@ -388,7 +388,7 @@ describe("loadCrawledPages", () => {
       } as Response;
     });
 
-    const pages = await loadCrawledPages(config);
+    const pages = (await loadCrawledPages(config)).records;
     expect(pages.map((page) => page.url)).toEqual(["/docs"]);
     expect(requested).toEqual(["https://example.com/sitemap.xml", "https://example.com/docs"]);
   });

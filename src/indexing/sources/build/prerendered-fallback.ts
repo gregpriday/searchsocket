@@ -3,6 +3,7 @@ import path from "node:path";
 import fg from "fast-glob";
 import type { PageSourceRecord } from "../../../types";
 import { staticHtmlFileToUrl } from "../../../utils/path";
+import { applyMaxPages, sourceResult, type SourceFailure, type SourceLoadResult } from "../result";
 
 /**
  * Universal skip list for SvelteKit prerendered output across adapters.
@@ -32,19 +33,30 @@ export async function loadPrerenderedPages(
   cwd: string,
   outputDir: string,
   maxPages?: number
-): Promise<PageSourceRecord[]> {
+): Promise<SourceLoadResult> {
   const htmlFiles = await fg(["**/*.html"], {
     cwd: outputDir,
     absolute: true,
     ignore: PRERENDERED_IGNORE_PATTERNS
   });
 
-  const limit = typeof maxPages === "number" ? Math.max(0, Math.floor(maxPages)) : undefined;
-  const selected = typeof limit === "number" ? htmlFiles.slice(0, limit) : htmlFiles;
+  // Deterministic order before limiting — see static-output for why.
+  htmlFiles.sort();
+  const { selected, limitedBy } = applyMaxPages(htmlFiles, maxPages);
 
   const pages: PageSourceRecord[] = [];
+  const failures: SourceFailure[] = [];
   for (const filePath of selected) {
-    const html = await fs.readFile(filePath, "utf8");
+    let html: string;
+    try {
+      html = await fs.readFile(filePath, "utf8");
+    } catch (error) {
+      failures.push({
+        target: path.relative(cwd, filePath).replace(/\\/g, "/"),
+        reason: error instanceof Error ? error.message : String(error)
+      });
+      continue;
+    }
     pages.push({
       url: staticHtmlFileToUrl(filePath, outputDir),
       html,
@@ -53,5 +65,10 @@ export async function loadPrerenderedPages(
     });
   }
 
-  return pages;
+  return sourceResult({
+    records: pages,
+    discoveredCount: htmlFiles.length,
+    failures,
+    limitedBy
+  });
 }
