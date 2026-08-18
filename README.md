@@ -1,8 +1,12 @@
 # SearchSocket
 
+[![npm version](https://img.shields.io/npm/v/searchsocket.svg)](https://www.npmjs.com/package/searchsocket)
+[![ci](https://github.com/gregpriday/searchsocket/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/gregpriday/searchsocket/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/searchsocket.svg)](./LICENSE)
+
 Semantic site search and MCP retrieval for SvelteKit content projects. Index your site, search it from the browser or AI tools, and scroll users to the exact content they're looking for.
 
-**Requirements**: Node.js >= 20 | **Backend**: [Upstash Vector](https://upstash.com/docs/vector/overall/getstarted) | **License**: MIT
+**Requirements**: Node.js >= 20.19 | **Backend**: [Upstash Vector](https://upstash.com/docs/vector/overall/getstarted) | **License**: MIT
 
 ## How it works
 
@@ -1155,6 +1159,46 @@ See [docs/ci.md](docs/ci.md) for ready-to-use GitHub Actions workflows covering:
 - [CI/CD Workflows](docs/ci.md) — GitHub Actions and Vercel integration
 - [MCP over HTTP Guide](docs/mcp-claude-code.md) — detailed HTTP MCP setup for Claude Code
 - [Troubleshooting](docs/troubleshooting.md) — common issues, diagnostics, and FAQ
+
+## Contributing
+
+This repo follows **Git Flow**:
+
+| Branch | Purpose |
+| --- | --- |
+| `main` | Production. Only ever receives merges from `release/*` and `hotfix/*`, and carries the `v*` release tags. |
+| `develop` | Integration branch and the default PR target. |
+| `feature/*` | Branched from `develop`, merged back into `develop`. |
+| `release/*` | Branched from `develop`, merged into both `main` and `develop`. |
+| `hotfix/*` | Branched from `main`, merged into both `main` and `develop`. |
+
+```bash
+# start a feature
+git switch develop && git pull
+git switch -c feature/my-thing
+
+# open the PR against develop
+gh pr create --base develop
+```
+
+Local development:
+
+```bash
+pnpm install
+pnpm run typecheck   # tsc --noEmit
+pnpm run test        # vitest run
+pnpm run build       # tsup → dist/
+```
+
+CI runs typecheck, build, and the test suite on Node 20, 22, and 24 for every push to
+`main`/`develop`/`release/*`/`hotfix/*` and every PR into `main` or `develop`.
+
+`pnpm run test:quality` runs Mean Reciprocal Rank assertions against a live index. It needs
+Upstash credentials and is not part of CI — run it locally when changing `src/search/ranking.ts`.
+
+Releases are cut from a `release/*` branch: bump the version, merge to `main`, then push the
+`v*` tag. The [`publish`](.github/workflows/publish.yml) workflow builds, tests, and publishes to
+NPM via Trusted Publishing (OIDC).
 
 ## License
 

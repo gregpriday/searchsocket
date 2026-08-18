@@ -18,7 +18,7 @@ Use existing libraries from `package.json` — do not introduce new dependencies
 - **HTML Parsing**: `cheerio` (avoid regex for HTML).
 - **Markdown Conversion**: `turndown` and `turndown-plugin-gfm`.
 - **Frontmatter**: `gray-matter`.
-- **Vector Database**: `@upstash/vector` (Note: Jina/Turso were removed in v0.5.0, DO NOT use them).
+- **Vector Database**: `@upstash/vector`. Embeddings and reranking are Upstash-hosted — there is no separate embedding provider. **Removed, do not reintroduce**: Jina and Turso (v0.5.0), OpenAI, and the Gemini embedder / `@google/genai`.
 - **File globbing**: `fast-glob`.
 - **Validation**: `zod`.
 - **AST Manipulation**: `magicast` (used in `src/init-helpers.ts`).
@@ -31,20 +31,47 @@ Use existing libraries from `package.json` — do not introduce new dependencies
 - **Svelte 5**: Any UI templates (in `src/templates/`) MUST use Svelte 5 Runes (`$state`, `$props`, `$effect`, `$derived`, `$bindable`). Do not use Svelte 4 `export let` syntax.
 - **Path Handling**: Use the utility functions in `src/utils/path.ts` (`normalizeUrlPath`, `staticHtmlFileToUrl`, `getUrlDepth`, `joinUrl`) instead of raw string manipulation for URLs and routes.
 
+## Branching Model (Git Flow)
+
+- `main` — production. Only receives merges from `release/*` and `hotfix/*`, and carries the `v*` tags.
+- `develop` — integration branch and the **default branch**. Feature PRs target this.
+- `feature/*` — branch from `develop`, merge back to `develop`.
+- `release/*` — branch from `develop`, merge to **both** `main` and `develop`.
+- `hotfix/*` — branch from `main`, merge to **both** `main` and `develop`.
+
+Never commit directly to `main`. Git Flow branch/prefix names are stored in the repo's
+git config (`git config --get-regexp '^gitflow\.'`).
+
 ## Release Process
 
-- Version 0.2.0 is the initial public release
-- GitHub Actions workflow (`.github/workflows/publish.yml`) handles publishing on tag push via NPM Trusted Publishing (OIDC, no secrets needed)
-- To release a new version:
+- GitHub Actions workflow (`.github/workflows/publish.yml`) publishes on `v*` tag push via NPM Trusted Publishing (OIDC, no secrets needed)
+- Releases are cut from a `release/*` branch, not from `develop` or `main` directly:
   ```bash
-  npm version patch   # or minor
-  git push origin main --tags
+  git switch -c release/0.8.0 develop
+  npm version minor --no-git-tag-version   # bump + update CHANGELOG.md
+  git commit -am "chore: prepare for v0.8.0 release"
+  # merge release/0.8.0 into main, then tag main:
+  git switch main && git merge --no-ff release/0.8.0
+  git tag v0.8.0 && git push origin main --tags
+  # merge back so develop carries the bump:
+  git switch develop && git merge --no-ff release/0.8.0
+  git push origin develop
   ```
-- `npm version` updates package.json, commits, and creates the `v*` tag automatically
-- The workflow runs: pnpm install, build, test, then `npm publish --provenance --access public`
+- The workflow runs: pnpm install, typecheck, build, test, then `pnpm publish --provenance --access public`
 - Trusted publisher is configured on NPM to accept the `publish.yml` workflow from `gregpriday/searchsocket`
 - Update CHANGELOG.md with each release
 - You can automate the release process by running the custom `/release` command.
+
+## CI
+
+`.github/workflows/ci.yml` runs typecheck → build → test on Node 20, 22, and 24 for pushes to
+`main`/`develop`/`release/*`/`hotfix/*` and PRs into `main` or `develop`. Keep the matrix in sync
+with `engines.node` in package.json (currently `>=20.19.0`, floor set by `chokidar`).
+
+`.github/workflows/searchsocket-prune.yml` no-ops unless `UPSTASH_VECTOR_REST_URL` and
+`UPSTASH_VECTOR_REST_TOKEN` repo secrets are set. Note it invokes the CLI as `node dist/cli.js`,
+not `pnpm searchsocket` — this repo *is* the package, so its own bin is never linked into
+`node_modules/.bin`.
 
 ## Build & Test
 
@@ -56,18 +83,33 @@ Use existing libraries from `package.json` — do not introduce new dependencies
 
 ## Package Structure
 
-- Three entry points: `searchsocket` (core), `searchsocket/sveltekit`, `searchsocket/client`
-- CLI binary: `searchsocket` (dist/cli.js)
-- Only `dist/` and `README.md` are published to NPM (controlled by `files` in package.json)
+Five entry points (see `exports` in package.json):
+
+| Import | Source |
+| --- | --- |
+| `searchsocket` | `src/index.ts` |
+| `searchsocket/sveltekit` | `src/sveltekit.ts` |
+| `searchsocket/client` | `src/client.ts` |
+| `searchsocket/scroll` | `src/scroll.ts` |
+| `searchsocket/svelte` | `src/svelte/index.svelte.ts` (shipped as source, not bundled) |
+
+- CLI binary: `searchsocket` → `dist/cli.js`
+- Published to NPM: `dist/` (minus sourcemaps), `src/svelte/`, and `README.md` — controlled by `files` in package.json
 
 ## Key Directories
 
-- `src/` - TypeScript source
-- `src/cli/` - CLI commands (init, index, status, dev, clean, prune, doctor, mcp, search)
-- `src/indexing/` - Indexing pipeline
-- `src/search/` - Search engine and ranking
-- `src/mcp/` - MCP server (stdio + HTTP)
-- `src/sveltekit/` - SvelteKit Vite plugin and server hook
-- `src/client/` - Browser search client
-- `src/templates/` - Svelte 5 search UI components
-- `tests/` - Test files
+- `src/cli.ts` — **the entire CLI lives in this one file** (all commands: init, index, status, dev, clean, prune, doctor, mcp, search, test, add). `src/cli/` holds only `test-schemas.ts`, not the commands.
+- `src/config/` — `schema.ts` (zod), `defaults.ts`, `load.ts`
+- `src/core/` — `logger.ts`, `scope.ts`, `serverless.ts`, `state.ts`
+- `src/errors/` — `SearchSocketError` and typed error codes
+- `src/indexing/` — pipeline, extractor, chunker, route-mapper, robots, llms-txt, `sources/`
+- `src/search/` — `engine.ts`, `ranking.ts`, `related-pages.ts`, `quality-metrics.ts`
+- `src/mcp/` — `server.ts` (stdio + HTTP MCP server)
+- `src/sveltekit/` — `handle.ts` (server hook), `plugin.ts` (Vite plugin), `scroll-to-text.ts`
+- `src/svelte/` — Svelte 5 runes API (`createSearch`) and `<SearchSocket>` component
+- `src/templates/` — Svelte 5 search UI components copied out by `searchsocket add`
+- `src/vector/` — Upstash Vector client, factory
+- `src/utils/` — `path.ts`, `text.ts`, `hash.ts`, `pattern.ts`, `time.ts`, `structured-meta.ts`
+- `src/playground/` — local relevance-tuning playground
+- `src/client.ts` — browser search client (no `src/client/` directory)
+- `tests/` — vitest suites; fixtures in `tests/fixtures/`
