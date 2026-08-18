@@ -123,7 +123,7 @@ export interface SearchSocketConfig {
      */
     allowedScopes?: string[];
     /**
-     * Include source file paths and full section text in browser responses.
+     * Include source file paths and matched sections' indexed text in browser responses.
      * Off by default.
      */
     exposeInternalFields?: boolean;

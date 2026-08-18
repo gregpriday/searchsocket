@@ -605,11 +605,93 @@ describe("provenance transitions", () => {
 
     const rewritten = vi
       .mocked(store.upsertChunks)
-      .mock.calls.flatMap((call) => call[0] as Array<{ metadata: { url?: string; custom?: boolean } }>)
+      .mock.calls.flatMap(
+        (call) => call[0] as Array<{ id: string; metadata: { url?: string; custom?: boolean; ordinal?: number } }>
+      )
       .filter((doc) => doc.metadata.url === "/shared");
 
-    expect(rewritten.length).toBeGreaterThan(0);
+    // The page-summary chunk's key is content-independent, so it is the same
+    // record in both runs. Asserting it was rewritten proves the provenance
+    // change alone invalidated the hash — a body chunk could have been
+    // rewritten merely because its text or heading differed.
+    const summary = rewritten.find((doc) => doc.metadata.ordinal === 0);
+    expect(summary).toBeDefined();
+    expect(summary!.metadata.custom).toBe(false);
     expect(rewritten.every((doc) => doc.metadata.custom === false)).toBe(true);
+  });
+
+  it("keeps provenance when beforeIndex rebuilds the chunk array", async () => {
+    const { cwd, config } = await createFixture({ "docs/alpha": "Alpha content here." });
+    const { store } = createStatefulMockStore();
+
+    await (
+      await IndexPipeline.create({
+        cwd,
+        config,
+        store,
+        hooks: {
+          beforeIndex: async (chunks) =>
+            chunks.map((chunk) => ({ ...chunk, custom: undefined }) as never)
+        }
+      })
+    ).run({
+      changedOnly: true,
+      customRecords: [{ url: "/from-cms/post", title: "CMS", content: "Body from the CMS." }]
+    });
+
+    const written = vi
+      .mocked(store.upsertChunks)
+      .mock.calls.flatMap((call) => call[0] as Array<{ metadata: { url?: string; custom?: boolean } }>)
+      .filter((doc) => doc.metadata.url === "/from-cms/post");
+
+    expect(written.length).toBeGreaterThan(0);
+    expect(written.every((doc) => doc.metadata.custom === true)).toBe(true);
+  });
+
+  it("cannot be marked custom by a transformPage hook on a site page", async () => {
+    // Otherwise a hook could make an ordinary page, and its chunks, immune to
+    // deletion by every later indexing run.
+    const { cwd, config } = await createFixture({ "docs/alpha": "Alpha content here." });
+    const { store } = createStatefulMockStore();
+
+    await (
+      await IndexPipeline.create({
+        cwd,
+        config,
+        store,
+        hooks: { transformPage: async (page) => ({ ...page, custom: true }) as never }
+      })
+    ).run({ changedOnly: true });
+
+    const pagesWritten = vi
+      .mocked(store.upsertPages)
+      .mock.calls.flatMap((call) => call[0] as Array<{ metadata: { custom?: boolean } }>);
+
+    expect(pagesWritten.length).toBeGreaterThan(0);
+    expect(pagesWritten.every((doc) => doc.metadata.custom === false)).toBe(true);
+  });
+
+  it("drops a chunk a hook pointed at a page this run never indexed", async () => {
+    // Such a chunk has no determinable provenance and getPage could never
+    // return it, so guessing either strands it or leaves it deletable.
+    const { cwd, config } = await createFixture({ "docs/alpha": "Alpha content here." });
+    const { store } = createStatefulMockStore();
+
+    const stats = await (
+      await IndexPipeline.create({
+        cwd,
+        config,
+        store,
+        hooks: {
+          beforeIndex: async (chunks) =>
+            chunks.map((chunk) => ({ ...chunk, url: "/nowhere" }) as never)
+        }
+      })
+    ).run({ changedOnly: true });
+
+    expect(vi.mocked(store.upsertChunks)).not.toHaveBeenCalled();
+    expect(stats.warnings.some((w) => w.kind === "hook-failure")).toBe(true);
+    expect(stats.deletionEligible).toBe(false);
   });
 
   it("keeps provenance when a chunk hook rebuilds the chunk", async () => {

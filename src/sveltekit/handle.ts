@@ -364,7 +364,7 @@ function toPublicPage<T extends { frontmatter?: Record<string, unknown> }>(
  * Strip fields a public search response should not carry.
  *
  * `routeFile` is a path inside the author's repository and `chunkText` is the
- * indexed text of a whole section rather than a snippet. Both are useful to an MCP
+ * indexed text of a matched section rather than a snippet. Both are useful to an MCP
  * client editing the site and neither belongs in a public search box, so they
  * are opt-in via `api.exposeInternalFields`.
  */
@@ -618,8 +618,8 @@ async function handleMcpRequest(
     );
   }
 
-  // MCP is a privileged surface: its tools return repository paths, full page
-  // markdown, and any scope the caller names — none of which the browser API
+  // MCP is a privileged surface: its tools return repository paths, a page's
+  // indexed markdown, and any scope the caller names — none of which the browser API
   // discloses. It must therefore fail closed. Previously the auth check was
   // wrapped in `if (apiKey)`, so a deployment that never configured a key — or
   // whose `apiKeyEnv` was unset in production — served all of that to anyone.

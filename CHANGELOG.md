@@ -54,7 +54,7 @@ observably wrong, not merely untidy. See
 - Any caller could select any scope via `?scope=` or a POST body. Scope
   selection now requires `api.allowedScopes`.
 - Browser search responses carried `routeFile` (a repository path) and
-  `chunkText` (the full matched section). Both are opt-in via
+  `chunkText` (the matched section's indexed text). Both are opt-in via
   `api.exposeInternalFields`.
 - The MCP endpoint's auth check was skipped entirely when no key was configured.
   It now refuses to serve without one.

@@ -89,7 +89,7 @@ export function createServer(engine: SearchEngine): McpServer {
   );
 
   // ---------------------------------------------------------------------------
-  // Tool 2: get_page — Full page retrieval for RAG deep-dives
+  // Tool 2: get_page — page-level retrieval for RAG deep-dives
   // ---------------------------------------------------------------------------
   server.registerTool(
     "get_page",

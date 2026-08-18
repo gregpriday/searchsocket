@@ -151,7 +151,7 @@ export const searchSocketConfigSchema = z.object({
        */
       allowedScopes: z.array(z.string()).optional(),
       /**
-       * Include internal fields — source file paths and full section text — in
+       * Include internal fields — source file paths and matched sections' indexed text — in
        * browser search responses. Off by default: these are useful to an editing
        * agent and are not something a public search box should disclose.
        */

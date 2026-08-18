@@ -351,6 +351,12 @@ export class IndexPipeline {
       } else {
         accepted = extracted;
       }
+
+      // Provenance belongs to the pipeline. A hook marking a site page as
+      // custom would make it, and its chunks, permanently immune to deletion
+      // by any ordinary indexing run.
+      accepted.custom = false;
+
       extractedPages.push(accepted);
       this.logger.event("page_extracted", {
         url: accepted.url
@@ -687,9 +693,27 @@ export class IndexPipeline {
     // marker and leave a custom record's sections deletable by the next
     // site-only run. Reassert it from the page each chunk came from.
     const customUrls = new Set(pages.filter((page) => page.custom).map((page) => page.url));
+    const knownUrls = new Set(pages.map((page) => page.url));
+    const placeable: Chunk[] = [];
     for (const chunk of chunks) {
+      // A hook may rewrite a chunk's URL. One pointing at a page this run never
+      // indexed has no determinable provenance and can never be returned by
+      // getPage, so it is dropped rather than guessed at — guessing either
+      // strands it or leaves it deletable by the next site-only run.
+      if (!knownUrls.has(chunk.url)) {
+        this.logger.warn(
+          `Chunk ${chunk.chunkKey} references ${chunk.url}, which is not an indexed page in this run; skipping it.`
+        );
+        runWarnings.push({
+          kind: "hook-failure",
+          detail: `chunk ${chunk.chunkKey} references unindexed page ${chunk.url}`
+        });
+        continue;
+      }
       chunk.custom = customUrls.has(chunk.url);
+      placeable.push(chunk);
     }
+    chunks = placeable;
 
     stageEnd("chunk", chunkStart);
     this.logger.info(`Chunked into ${chunks.length} chunk${chunks.length === 1 ? "" : "s"} (${stageTimingsMs["chunk"]}ms)`);
