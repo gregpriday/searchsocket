@@ -102,8 +102,7 @@ export const searchSocketConfigSchema = z.object({
     .object({
       model: z.string().optional(),
       dimensions: z.number().int().positive().optional(),
-      taskType: z.string().optional(),
-      batchSize: z.number().int().positive().optional()
+      taskType: z.string().optional()
     })
     .optional(),
   indexing: z
@@ -117,12 +116,6 @@ export const searchSocketConfigSchema = z.object({
       maxDeletionRatio: z.number().min(0).max(1).optional()
     })
     .optional(),
-  search: z
-    .object({
-      dualSearch: z.boolean().optional(),
-      pageSearchWeight: z.number().min(0).max(1).optional()
-    })
-    .optional(),
   ranking: z
     .object({
       enableIncomingLinkBoost: z.boolean().optional(),
@@ -131,16 +124,12 @@ export const searchSocketConfigSchema = z.object({
       freshnessDecayRate: z.number().positive().optional(),
       enableAnchorTextBoost: z.boolean().optional(),
       pageWeights: z.record(z.string(), z.number().min(0)).optional(),
-      aggregationCap: z.number().int().positive().optional(),
-      aggregationDecay: z.number().min(0).max(1).optional(),
-      minChunkScoreRatio: z.number().min(0).max(1).optional(),
       minScoreRatio: z.number().min(0).max(1).optional(),
       scoreGapThreshold: z.number().min(0).max(1).optional(),
       weights: z
         .object({
           incomingLinks: z.number().optional(),
           depth: z.number().optional(),
-          aggregation: z.number().optional(),
           titleMatch: z.number().optional(),
           freshness: z.number().optional(),
           anchorText: z.number().optional()

@@ -453,24 +453,22 @@ The highlight fades after 2 seconds. Customize with CSS:
 
 ### Dual search
 
-By default, SearchSocket runs two parallel queries — one against page-level summaries and one against individual chunks — then blends the scores:
+SearchSocket searches page-first: one query ranks page summaries, then the
+best-matching sections within the top pages are retrieved and attached as
+sub-results. This keeps results coherent at page level while still pointing at
+the exact section that matched.
 
-```ts
-export default {
-  search: {
-    dualSearch: true,          // default
-    pageSearchWeight: 0.3      // weight of page results vs chunks (0-1)
-  }
-};
-```
+Section lookups are bounded — only the top pages are expanded, and those
+requests run through a concurrency limit — so a large `topK` cannot fan out into
+one backend request per result.
 
-### Page aggregation
+### Page weights
 
-With `groupBy: "page"` (default), chunk results are grouped by page URL:
-
-1. The top chunk score becomes the base page score
-2. Additional matching chunks add a decaying bonus: `chunk_score * decay^i`
-3. Per-URL page weights are applied multiplicatively
+A page's weight multiplies its final score. It comes from the page itself —
+`<meta name="searchsocket-weight" content="1.5">` or `searchsocket.weight` in
+frontmatter — falling back to a `ranking.pageWeights` pattern. A weight of `0`
+from either source excludes the page entirely, so an operator can suppress
+pages regardless of what their markup asks for.
 
 ### Ranking configuration
 
@@ -488,16 +486,12 @@ export default {
       "/download": 1.05
     },
 
-    aggregationCap: 5,               // max chunks contributing to page score
-    aggregationDecay: 0.5,           // decay for additional chunks
     minScoreRatio: 0.70,             // drop results below 70% of best score
     scoreGapThreshold: 0.4,          // trim results >40% below best
-    minChunkScoreRatio: 0.5,         // threshold for sub-chunks
 
     weights: {
       incomingLinks: 0.05,
       depth: 0.03,
-      aggregation: 0.1,
       titleMatch: 0.15,
       freshness: 0.1,
       anchorText: 0.10
@@ -922,8 +916,6 @@ export default {
       "/download": 1.05,
       "/docs/**": 1.05
     },
-    aggregationCap: 3,
-    aggregationDecay: 0.3
   }
 };
 ```
@@ -949,8 +941,6 @@ export const handle = searchsocketHandle({
     ranking: {
       minScoreRatio: 0.70,
       pageWeights: { "/": 0.95, "/download": 1.05, "/docs/**": 1.05 },
-      aggregationCap: 3,
-      aggregationDecay: 0.3
     }
   }
 });
@@ -1150,18 +1140,11 @@ export default {
     tokenEnv: "UPSTASH_VECTOR_REST_TOKEN"
   },
 
-  search: {
-    dualSearch: true,
-    pageSearchWeight: 0.3
-  },
-
   ranking: {
     enableIncomingLinkBoost: true,
     enableDepthBoost: true,
     pageWeights: { "/docs": 1.15 },
     minScoreRatio: 0.70,
-    aggregationCap: 5,
-    aggregationDecay: 0.5
   },
 
   api: {

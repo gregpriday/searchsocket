@@ -88,7 +88,6 @@ export interface SearchSocketConfig {
     model?: string;
     dimensions?: number;
     taskType?: string;
-    batchSize?: number;
   };
   indexing?: {
     /**
@@ -97,10 +96,6 @@ export interface SearchSocketConfig {
      */
     maxDeletionRatio?: number;
   };
-  search?: {
-    dualSearch?: boolean;
-    pageSearchWeight?: number;
-  };
   ranking?: {
     enableIncomingLinkBoost?: boolean;
     enableDepthBoost?: boolean;
@@ -108,15 +103,11 @@ export interface SearchSocketConfig {
     freshnessDecayRate?: number;
     enableAnchorTextBoost?: boolean;
     pageWeights?: Record<string, number>;
-    aggregationCap?: number;
-    aggregationDecay?: number;
-    minChunkScoreRatio?: number;
     minScoreRatio?: number;
     scoreGapThreshold?: number;
     weights?: {
       incomingLinks?: number;
       depth?: number;
-      aggregation?: number;
       titleMatch?: number;
       freshness?: number;
       anchorText?: number;
@@ -239,14 +230,9 @@ export interface ResolvedSearchSocketConfig {
     model: string;
     dimensions: number;
     taskType: string;
-    batchSize: number;
   };
   indexing: {
     maxDeletionRatio: number;
-  };
-  search: {
-    dualSearch: boolean;
-    pageSearchWeight: number;
   };
   ranking: {
     enableIncomingLinkBoost: boolean;
@@ -255,15 +241,11 @@ export interface ResolvedSearchSocketConfig {
     freshnessDecayRate: number;
     enableAnchorTextBoost: boolean;
     pageWeights: Record<string, number>;
-    aggregationCap: number;
-    aggregationDecay: number;
-    minChunkScoreRatio: number;
     minScoreRatio: number;
     scoreGapThreshold: number;
     weights: {
       incomingLinks: number;
       depth: number;
-      aggregation: number;
       titleMatch: number;
       freshness: number;
       anchorText: number;
@@ -362,6 +344,8 @@ export interface IndexedPage {
   keywords?: string[];
   publishedAt?: number;
   incomingAnchorText?: string;
+  /** Per-page weight from `searchsocket-weight` / frontmatter, if set. */
+  weight?: number;
   meta?: Record<string, string | number | boolean | string[]>;
 }
 
@@ -436,6 +420,8 @@ export interface PageRecord {
   keywords?: string[];
   contentHash?: string;
   publishedAt?: number;
+  incomingAnchorText?: string;
+  weight?: number;
   meta?: Record<string, string | number | boolean | string[]>;
 }
 
@@ -450,6 +436,18 @@ export interface PageHit {
   incomingLinks: number;
   routeFile: string;
   publishedAt?: number;
+  /**
+   * Anchor text of links pointing at this page. Without it the documented
+   * `ranking.enableAnchorTextBoost` had nothing to match against in the
+   * page-first path and was silently inert.
+   */
+  incomingAnchorText?: string;
+  /**
+   * Per-page weight from `searchsocket-weight` / frontmatter. Extraction read
+   * it but only ever used it to drop zero-weight pages, so a page asking to be
+   * ranked higher was ignored.
+   */
+  weight?: number;
 }
 
 export interface ScopeInfo {
@@ -463,20 +461,13 @@ export interface RankingOverrides {
   ranking?: {
     enableIncomingLinkBoost?: boolean;
     enableDepthBoost?: boolean;
-    aggregationCap?: number;
-    aggregationDecay?: number;
-    minChunkScoreRatio?: number;
     minScoreRatio?: number;
     scoreGapThreshold?: number;
     weights?: {
       incomingLinks?: number;
       depth?: number;
-      aggregation?: number;
       titleMatch?: number;
     };
-  };
-  search?: {
-    pageSearchWeight?: number;
   };
 }
 
@@ -494,6 +485,8 @@ export interface SearchRequest {
 }
 
 export interface ScoreBreakdown {
+  /** Effective per-page weight multiplier applied to the score. */
+  pageWeight?: number;
   baseScore: number;
   incomingLinkBoost: number;
   depthBoost: number;

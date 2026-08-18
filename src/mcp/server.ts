@@ -32,7 +32,7 @@ export function createServer(engine: SearchEngine): McpServer {
     "search",
     {
       description:
-        "Searches indexed site content using semantic similarity. Returns ranked results with url, title, snippet, chunkText (full section markdown), score, and routeFile (source file path for editing). Each result includes the best-matching section; set groupBy to 'page' (default) for additional chunk sub-results per page. Use routeFile to locate the source file when editing content. If snippets lack detail, call get_page with the result URL to retrieve the full page markdown.",
+        "Searches indexed site content using semantic similarity. Returns ranked results with url, title, snippet, chunkText (full section markdown), score, and routeFile (source file path for editing). The highest-ranked results include their best-matching sections; lower-ranked results carry a page summary only. Set groupBy to 'chunk' to search sections directly. Use routeFile to locate the source file when editing content. If snippets lack detail, call get_page with the result URL to retrieve the full page markdown.",
       inputSchema: {
         query: z.string().min(1).describe("Search query. Use keywords or natural language, not full sentences."),
         topK: z.number().int().positive().max(100).optional().describe("Number of results to return (default: 10, max: 100)"),

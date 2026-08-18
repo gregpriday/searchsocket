@@ -6,7 +6,7 @@ import { resolveScope } from "../core/scope";
 import { hrTimeMs } from "../utils/time";
 import { normalizeUrlPath } from "../utils/path";
 import { createUpstashStore } from "../vector/factory";
-import { rankHits, aggregateByPage, trimByScoreGap, mergePageAndChunkResults, rankPageHits, trimPagesByScoreGap } from "./ranking";
+import { rankHits, rankPageHits, trimPagesByScoreGap } from "./ranking";
 import type {
   PageHit,
   RankingOverrides,
@@ -21,31 +21,56 @@ import type {
   VectorHit
 } from "../types";
 import type { UpstashSearchStore } from "../vector/upstash";
-import type { RankedHit, PageResult, RankedPage } from "./ranking";
+import type { RankedHit, RankedPage } from "./ranking";
 import { diceScore, compositeScore, dominantRelationshipType } from "./related-pages";
 import { toSnippet, queryAwareExcerpt } from "../utils/text";
 import { buildMetaFilterString, UnsafeFilterValueError } from "../utils/structured-meta";
+import pLimit from "p-limit";
 
-const rankingOverridesSchema = z.object({
-  ranking: z.object({
-    enableIncomingLinkBoost: z.boolean().optional(),
-    enableDepthBoost: z.boolean().optional(),
-    aggregationCap: z.number().int().positive().optional(),
-    aggregationDecay: z.number().min(0).max(1).optional(),
-    minChunkScoreRatio: z.number().min(0).max(1).optional(),
-    minScoreRatio: z.number().min(0).max(1).optional(),
-    scoreGapThreshold: z.number().min(0).max(1).optional(),
-    weights: z.object({
-      incomingLinks: z.number().optional(),
-      depth: z.number().optional(),
-      aggregation: z.number().optional(),
-      titleMatch: z.number().optional(),
-    }).optional(),
-  }).optional(),
-  search: z.object({
-    pageSearchWeight: z.number().min(0).max(1).optional(),
-  }).optional(),
-}).optional();
+/**
+ * How many of the top pages get their sections expanded. Beyond this a page is
+ * still returned, just without sub-results — a search UI does not render
+ * sections for the 40th hit.
+ */
+const SUBRESULT_PAGE_LIMIT = 10;
+
+/** Simultaneous section lookups, so a large topK cannot burst the backend. */
+const SUBRESULT_CONCURRENCY = 5;
+
+/**
+ * Debug ranking overrides.
+ *
+ * Strict at every level: a request still sending a removed control such as
+ * `search.pageSearchWeight` or `ranking.aggregationCap` must be told it no
+ * longer exists rather than have it silently stripped, which is exactly how
+ * those options went on being tuned after they stopped doing anything.
+ */
+const rankingOverridesSchema = z
+  .object({
+    ranking: z
+      .object({
+        enableIncomingLinkBoost: z.boolean().optional(),
+        enableDepthBoost: z.boolean().optional(),
+        enableFreshnessBoost: z.boolean().optional(),
+        enableAnchorTextBoost: z.boolean().optional(),
+        minScoreRatio: z.number().min(0).max(1).optional(),
+        scoreGapThreshold: z.number().min(0).max(1).optional(),
+        weights: z
+          .object({
+            incomingLinks: z.number().optional(),
+            depth: z.number().optional(),
+            titleMatch: z.number().optional(),
+            freshness: z.number().optional(),
+            anchorText: z.number().optional()
+          })
+          .strict()
+          .optional()
+      })
+      .strict()
+      .optional()
+  })
+  .strict()
+  .optional();
 
 const requestSchema = z.object({
   q: z.string().trim().min(1),
@@ -141,10 +166,6 @@ function mergeRankingOverrides(
 ): ResolvedSearchSocketConfig {
   return {
     ...base,
-    search: {
-      ...base.search,
-      ...overrides.search,
-    },
     ranking: {
       ...base.ranking,
       ...overrides.ranking,
@@ -314,16 +335,31 @@ export class SearchEngine {
       // Take top N pages
       const topPages = rankedPages.slice(0, topK);
 
-      // 3. For each top page, find best-matching chunks within that page
-      const chunkPromises = topPages.map((page) =>
-        this.requireStore().searchChunksByUrl(
-          queryText,
-          page.url,
-          { limit: maxSubResults, filter: metaFilter },
-          resolvedScope
-        ).then((chunks) => applyChunkPostFilters(chunks))
+      // 3. For each top page, find its best-matching sections.
+      //
+      // This is one backend request per page, so it is bounded twice: only the
+      // first SUBRESULT_PAGE_LIMIT pages are expanded, and those requests run
+      // through a concurrency limiter. Previously `topK: 100` fired 100
+      // simultaneous requests, which is both a cost and a rate-limit hazard.
+      const expandable = topPages.slice(0, SUBRESULT_PAGE_LIMIT);
+      const limit = pLimit(SUBRESULT_CONCURRENCY);
+      const expandedChunks = await Promise.all(
+        expandable.map((page) =>
+          limit(() =>
+            this.requireStore()
+              .searchChunksByUrl(
+                queryText,
+                page.url,
+                { limit: maxSubResults, filter: metaFilter },
+                resolvedScope
+              )
+              .then((chunks) => applyChunkPostFilters(chunks))
+          )
+        )
       );
-      const allChunks = await Promise.all(chunkPromises);
+      // Pages past the expansion limit still appear as results, just without
+      // section sub-results.
+      const allChunks = topPages.map((_, i) => expandedChunks[i] ?? []);
 
       // 4. Build results: pages with nested chunks for navigation
       const searchMs = hrTimeMs(searchStart);
@@ -363,7 +399,7 @@ export class SearchEngine {
 
       const ranked = rankHits(filtered, effectiveConfig, input.q, input.debug);
       const searchMs = hrTimeMs(searchStart);
-      const results = this.buildResults(ranked, topK, false, maxSubResults, input.q, input.debug, effectiveConfig);
+      const results = this.buildResults(ranked, topK, input.q, input.debug, effectiveConfig);
 
       return {
         q: input.q,
@@ -423,7 +459,10 @@ export class SearchEngine {
           depthBoost: page.breakdown.depthBoost,
           titleMatchBoost: page.breakdown.titleMatchBoost,
           freshnessBoost: page.breakdown.freshnessBoost,
-          anchorTextMatchBoost: 0
+          // Was hardcoded to 0, so the playground showed no anchor boost even
+          // when one had been applied.
+          anchorTextMatchBoost: page.breakdown.anchorTextMatchBoost ?? 0,
+          pageWeight: page.breakdown.pageWeight
         };
       }
 
@@ -440,42 +479,12 @@ export class SearchEngine {
     return snippet || "";
   }
 
-  private buildResults(ordered: RankedHit[], topK: number, groupByPage: boolean, maxSubResults: number, query?: string, debug?: boolean, config?: ResolvedSearchSocketConfig): SearchResult[] {
+  private buildResults(ordered: RankedHit[], topK: number, query?: string, debug?: boolean, config?: ResolvedSearchSocketConfig): SearchResult[] {
     const cfg = config ?? this.config;
-    if (groupByPage) {
-      let pages = aggregateByPage(ordered, cfg);
-      pages = trimByScoreGap(pages, cfg);
-      const minRatio = cfg.ranking.minChunkScoreRatio;
-      return pages.slice(0, topK).map((page) => {
-        const bestScore = page.bestChunk.finalScore;
-        const minChunkScore = Number.isFinite(bestScore) ? bestScore * minRatio : Number.NEGATIVE_INFINITY;
-        const meaningful = page.matchingChunks
-          .filter((c) => c.finalScore >= minChunkScore)
-          .slice(0, maxSubResults);
-        const result: SearchResult = {
-          url: page.url,
-          title: page.title,
-          sectionTitle: page.bestChunk.hit.metadata.sectionTitle || undefined,
-          snippet: this.ensureSnippet(page.bestChunk, query),
-          chunkText: page.bestChunk.hit.metadata.chunkText || undefined,
-          score: Number(page.pageScore.toFixed(6)),
-          routeFile: page.routeFile,
-          chunks: meaningful.length >= 1
-            ? meaningful.map((c) => ({
-                sectionTitle: c.hit.metadata.sectionTitle || undefined,
-                snippet: this.ensureSnippet(c, query),
-                chunkText: c.hit.metadata.chunkText || undefined,
-                headingPath: c.hit.metadata.headingPath,
-                score: Number(c.finalScore.toFixed(6))
-              }))
-            : undefined
-        };
-        if (debug && page.bestChunk.breakdown) {
-          result.breakdown = page.bestChunk.breakdown;
-        }
-        return result;
-      });
-    } else {
+    // Chunk-only mode. The page-grouping branch that used to live here was
+    // unreachable — the page-first pipeline builds its own results — so its
+    // config (aggregationCap, aggregationDecay, weights.aggregation,
+    // minChunkScoreRatio) was tunable but inert.
       let filtered = ordered;
       const minScoreRatio = cfg.ranking.minScoreRatio;
       if (minScoreRatio > 0 && ordered.length > 0) {
@@ -499,8 +508,7 @@ export class SearchEngine {
           result.breakdown = breakdown;
         }
         return result;
-      });
-    }
+    });
   }
 
   async getPage(pathOrUrl: string, scope?: string): Promise<{

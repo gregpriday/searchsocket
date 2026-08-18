@@ -74,6 +74,8 @@ interface ChunkVectorMetadata {
 interface PageVectorMetadata {
   projectId: string;
   scopeName: string;
+  incomingAnchorText?: string;
+  weight?: number | null;
   /** Identity-layout version; see INDEX_SCHEMA_VERSION. */
   schemaVersion?: number;
   type: string;
@@ -542,7 +544,9 @@ export class UpstashSearchStore {
       depth: doc.metadata?.depth ?? 0,
       incomingLinks: doc.metadata?.incomingLinks ?? 0,
       routeFile: doc.metadata?.routeFile ?? "",
-      publishedAt: typeof doc.metadata?.publishedAt === "number" ? doc.metadata.publishedAt : undefined
+      publishedAt: typeof doc.metadata?.publishedAt === "number" ? doc.metadata.publishedAt : undefined,
+      incomingAnchorText: doc.metadata?.incomingAnchorText || undefined,
+      weight: typeof doc.metadata?.weight === "number" ? doc.metadata.weight : undefined
     }));
   }
 
@@ -940,7 +944,9 @@ export class UpstashSearchStore {
         summary: doc.metadata.summary || undefined,
         description: doc.metadata.description || undefined,
         keywords: doc.metadata.keywords?.length ? doc.metadata.keywords : undefined,
-        publishedAt: typeof doc.metadata.publishedAt === "number" ? doc.metadata.publishedAt : undefined
+        publishedAt: typeof doc.metadata.publishedAt === "number" ? doc.metadata.publishedAt : undefined,
+        incomingAnchorText: doc.metadata.incomingAnchorText || undefined,
+        weight: typeof doc.metadata.weight === "number" ? doc.metadata.weight : undefined
       };
     } catch (error) {
       if (isMissingNamespaceError(error)) return null;

@@ -60,6 +60,44 @@ hashed the chunk's ordinal, so inserting a paragraph near the top of a page
 changed the key of every chunk below it and forced the whole page to be
 re-embedded. This is why the migration cannot reuse existing chunk records.
 
+**Per-page weights now outrank config patterns, and actually affect ranking.**
+A page declaring `searchsocket-weight` (HTML meta) or `searchsocket.weight`
+(frontmatter) uses that value; otherwise `ranking.pageWeights` patterns apply.
+Previously indexing used exactly this precedence but ranking used *only* the
+config patterns, so the two disagreed: a page with `searchsocket-weight="1"`
+matched by a `pageWeights` pattern of `0` was indexed and then hidden at query
+time. It is now returned, consistently with having been indexed. If you were
+relying on `pageWeights` to suppress such pages, set the weight on the page
+itself, or remove the page-level weight so the pattern applies.
+
+For the same reason, a non-zero per-page weight now changes ranking. It was read
+at index time only to drop zero-weight pages, so a page asking to rank higher
+had no effect.
+
+**`ranking.enableAnchorTextBoost` now does something.** Page results carry the
+anchor text of links pointing at them, so the documented boost applies to the
+default page-first search. It was previously inert there — the data was never
+loaded — and only affected `groupBy: "chunk"`.
+
+**Config options that never affected anything are removed.** Each was tunable —
+documented, typed, exposed in the playground — while having no effect on the
+running search. Setting any of them now fails with a migration error naming the
+replacement rather than being silently ignored:
+
+| Removed | Use instead |
+| --- | --- |
+| `search.dualSearch` | nothing — search is page-first |
+| `search.pageSearchWeight` | `ranking.weights` |
+| `ranking.aggregationCap` | nothing — chunk aggregation is gone |
+| `ranking.aggregationDecay` | nothing — chunk aggregation is gone |
+| `ranking.minChunkScoreRatio` | the `maxSubResults` request option |
+| `ranking.weights.aggregation` | nothing — chunk aggregation is gone |
+| `embedding.batchSize` | `upstash.batchSize` |
+| `embedding.images.enable` | nothing — SearchSocket is text-only |
+
+The same keys are also rejected in `rankingOverrides` on a search request, which
+previously stripped them silently.
+
 **Filter values may not contain a quote or backslash.** Upstash Vector's filter
 syntax documents single-quoted string literals but defines no escape sequence for
 an embedded quote or backslash, so SearchSocket now rejects such values in

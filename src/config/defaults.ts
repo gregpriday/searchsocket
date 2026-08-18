@@ -65,15 +65,10 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
     embedding: {
       model: "bge-large-en-v1.5",
       dimensions: 1024,
-      taskType: "RETRIEVAL_DOCUMENT",
-      batchSize: 100
+      taskType: "RETRIEVAL_DOCUMENT"
     },
     indexing: {
       maxDeletionRatio: 0.5
-    },
-    search: {
-      dualSearch: true,
-      pageSearchWeight: 0.3
     },
     ranking: {
       enableIncomingLinkBoost: true,
@@ -82,15 +77,11 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       freshnessDecayRate: 0.001,
       enableAnchorTextBoost: false,
       pageWeights: {},
-      aggregationCap: 5,
-      aggregationDecay: 0.5,
-      minChunkScoreRatio: 0.5,
       minScoreRatio: 0.70,
       scoreGapThreshold: 0.4,
       weights: {
         incomingLinks: 0.05,
         depth: 0.03,
-        aggregation: 0.1,
         titleMatch: 0.15,
         freshness: 0.1,
         anchorText: 0.10

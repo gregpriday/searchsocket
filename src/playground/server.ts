@@ -46,15 +46,9 @@ export async function runPlaygroundServer(
       ranking: {
         enableIncomingLinkBoost: config.ranking.enableIncomingLinkBoost,
         enableDepthBoost: config.ranking.enableDepthBoost,
-        aggregationCap: config.ranking.aggregationCap,
-        aggregationDecay: config.ranking.aggregationDecay,
-        minChunkScoreRatio: config.ranking.minChunkScoreRatio,
         minScoreRatio: config.ranking.minScoreRatio,
         scoreGapThreshold: config.ranking.scoreGapThreshold,
         weights: { ...config.ranking.weights },
-      },
-      search: {
-        pageSearchWeight: config.search.pageSearchWeight,
       },
     });
   });

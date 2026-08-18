@@ -86,6 +86,11 @@ export function buildPageContentHash(page: IndexedPage): string {
     String(page.outgoingLinks),
     String(page.publishedAt ?? ""),
     page.incomingAnchorText ?? "",
+    // Weight affects ranking and is persisted in page metadata, so it must
+    // change the hash. Without it, editing searchsocket-weight="1" to "2"
+    // left the hash identical, the upsert was skipped, and search kept
+    // ranking with the old weight until the next forced rebuild.
+    String(page.weight ?? ""),
     (page.outgoingLinkUrls ?? []).slice().sort().join(","),
     page.meta ? JSON.stringify(page.meta, Object.keys(page.meta).sort()) : ""
   ];
@@ -424,7 +429,11 @@ export class IndexPipeline {
     // Filter out zero-weight pages at index time.
     const indexablePages: ExtractedPage[] = [];
     for (const page of uniquePages) {
-      const effectiveWeight = page.weight ?? findPageWeight(page.url, this.config.ranking.pageWeights);
+      // Same precedence as ranking: a zero from either source suppresses the
+      // page, otherwise the page's own declared weight wins.
+      const configWeight = findPageWeight(page.url, this.config.ranking.pageWeights);
+      const effectiveWeight =
+        configWeight === 0 || page.weight === 0 ? 0 : page.weight ?? configWeight;
       if (effectiveWeight === 0) {
         this.logger.debug(`Excluding ${page.url} (zero weight)`);
         continue;
@@ -555,6 +564,7 @@ export class IndexPipeline {
         keywords: page.keywords,
         publishedAt: page.publishedAt,
         incomingAnchorText,
+        weight: page.weight,
         meta: page.meta
       };
 
@@ -584,6 +594,8 @@ export class IndexPipeline {
         keywords: p.keywords,
         contentHash: buildPageContentHash(p),
         publishedAt: p.publishedAt,
+        incomingAnchorText: p.incomingAnchorText,
+        weight: p.weight,
         meta: p.meta
       };
     });
@@ -810,6 +822,8 @@ export class IndexPipeline {
             indexedAt: r.indexedAt,
             contentHash: r.contentHash ?? "",
             publishedAt: r.publishedAt ?? null,
+            incomingAnchorText: r.incomingAnchorText ?? "",
+            weight: r.weight ?? null,
             ...(r.meta && Object.keys(r.meta).length > 0 ? { meta: r.meta } : {})
           }
         }));

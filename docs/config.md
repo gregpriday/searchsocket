@@ -99,10 +99,12 @@ Upstash handles embedding server-side via the `data` field. These settings must 
 - `embedding.model` (default `bge-large-en-v1.5`) — embedding model name
 - `embedding.dimensions` (default `1024`) — vector dimensions
 - `embedding.taskType` (default `RETRIEVAL_DOCUMENT`) — embedding task type
-- `embedding.batchSize` — **unused.** Batch size is controlled by
-  `upstash.batchSize`; this field has no runtime effect and is kept only so
-  existing configs keep loading.
-- `embedding.images.enable` — unused, kept for backwards compatibility. Images are made searchable via text descriptions (`data-search-description`, `alt`, `figcaption`), not image embeddings.
+- `embedding.batchSize` — **removed in 1.0.** It never affected anything at
+  runtime. Use `upstash.batchSize`. Setting it now produces a migration error
+  rather than being silently ignored.
+- `embedding.images.enable` — **removed in 1.0.** SearchSocket is text-only.
+  Images are made searchable via their text descriptions
+  (`data-search-description`, `alt`, `figcaption`), never image embeddings.
 
 ### Non-English / multilingual sites
 
@@ -121,8 +123,11 @@ The model and dimensions must match what you selected when creating the Upstash 
 
 ## Search
 
-- `search.dualSearch` (default `true`) — run parallel page-level and chunk-level search
-- `search.pageSearchWeight` (default `0.3`) — weight of page-level results vs chunks (0-1)
+Search is page-first: one query ranks pages, then the best-matching sections
+within the top pages are retrieved as sub-results. There is no `search` config
+section — `search.dualSearch` and `search.pageSearchWeight` described a parallel
+blended retrieval path that the default search stopped using, and setting either
+now produces a migration error. Tune ranking through `ranking.weights`.
 
 ## Ranking
 
@@ -131,18 +136,17 @@ The model and dimensions must match what you selected when creating the Upstash 
 - `ranking.enableFreshnessBoost` (default `false`) — boost recently published pages
 - `ranking.freshnessDecayRate` (default `0.001`) — decay rate for freshness boost
 - `ranking.enableAnchorTextBoost` (default `false`) — boost pages whose anchor text matches the query
-- `ranking.pageWeights` (default `{}`) — per-URL score multipliers (e.g., `{ "/docs": 1.15 }`)
-- `ranking.aggregationCap` (default `5`) — max chunks contributing to a page score
-- `ranking.aggregationDecay` (default `0.5`) — decay factor for additional matching chunks
-- `ranking.minChunkScoreRatio` (default `0.5`) — minimum chunk score relative to best chunk
-- `ranking.minScore` (default `0.3`) — minimum absolute score to include in results
+- `ranking.pageWeights` (default `{}`) — per-URL score multipliers (e.g.,
+  `{ "/docs": 1.15 }`). A page's own `searchsocket-weight` / frontmatter weight
+  takes precedence, except that a `0` from either source excludes the page.
+- `ranking.minScoreRatio` (default `0.70`) — drop results scoring below this
+  fraction of the best result
 - `ranking.scoreGapThreshold` (default `0.4`) — trim results below best score minus this threshold
 
 ### Ranking weights
 
 - `ranking.weights.incomingLinks` (default `0.05`)
 - `ranking.weights.depth` (default `0.03`)
-- `ranking.weights.aggregation` (default `0.1`)
 - `ranking.weights.titleMatch` (default `0.15`)
 - `ranking.weights.freshness` (default `0.1`)
 - `ranking.weights.anchorText` (default `0.10`)

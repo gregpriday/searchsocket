@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDefaultConfig } from "../src/config/defaults";
 import { extractFromHtml, extractFromMarkdown, normalizeDateToMs, extractPublishedAtFromFrontmatter } from "../src/indexing/extractor";
-import { rankHits, mergePageAndChunkResults } from "../src/search/ranking";
+import { rankHits } from "../src/search/ranking";
 import type { PageHit, VectorHit } from "../src/types";
 
 const config = createDefaultConfig("test");
@@ -360,26 +360,3 @@ describe("freshness boost in rankHits", () => {
 
 // --- Synthetic page hits carry publishedAt ---
 
-describe("mergePageAndChunkResults publishedAt", () => {
-  it("synthetic VectorHit carries publishedAt from PageHit", () => {
-    const freshConfig = createDefaultConfig("test");
-    const publishedAt = Date.now() - 30 * 86_400_000;
-
-    const pageHits: PageHit[] = [{
-      id: "/page-only",
-      score: 0.9,
-      title: "Page Only",
-      url: "/page-only",
-      description: "desc",
-      tags: [],
-      depth: 1,
-      incomingLinks: 0,
-      routeFile: "src/routes/+page.svelte",
-      publishedAt
-    }];
-
-    const merged = mergePageAndChunkResults(pageHits, [], freshConfig);
-    expect(merged.length).toBe(1);
-    expect(merged[0]?.hit.metadata.publishedAt).toBe(publishedAt);
-  });
-});
