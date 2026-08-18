@@ -24,7 +24,7 @@ import type { UpstashSearchStore } from "../vector/upstash";
 import type { RankedHit, PageResult, RankedPage } from "./ranking";
 import { diceScore, compositeScore, dominantRelationshipType } from "./related-pages";
 import { toSnippet, queryAwareExcerpt } from "../utils/text";
-import { buildMetaFilterString } from "../utils/structured-meta";
+import { buildMetaFilterString, UnsafeFilterValueError } from "../utils/structured-meta";
 
 const rankingOverridesSchema = z.object({
   ranking: z.object({
@@ -251,10 +251,21 @@ export class SearchEngine {
       : undefined;
     const filterTags = input.tags && input.tags.length > 0 ? input.tags : undefined;
 
-    // Build server-side Upstash filter for structured metadata
-    const metaFilterStr = input.filters && Object.keys(input.filters).length > 0
-      ? buildMetaFilterString(input.filters)
-      : "";
+    // Build server-side Upstash filter for structured metadata.
+    // Values containing a quote or backslash are rejected rather than escaped
+    // (Upstash defines no escape sequence), and that must reach the caller as a
+    // 400 rather than a 500.
+    let metaFilterStr = "";
+    if (input.filters && Object.keys(input.filters).length > 0) {
+      try {
+        metaFilterStr = buildMetaFilterString(input.filters);
+      } catch (error) {
+        if (error instanceof UnsafeFilterValueError) {
+          throw new SearchSocketError("INVALID_REQUEST", error.message, 400);
+        }
+        throw error;
+      }
+    }
     const metaFilter = metaFilterStr || undefined;
 
     const applyPagePostFilters = (hits: PageHit[]): PageHit[] => {

@@ -31,6 +31,8 @@ import {
   VITE_PLUGIN_SNIPPET,
 } from "./init-helpers";
 import { copyComponent, isValidComponent, listAvailableComponents } from "./add-helpers";
+import { INDEX_SCHEMA_VERSION } from "./vector/ids";
+import { parseRemoteBranches, selectStaleScopes, type PruneMatchMode } from "./cli/services/prune";
 
 interface RootCommandOptions {
   cwd?: string;
@@ -203,27 +205,13 @@ function readRemoteGitBranches(cwd: string): Set<string> | null {
       return null;
     }
 
-    const scopes = git("branch -r --format='%(refname:short)'")
-      .split(/\r?\n/)
-      .map((line) => line.trim().replace(/^'|'$/g, ""))
-      .filter(Boolean)
-      // Drop the symbolic remote HEAD ("origin/HEAD -> origin/main", printed
-      // as a bare remote name). Counting it inflated the branch total and let
-      // a one-branch shallow inventory look plausible.
-      .filter((line) => line.includes("/"))
-      // Strip whichever remote the ref belongs to, not just "origin/".
-      .map((line) => {
-        const remote = remotes.find((r) => line.startsWith(`${r}/`));
-        return remote ? line.slice(remote.length + 1) : line;
-      })
-      .filter((name) => name !== "HEAD");
-
-    if (scopes.length === 0) {
+    const scopes = parseRemoteBranches(git("branch -r --format='%(refname:short)'"), remotes);
+    if (scopes === null) {
       process.stderr.write("warning: no remote branches found.\n");
       return null;
     }
 
-    return new Set(scopes);
+    return scopes;
   } catch {
     return null;
   }
@@ -820,6 +808,78 @@ program
     process.stdout.write(`deleted remote records for scope ${scope.scopeName}\n`);
   });
 
+const migrate = program
+  .command("migrate")
+  .description("Index schema migration helpers");
+
+migrate
+  .command("cleanup-legacy")
+  .description(
+    "Delete records written under an older index schema (dry-run by default). " +
+      "Run only after a successful reindex on the current schema."
+  )
+  .option("--apply", "actually delete the legacy records", false)
+  .option("--confirm-project <id>", "confirmation token; must equal the project id")
+  .action(async (opts, command) => {
+    const rootOpts = getRootOptions(command.parent?.parent as Command);
+    const cwd = path.resolve(rootOpts?.cwd ?? process.cwd());
+    const config = await loadConfig({ cwd, configPath: rootOpts?.config });
+
+    let store: UpstashSearchStore;
+    let legacy: { pages: string[]; chunks: string[] };
+    try {
+      store = await createUpstashStore(config);
+      legacy = await store.scanLegacyRecords(config.project.id);
+    } catch (error) {
+      process.stderr.write(
+        `error: failed to scan for legacy records: ${error instanceof Error ? error.message : String(error)}\n`
+      );
+      process.exitCode = EXIT_BACKEND_UNAVAILABLE;
+      return;
+    }
+
+    const total = legacy.pages.length + legacy.chunks.length;
+    if (total === 0) {
+      process.stdout.write(`no legacy records found for project ${config.project.id}\n`);
+      return;
+    }
+
+    process.stdout.write(
+      `legacy records in project ${config.project.id} (schema older than ${INDEX_SCHEMA_VERSION}):\n` +
+        `  pages: ${legacy.pages.length}\n` +
+        `  chunks: ${legacy.chunks.length}\n`
+    );
+    for (const id of [...legacy.pages, ...legacy.chunks].slice(0, 20)) {
+      process.stdout.write(`  - ${id}\n`);
+    }
+    if (total > 20) process.stdout.write(`  ... and ${total - 20} more\n`);
+
+    if (!opts.apply) {
+      process.stdout.write(
+        "dry-run only. Verify the current schema is fully indexed and searching correctly, " +
+          `then re-run with --apply --confirm-project ${config.project.id}.\n`
+      );
+      return;
+    }
+
+    if (opts.confirmProject !== config.project.id) {
+      process.stderr.write(
+        `error: this permanently deletes ${total} record(s). ` +
+          `Re-run with --confirm-project ${config.project.id} to acknowledge.\n`
+      );
+      process.exitCode = EXIT_DESTRUCTIVE_REFUSED;
+      return;
+    }
+
+    const result = await store.deleteLegacyRecords(config.project.id, legacy);
+    process.stdout.write(`deleted ${result.deleted} legacy record(s)\n`);
+    if (result.skipped > 0) {
+      process.stdout.write(
+        `skipped ${result.skipped} record(s) that were no longer legacy at deletion time\n`
+      );
+    }
+  });
+
 program
   .command("prune")
   .description("List/delete stale scopes (dry-run by default)")
@@ -912,43 +972,20 @@ program
     }
     const now = Date.now();
 
-    const skipped: string[] = [];
-    const stale = scopes.filter((entry) => {
-      if (protectedScopes.has(entry.scopeName)) {
-        return false;
-      }
-
-      const staleByList = !keepScopes.has(entry.scopeName);
-
-      let staleByTtl = false;
-      if (olderThanMs !== undefined) {
-        if (entry.lastIndexedAt === "unknown") {
-          // No trustworthy timestamp. Treating unknown as "old" would delete
-          // scopes purely because their age could not be established.
-          skipped.push(
-            `${entry.scopeName}: no recorded indexedAt, cannot evaluate --older-than`
-          );
-          return false;
-        }
-        const parsed = Date.parse(entry.lastIndexedAt);
-        if (Number.isNaN(parsed)) {
-          skipped.push(`${entry.scopeName}: unparseable indexedAt "${entry.lastIndexedAt}"`);
-          return false;
-        }
-        staleByTtl = now - parsed > olderThanMs;
-      }
-
-      if (olderThanMs === undefined) return staleByList;
-
-      // Default "all": a scope must be BOTH orphaned and inactive. The old
-      // behaviour was an implicit OR, which deleted an active branch's scope
-      // merely for being old.
-      return opts.match === "any" ? staleByList || staleByTtl : staleByList && staleByTtl;
+    const { stale, skipped } = selectStaleScopes({
+      scopes,
+      keepScopes,
+      protectedScopes,
+      olderThanMs,
+      matchMode: opts.match as PruneMatchMode,
+      now
     });
 
     if (skipped.length > 0) {
       process.stdout.write(`skipped ${skipped.length} scope(s) with unusable timestamps:\n`);
-      for (const line of skipped) process.stdout.write(`  - ${line}\n`);
+      for (const entry of skipped) {
+        process.stdout.write(`  - ${entry.scopeName}: ${entry.reason}\n`);
+      }
     }
 
     if (stale.length === 0) {

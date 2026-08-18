@@ -72,11 +72,33 @@ export function toStoredMeta(meta: PageMeta): StoredPageMeta {
 }
 
 /**
- * Escape a string value for use in Upstash Vector filter DSL.
- * Single quotes are escaped by doubling them.
+ * Thrown when a filter value cannot be represented in Upstash's filter syntax.
+ * Kept local so this module stays importable from the browser bundle, which is
+ * why it does not use SearchSocketError.
  */
-export function escapeFilterValue(s: string): string {
-  return s.replace(/'/g, "''");
+export class UnsafeFilterValueError extends Error {}
+
+/**
+ * Validate a string for use as a single-quoted literal in the Upstash Vector
+ * filter DSL.
+ *
+ * Upstash documents single-quoted literals but specifies **no escape sequence**
+ * for an embedded quote or backslash. This function previously doubled quotes
+ * SQL-style, which is a guess: if the backend instead treats `\'` as the escape,
+ * a value like `x' OR projectId = 'other` survives as filter syntax and widens
+ * the query across tenants.
+ *
+ * Rather than guess, reject. A caller gets a clear error instead of silently
+ * wrong — or silently over-broad — results.
+ */
+export function assertSafeFilterValue(value: string): string {
+  if (value.includes("'") || value.includes("\\")) {
+    throw new UnsafeFilterValueError(
+      "Filter values may not contain a quote or backslash: Upstash Vector's filter " +
+        "syntax defines no way to escape them."
+    );
+  }
+  return value;
 }
 
 /**
@@ -96,7 +118,7 @@ export function buildMetaFilterString(
     const field = `meta.${key}`;
 
     if (typeof value === "string") {
-      clauses.push(`${field} CONTAINS '${escapeFilterValue(value)}'`);
+      clauses.push(`${field} CONTAINS '${assertSafeFilterValue(value)}'`);
     } else if (typeof value === "boolean") {
       clauses.push(`${field} = ${value}`);
     } else {

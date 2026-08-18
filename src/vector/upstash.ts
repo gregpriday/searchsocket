@@ -8,11 +8,27 @@ import type {
   VectorHit
 } from "../types";
 import { SearchSocketError } from "../errors";
+import {
+  INDEX_SCHEMA_VERSION,
+  chunkId,
+  filterStringLiteral,
+  groupFilter,
+  logicalKeyFromId,
+  pageId,
+  recordBelongsToScope,
+  recordPrefix,
+  scopeFilterClauses,
+  urlFromPageId
+} from "./ids";
 
 /** Flat metadata stored alongside each chunk vector in Upstash Vector */
 interface ChunkVectorMetadata {
   projectId: string;
   scopeName: string;
+  /** Identity-layout version; see INDEX_SCHEMA_VERSION. */
+  schemaVersion?: number;
+  /** Logical chunk key, i.e. the record ID minus its scope prefix. */
+  chunkKey?: string;
   type: string;
   url: string;
   path: string;
@@ -38,6 +54,8 @@ interface ChunkVectorMetadata {
 interface PageVectorMetadata {
   projectId: string;
   scopeName: string;
+  /** Identity-layout version; see INDEX_SCHEMA_VERSION. */
+  schemaVersion?: number;
   type: string;
   title: string;
   url: string;
@@ -131,13 +149,18 @@ export class UpstashSearchStore {
     for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
       const batch = chunks.slice(i, i + BATCH_SIZE);
       await this.chunksNs.upsert(
+        // `c.id` is the logical chunk key; the physical record ID carries the
+        // project, scope, and schema version so two tenants sharing one index
+        // cannot overwrite each other.
         batch.map((c) => ({
-          id: c.id,
+          id: chunkId(scope, c.id),
           data: c.data,
           metadata: {
             ...c.metadata,
+            chunkKey: c.id,
             projectId: scope.projectId,
             scopeName: scope.scopeName,
+            schemaVersion: INDEX_SCHEMA_VERSION,
             type: (c.metadata.type as string) || "chunk"
           }
         }))
@@ -153,12 +176,9 @@ export class UpstashSearchStore {
     },
     scope: Scope
   ): Promise<VectorHit[]> {
-    const filterParts = [
-      `projectId = '${scope.projectId}'`,
-      `scopeName = '${scope.scopeName}'`
-    ];
+    const filterParts = [...scopeFilterClauses(scope)];
     if (opts.filter) {
-      filterParts.push(opts.filter);
+      filterParts.push(groupFilter(opts.filter));
     }
 
     const results = await this.chunksNs.query<ChunkVectorMetadata>({
@@ -170,8 +190,14 @@ export class UpstashSearchStore {
       fusionAlgorithm: FusionAlgorithm.DBSF
     });
 
-    return results.map((doc) => ({
-      id: String(doc.id),
+    return results
+      // Defence in depth: the server-side filter should already have excluded
+      // these, but a filter-syntax surprise must not leak another tenant's
+      // record into results.
+      .filter((doc) => recordBelongsToScope(doc.metadata, scope))
+      .map((doc) => ({
+      // Logical chunk key, so the value round-trips back into deleteByIds().
+      id: logicalKeyFromId(String(doc.id), scope, "chunk") ?? String(doc.id),
       score: doc.score,
       metadata: {
         projectId: doc.metadata?.projectId ?? "",
@@ -210,26 +236,42 @@ export class UpstashSearchStore {
     },
     scope: Scope
   ): Promise<VectorHit[]> {
-    const filterParts = [
-      `projectId = '${scope.projectId}'`,
-      `scopeName = '${scope.scopeName}'`,
-      `url = '${url}'`
-    ];
+    const filterParts = [...scopeFilterClauses(scope)];
+
+    // A URL containing a quote or backslash cannot be expressed as a filter
+    // literal, because Upstash defines no escape sequence for either. Rather
+    // than fail — the page is perfectly valid, e.g. /blog/it's-here — fall back
+    // to over-fetching and matching the URL locally.
+    let urlFilterable = true;
+    try {
+      filterParts.push(`url = ${filterStringLiteral(url, "url")}`);
+    } catch {
+      urlFilterable = false;
+    }
+
     if (opts.filter) {
-      filterParts.push(opts.filter);
+      filterParts.push(groupFilter(opts.filter));
     }
 
     const results = await this.chunksNs.query<ChunkVectorMetadata>({
       data,
-      topK: opts.limit,
+      topK: urlFilterable ? opts.limit : Math.min(opts.limit * 10, 200),
       includeMetadata: true,
       filter: filterParts.join(" AND "),
       queryMode: QueryMode.HYBRID,
       fusionAlgorithm: FusionAlgorithm.DBSF
     });
 
-    return results.map((doc) => ({
-      id: String(doc.id),
+    return results
+      // Defence in depth: the server-side filter should already have excluded
+      // these, but a filter-syntax surprise must not leak another tenant's
+      // record into results. The URL is always re-checked locally so the
+      // unfilterable-URL fallback above cannot return another page's chunks.
+      .filter((doc) => recordBelongsToScope(doc.metadata, scope) && doc.metadata?.url === url)
+      .slice(0, opts.limit)
+      .map((doc) => ({
+      // Logical chunk key, so the value round-trips back into deleteByIds().
+      id: logicalKeyFromId(String(doc.id), scope, "chunk") ?? String(doc.id),
       score: doc.score,
       metadata: {
         projectId: doc.metadata?.projectId ?? "",
@@ -289,12 +331,9 @@ export class UpstashSearchStore {
     },
     scope: Scope
   ): Promise<PageHit[]> {
-    const filterParts = [
-      `projectId = '${scope.projectId}'`,
-      `scopeName = '${scope.scopeName}'`
-    ];
+    const filterParts = [...scopeFilterClauses(scope)];
     if (opts.filter) {
-      filterParts.push(opts.filter);
+      filterParts.push(groupFilter(opts.filter));
     }
 
     let results;
@@ -311,8 +350,11 @@ export class UpstashSearchStore {
       return [];
     }
 
-    return results.map((doc) => ({
-      id: String(doc.id),
+    return results
+      .filter((doc) => recordBelongsToScope(doc.metadata, scope))
+      .map((doc) => ({
+      // Page URL, so the value round-trips back into deletePagesByIds().
+      id: doc.metadata?.url ?? urlFromPageId(String(doc.id), scope) ?? String(doc.id),
       score: doc.score,
       title: doc.metadata?.title ?? "",
       url: doc.metadata?.url ?? "",
@@ -325,32 +367,38 @@ export class UpstashSearchStore {
     }));
   }
 
-  async deleteByIds(ids: string[], _scope: Scope): Promise<void> {
-    if (ids.length === 0) return;
+  /** `keys` are logical chunk keys, not physical record IDs. */
+  async deleteByIds(keys: string[], scope: Scope): Promise<void> {
+    if (keys.length === 0) return;
 
     const BATCH_SIZE = 90;
-    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
-      const batch = ids.slice(i, i + BATCH_SIZE);
-      await this.chunksNs.delete(batch);
+    for (let i = 0; i < keys.length; i += BATCH_SIZE) {
+      const batch = keys.slice(i, i + BATCH_SIZE);
+      // Encoding here means a caller cannot delete outside its own scope even
+      // if it passes an arbitrary key.
+      await this.chunksNs.delete(batch.map((key) => chunkId(scope, key)));
     }
   }
 
   async deleteScope(scope: Scope): Promise<void> {
     // Scan both namespaces for vectors matching this scope, then delete
-    for (const ns of [this.chunksNs, this.pagesNs]) {
+    for (const [ns, type] of [
+      [this.chunksNs, "chunk"],
+      [this.pagesNs, "page"]
+    ] as const) {
       const ids: string[] = [];
       let cursor = "0";
       try {
         for (;;) {
           const result = await ns.range<ChunkVectorMetadata>({
             cursor,
+            prefix: recordPrefix(scope, type),
             limit: 100,
             includeMetadata: true
           });
           for (const doc of result.vectors) {
             if (
-              doc.metadata?.projectId === scope.projectId &&
-              doc.metadata?.scopeName === scope.scopeName
+              recordBelongsToScope(doc.metadata, scope)
             ) {
               ids.push(String(doc.id));
             }
@@ -447,21 +495,20 @@ export class UpstashSearchStore {
     for (let i = 0; i < keys.length; i += BATCH_SIZE) {
       const batch = keys.slice(i, i + BATCH_SIZE);
       try {
-        const results = await this.chunksNs.fetch<ChunkVectorMetadata>(batch, {
-          includeMetadata: true
-        });
+        const results = await this.chunksNs.fetch<ChunkVectorMetadata>(
+          batch.map((key) => chunkId(scope, key)),
+          { includeMetadata: true }
+        );
         for (const doc of results) {
-          if (
-            doc &&
-            doc.metadata?.projectId === scope.projectId &&
-            doc.metadata?.scopeName === scope.scopeName &&
-            doc.metadata?.contentHash
-          ) {
-            map.set(String(doc.id), doc.metadata.contentHash);
+          // A direct fetch bypasses the metadata filter, so verify ownership
+          // explicitly rather than trusting the ID.
+          if (doc && recordBelongsToScope(doc.metadata, scope) && doc.metadata?.contentHash) {
+            const key = logicalKeyFromId(String(doc.id), scope, "chunk");
+            if (key !== null) map.set(key, doc.metadata.contentHash);
           }
         }
-      } catch {
-        // Namespace may not exist yet
+      } catch (error) {
+        if (!isMissingNamespaceError(error)) throw error;
       }
     }
 
@@ -478,24 +525,24 @@ export class UpstashSearchStore {
 
     try {
       for (;;) {
+        // Scoped by ID prefix so the scan costs what this scope holds rather
+        // than what every project sharing the index holds.
         const result = await this.chunksNs.range<ChunkVectorMetadata>({
           cursor,
+          prefix: recordPrefix(scope, "chunk"),
           limit: 100,
           includeMetadata: true
         });
         for (const doc of result.vectors) {
-          if (
-            doc.metadata?.projectId === scope.projectId &&
-            doc.metadata?.scopeName === scope.scopeName
-          ) {
-            ids.add(String(doc.id));
-          }
+          if (!recordBelongsToScope(doc.metadata, scope)) continue;
+          const key = logicalKeyFromId(String(doc.id), scope, "chunk");
+          if (key !== null) ids.add(key);
         }
         if (!result.nextCursor || result.nextCursor === "0") break;
         cursor = result.nextCursor;
       }
-    } catch {
-      // Namespace may not exist yet
+    } catch (error) {
+      if (!isMissingNamespaceError(error)) throw error;
     }
 
     return ids;
@@ -512,17 +559,16 @@ export class UpstashSearchStore {
       for (;;) {
         const result = await ns.range<ChunkVectorMetadata>({
           cursor,
+          prefix: recordPrefix(scope, "chunk"),
           limit: 100,
           includeMetadata: true
         });
         for (const doc of result.vectors) {
-          if (
-            doc.metadata?.projectId === scope.projectId &&
-            doc.metadata?.scopeName === scope.scopeName &&
-            doc.metadata?.contentHash
-          ) {
-            map.set(String(doc.id), doc.metadata.contentHash);
-          }
+          if (!recordBelongsToScope(doc.metadata, scope) || !doc.metadata?.contentHash) continue;
+          // Keyed by logical chunk key so the result is comparable with the
+          // keys the chunker produces, rather than by physical record ID.
+          const key = logicalKeyFromId(String(doc.id), scope, "chunk");
+          if (key !== null) map.set(key, doc.metadata.contentHash);
         }
         if (!result.nextCursor || result.nextCursor === "0") break;
         cursor = result.nextCursor;
@@ -547,6 +593,7 @@ export class UpstashSearchStore {
     try {
       const result = await this.pagesNs.range<PageVectorMetadata>({
         cursor,
+        prefix: recordPrefix(scope, "page"),
         limit,
         includeMetadata: true
       });
@@ -554,8 +601,7 @@ export class UpstashSearchStore {
       const pages = result.vectors
         .filter(
           (doc) =>
-            doc.metadata?.projectId === scope.projectId &&
-            doc.metadata?.scopeName === scope.scopeName &&
+            recordBelongsToScope(doc.metadata, scope) &&
             (!opts?.pathPrefix || (doc.metadata?.url ?? "").startsWith(opts.pathPrefix))
         )
         .map((doc) => ({
@@ -588,35 +634,44 @@ export class UpstashSearchStore {
       for (;;) {
         const result = await this.pagesNs.range<PageVectorMetadata>({
           cursor,
+          prefix: recordPrefix(scope, "page"),
           limit: 100,
           includeMetadata: true
         });
         for (const doc of result.vectors) {
-          if (
-            doc.metadata?.projectId === scope.projectId &&
-            doc.metadata?.scopeName === scope.scopeName &&
-            doc.metadata?.contentHash
-          ) {
-            map.set(String(doc.id), doc.metadata.contentHash);
-          }
+          if (!recordBelongsToScope(doc.metadata, scope) || !doc.metadata?.contentHash) continue;
+          // Keyed by URL: callers reason about pages by URL, and the physical
+          // ID is an encoding detail of this store.
+          const url = doc.metadata.url ?? urlFromPageId(String(doc.id), scope);
+          if (url) map.set(url, doc.metadata.contentHash);
         }
         if (!result.nextCursor || result.nextCursor === "0") break;
         cursor = result.nextCursor;
       }
-    } catch {
-      // Namespace may not exist yet
+    } catch (error) {
+      // A genuinely absent namespace means no pages are indexed yet. Anything
+      // else would make this look like an empty index, and the pipeline treats
+      // an empty page inventory as "nothing to compare against".
+      if (!isMissingNamespaceError(error)) {
+        throw new SearchSocketError(
+          "VECTOR_BACKEND_UNAVAILABLE",
+          `Failed to read page hashes for scope "${scope.scopeName}": ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error }
+        );
+      }
     }
 
     return map;
   }
 
-  async deletePagesByIds(ids: string[], _scope: Scope): Promise<void> {
-    if (ids.length === 0) return;
+  /** `urls` are page URLs, not physical record IDs. */
+  async deletePagesByIds(urls: string[], scope: Scope): Promise<void> {
+    if (urls.length === 0) return;
 
     const BATCH_SIZE = 90;
-    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
-      const batch = ids.slice(i, i + BATCH_SIZE);
-      await this.pagesNs.delete(batch);
+    for (let i = 0; i < urls.length; i += BATCH_SIZE) {
+      const batch = urls.slice(i, i + BATCH_SIZE);
+      await this.pagesNs.delete(batch.map((url) => pageId(scope, url)));
     }
   }
 
@@ -634,13 +689,16 @@ export class UpstashSearchStore {
     for (let i = 0; i < pages.length; i += BATCH_SIZE) {
       const batch = pages.slice(i, i + BATCH_SIZE);
       await this.pagesNs.upsert(
+        // `p.id` is the page URL; the physical record ID carries project,
+        // scope, and schema version.
         batch.map((p) => ({
-          id: p.id,
+          id: pageId(scope, p.id),
           data: p.data,
           metadata: {
             ...p.metadata,
             projectId: scope.projectId,
             scopeName: scope.scopeName,
+            schemaVersion: INDEX_SCHEMA_VERSION,
             type: "page"
           }
         }))
@@ -650,11 +708,16 @@ export class UpstashSearchStore {
 
   async getPage(url: string, scope: Scope): Promise<PageRecord | null> {
     try {
-      const results = await this.pagesNs.fetch<PageVectorMetadata>([url], {
+      const results = await this.pagesNs.fetch<PageVectorMetadata>([pageId(scope, url)], {
         includeMetadata: true
       });
       const doc = results[0];
       if (!doc || !doc.metadata) return null;
+
+      // A direct fetch bypasses the metadata filter that protects queries.
+      // Without this check, a record belonging to another project or scope —
+      // or written under an older schema — would be returned as this scope's.
+      if (!recordBelongsToScope(doc.metadata, scope)) return null;
 
       // Reconstruct markdown from chunks
       const chunks = await this.getChunksForPage(url, scope);
@@ -699,14 +762,14 @@ export class UpstashSearchStore {
       for (;;) {
         const result = await this.chunksNs.range<ChunkVectorMetadata>({
           cursor,
+          prefix: recordPrefix(scope, "chunk"),
           limit: 100,
           includeMetadata: true
         });
 
         for (const doc of result.vectors) {
           if (
-            doc.metadata?.projectId === scope.projectId &&
-            doc.metadata?.scopeName === scope.scopeName &&
+            recordBelongsToScope(doc.metadata, scope) &&
             doc.metadata?.url === url
           ) {
             chunks.push({
@@ -735,19 +798,14 @@ export class UpstashSearchStore {
     scope: Scope
   ): Promise<{ metadata: PageVectorMetadata; vector: number[] } | null> {
     try {
-      const results = await this.pagesNs.fetch<PageVectorMetadata>([url], {
+      const results = await this.pagesNs.fetch<PageVectorMetadata>([pageId(scope, url)], {
         includeMetadata: true,
         includeVectors: true
       });
       const doc = results[0];
       if (!doc || !doc.metadata || !doc.vector) return null;
 
-      if (
-        doc.metadata.projectId !== scope.projectId ||
-        doc.metadata.scopeName !== scope.scopeName
-      ) {
-        return null;
-      }
+      if (!recordBelongsToScope(doc.metadata, scope)) return null;
 
       return { metadata: doc.metadata, vector: doc.vector as number[] };
     } catch {
@@ -762,19 +820,15 @@ export class UpstashSearchStore {
     if (urls.length === 0) return [];
 
     try {
-      const results = await this.pagesNs.fetch<PageVectorMetadata>(urls, {
-        includeMetadata: true
-      });
+      const results = await this.pagesNs.fetch<PageVectorMetadata>(
+        urls.map((url) => pageId(scope, url)),
+        { includeMetadata: true }
+      );
 
       const out: Array<{ url: string; title: string; routeFile: string; outgoingLinkUrls: string[] }> = [];
       for (const doc of results) {
         if (!doc || !doc.metadata) continue;
-        if (
-          doc.metadata.projectId !== scope.projectId ||
-          doc.metadata.scopeName !== scope.scopeName
-        ) {
-          continue;
-        }
+        if (!recordBelongsToScope(doc.metadata, scope)) continue;
         out.push({
           url: doc.metadata.url,
           title: doc.metadata.title,
@@ -796,27 +850,128 @@ export class UpstashSearchStore {
       for (;;) {
         const result = await this.pagesNs.range<PageVectorMetadata>({
           cursor,
+          prefix: recordPrefix(scope, "page"),
           limit: 100,
           includeMetadata: true
         });
         for (const doc of result.vectors) {
-          if (
-            doc.metadata?.projectId === scope.projectId &&
-            doc.metadata?.scopeName === scope.scopeName
-          ) {
+          if (recordBelongsToScope(doc.metadata, scope)) {
+            // Physical IDs, deleted directly. Routing them through
+            // deletePagesByIds would re-encode an already-encoded ID and
+            // delete nothing.
             ids.push(String(doc.id));
           }
         }
         if (!result.nextCursor || result.nextCursor === "0") break;
         cursor = result.nextCursor;
       }
-    } catch {
-      // Namespace may not exist
+    } catch (error) {
+      if (!isMissingNamespaceError(error)) throw error;
     }
 
-    if (ids.length > 0) {
-      await this.deletePagesByIds(ids, scope);
+    const BATCH_SIZE = 90;
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      await this.pagesNs.delete(ids.slice(i, i + BATCH_SIZE));
     }
+  }
+
+  /**
+   * Find records written under an older identity layout.
+   *
+   * Records lacking the current `schemaVersion` are invisible to every read
+   * path, so a 1.0 index run writes a fresh generation beside them rather than
+   * overwriting them. They stay put — deliberately, so a rollback is possible —
+   * until `searchsocket migrate cleanup-legacy` removes them.
+   */
+  async scanLegacyRecords(projectId: string): Promise<{
+    pages: string[];
+    chunks: string[];
+  }> {
+    const found = { pages: [] as string[], chunks: [] as string[] };
+
+    for (const [ns, key] of [
+      [this.pagesNs, "pages"],
+      [this.chunksNs, "chunks"]
+    ] as const) {
+      let cursor = "0";
+      try {
+        for (;;) {
+          const result = await ns.range<ChunkVectorMetadata>({
+            cursor,
+            limit: 100,
+            includeMetadata: true
+          });
+          for (const doc of result.vectors) {
+            if (doc.metadata?.projectId !== projectId) continue;
+            // Only missing or older versions are legacy. Treating anything
+            // "!== current" as legacy would make a 1.0 cleanup delete records
+            // written by a future version that shares the index.
+            const version = doc.metadata?.schemaVersion;
+            const isLegacy = typeof version !== "number" || version < INDEX_SCHEMA_VERSION;
+            if (!isLegacy) continue;
+            found[key].push(String(doc.id));
+          }
+          if (!result.nextCursor || result.nextCursor === "0") break;
+          cursor = result.nextCursor;
+        }
+      } catch (error) {
+        if (!isMissingNamespaceError(error)) {
+          throw new SearchSocketError(
+            "VECTOR_BACKEND_UNAVAILABLE",
+            `Failed to scan legacy records: ${error instanceof Error ? error.message : String(error)}`,
+            { cause: error }
+          );
+        }
+      }
+    }
+
+    return found;
+  }
+
+  /**
+   * Delete legacy records by their exact physical IDs.
+   *
+   * Each ID is re-fetched and confirmed to belong to `projectId` and to carry
+   * an older schema immediately before deletion. The IDs come from a scan, but
+   * this method is public and the scan is not atomic with the delete: a
+   * concurrent 0.7.x writer could reuse a raw ID in the interim.
+   */
+  async deleteLegacyRecords(
+    projectId: string,
+    ids: { pages: string[]; chunks: string[] }
+  ): Promise<{ deleted: number; skipped: number }> {
+    const BATCH_SIZE = 90;
+    let deleted = 0;
+    let skipped = 0;
+
+    for (const [ns, list] of [
+      [this.pagesNs, ids.pages],
+      [this.chunksNs, ids.chunks]
+    ] as const) {
+      for (let i = 0; i < list.length; i += BATCH_SIZE) {
+        const batch = list.slice(i, i + BATCH_SIZE);
+        const docs = await ns.fetch<ChunkVectorMetadata>(batch, { includeMetadata: true });
+
+        const confirmed: string[] = [];
+        for (let j = 0; j < batch.length; j += 1) {
+          const doc = docs[j];
+          const version = doc?.metadata?.schemaVersion;
+          const isLegacy = typeof version !== "number" || version < INDEX_SCHEMA_VERSION;
+          if (doc && doc.metadata?.projectId === projectId && isLegacy) {
+            confirmed.push(batch[j]!);
+          } else if (doc) {
+            skipped += 1;
+          }
+        }
+
+        if (confirmed.length > 0) {
+          await ns.delete(confirmed);
+          deleted += confirmed.length;
+        }
+      }
+    }
+
+    return { deleted, skipped };
   }
 
   async health(): Promise<{ ok: boolean; details?: string }> {

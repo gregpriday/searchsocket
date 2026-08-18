@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process";
 import type { ResolvedSearchSocketConfig, Scope } from "../types";
 import { sanitizeScopeName } from "../utils/text";
+import { assertSafeName } from "../vector/ids";
 
 function resolveRawScopeName(config: ResolvedSearchSocketConfig): string {
   if (config.scope.mode === "fixed") {
@@ -29,6 +30,14 @@ function resolveRawScopeName(config: ResolvedSearchSocketConfig): string {
 export function resolveScope(config: ResolvedSearchSocketConfig, override?: string): Scope {
   const rawName = override ?? resolveRawScopeName(config);
   const scopeName = config.scope.sanitize ? sanitizeScopeName(rawName) : rawName;
+
+  // Both values are embedded in record IDs and in Upstash filter literals.
+  // Validating here means an unsafe name fails at resolution rather than
+  // producing a malformed ID or escaping the surrounding filter expression.
+  // `scope.sanitize: false` is the path that makes this reachable: it hands
+  // the raw branch name straight through.
+  assertSafeName("project id", config.project.id);
+  assertSafeName("scope name", scopeName);
 
   return {
     projectId: config.project.id,
