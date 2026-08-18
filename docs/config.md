@@ -86,6 +86,11 @@ SearchSocket reads `UPSTASH_VECTOR_REST_URL` and `UPSTASH_VECTOR_REST_TOKEN` fro
 - `upstash.token` — direct Upstash REST token (alternative to env var)
 - `upstash.namespaces.pages` (default `pages`) — namespace for page vectors
 - `upstash.namespaces.chunks` (default `chunks`) — namespace for chunk vectors
+- `upstash.batchSize` (default `90`, max `500`) — records per upsert/delete/fetch request
+- `upstash.maxRetries` (default `2`, max `10`) — retries for transient backend failures
+  (rate limits, timeouts, 5xx). Authorization and filter-syntax errors are never
+  retried. The Upstash SDK separately retries network failures on its own, so
+  raising this multiplies with those attempts.
 
 ## Embedding
 
@@ -94,7 +99,9 @@ Upstash handles embedding server-side via the `data` field. These settings must 
 - `embedding.model` (default `bge-large-en-v1.5`) — embedding model name
 - `embedding.dimensions` (default `1024`) — vector dimensions
 - `embedding.taskType` (default `RETRIEVAL_DOCUMENT`) — embedding task type
-- `embedding.batchSize` (default `100`) — vectors per upsert batch
+- `embedding.batchSize` — **unused.** Batch size is controlled by
+  `upstash.batchSize`; this field has no runtime effect and is kept only so
+  existing configs keep loading.
 - `embedding.images.enable` — unused, kept for backwards compatibility. Images are made searchable via text descriptions (`data-search-description`, `alt`, `figcaption`), not image embeddings.
 
 ### Non-English / multilingual sites

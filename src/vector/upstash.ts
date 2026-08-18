@@ -21,6 +21,26 @@ import {
   urlFromPageId
 } from "./ids";
 
+/**
+ * Records per write/delete/fetch request. Upstash bounds both request size and
+ * item count, and chunk metadata can be large, so this stays conservative.
+ */
+const DEFAULT_BATCH_SIZE = 90;
+/**
+ * Kept low deliberately: the Upstash SDK already retries *network* failures up
+ * to 5 times internally. This layer exists for the errors it does not retry —
+ * HTTP error responses such as 429 and 5xx, which surface as UpstashError. A
+ * larger value here multiplies with the SDK's own attempts.
+ */
+const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_RETRY_BASE_MS = 200;
+
+/** Coerce an untrusted numeric option to a finite integer inside [min, max]. */
+function clampInt(value: number | undefined, fallback: number, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(Math.floor(value), max));
+}
+
 /** Flat metadata stored alongside each chunk vector in Upstash Vector */
 interface ChunkVectorMetadata {
   projectId: string;
@@ -111,6 +131,15 @@ export interface UpstashSearchStoreOptions {
   index: Index;
   pagesNamespace: string;
   chunksNamespace: string;
+  /** Records per request. Defaults to 90; capped at 500. */
+  batchSize?: number;
+  /**
+   * Retries for transient failures only. Defaults to 2; 0 disables retrying.
+   * The Upstash SDK separately retries network failures 5 times on its own.
+   */
+  maxRetries?: number;
+  /** First backoff delay in ms; doubles per attempt, plus jitter. Defaults to 200. */
+  retryBaseMs?: number;
 }
 
 /**
@@ -118,21 +147,154 @@ export interface UpstashSearchStoreOptions {
  * backend failure. Only the former may be treated as empty state — an auth
  * error, timeout, or rate limit reported as "no records" can drive a caller
  * into deleting a perfectly healthy index.
+ *
+ * In practice this rarely fires: Upstash creates namespaces implicitly on
+ * first write, and a read against one that does not exist returns an empty
+ * result rather than an error. It is kept as a defensive fallback so a future
+ * change in that behaviour cannot break first-run indexing.
  */
 export function isMissingNamespaceError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /namespace .*(not found|does not exist)|no such namespace/i.test(message);
 }
 
+/**
+ * The distinct backend conditions a caller may need to act on differently.
+ * Collapsing all of them to an empty result — as this store previously did —
+ * makes an outage indistinguishable from an empty index.
+ */
+export type StorageErrorCode =
+  | "UNAUTHORIZED"
+  | "RATE_LIMITED"
+  | "TIMEOUT"
+  | "INVALID_FILTER"
+  | "NAMESPACE_MISSING"
+  | "SERVICE_UNAVAILABLE"
+  | "UNKNOWN";
+
+/**
+ * Classify a raw SDK/network error into an actionable category.
+ *
+ * Classification is message-driven because `UpstashError` carries only the
+ * server's `error` string — it has no status code. The `status` check below
+ * still runs for errors raised by anything else in the stack (a fetch polyfill,
+ * a proxy) that does attach one.
+ */
+export function classifyStorageError(error: unknown): StorageErrorCode {
+  if (isMissingNamespaceError(error)) return "NAMESPACE_MISSING";
+
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  const status =
+    typeof (error as { status?: unknown })?.status === "number"
+      ? (error as { status: number }).status
+      : undefined;
+
+  // A status code, when present, is more reliable than message matching, so it
+  // decides first. Otherwise a 502 whose body happens to mention "filter" would
+  // be classified as a client error and never retried.
+  if (status !== undefined) {
+    if (status === 401 || status === 403) return "UNAUTHORIZED";
+    if (status === 429) return "RATE_LIMITED";
+    if (status === 408 || status === 504) return "TIMEOUT";
+    if (status >= 500) return "SERVICE_UNAVAILABLE";
+  }
+
+  if (/\bunauthori[sz]ed\b|\bforbidden\b|invalid token|invalid credential/.test(message)) {
+    return "UNAUTHORIZED";
+  }
+  if (/rate ?limit|too many requests|\bquota\b/.test(message)) {
+    return "RATE_LIMITED";
+  }
+  // Deliberately excludes "abort": an aborted request is the caller cancelling,
+  // and retrying a cancellation is wrong.
+  if (/timed? ?out\b|\betimedout\b|\bgateway timeout\b/.test(message)) return "TIMEOUT";
+  // Word-bounded: an unbounded /parse/ matched "sparseVector", turning an
+  // unrelated vector error into a non-retryable filter error.
+  if (/\bfilter\b|\bsyntax\b|\bparse error\b|failed to parse/.test(message)) {
+    return "INVALID_FILTER";
+  }
+  if (
+    /\bunavailable\b|\beconnrefused\b|\benotfound\b|\becconnreset\b|socket hang up|fetch failed|\bnetwork\b|internal server error|bad gateway|service unavailable|exhausted all retries/.test(
+      message
+    )
+  ) {
+    return "SERVICE_UNAVAILABLE";
+  }
+  return "UNKNOWN";
+}
+
+/**
+ * Wrap a backend failure as a typed SearchSocketError.
+ *
+ * The original error is preserved as `cause` for logs; the public message
+ * carries only the operation and category, never the raw SDK text, which can
+ * contain a credential or an internal URL.
+ */
+export function toStorageError(operation: string, error: unknown): SearchSocketError {
+  const code = classifyStorageError(error);
+  const status = code === "UNAUTHORIZED" ? 500 : code === "RATE_LIMITED" ? 429 : 503;
+  return new SearchSocketError(
+    code === "RATE_LIMITED" ? "RATE_LIMITED" : "VECTOR_BACKEND_UNAVAILABLE",
+    `Vector backend ${operation} failed (${code}).`,
+    { status, cause: error }
+  );
+}
+
+
 export class UpstashSearchStore {
   private readonly index: Index;
   private readonly pagesNs: ReturnType<Index["namespace"]>;
   private readonly chunksNs: ReturnType<Index["namespace"]>;
+  private readonly batchSize: number;
+  private readonly maxRetries: number;
+  private readonly retryBaseMs: number;
 
   constructor(opts: UpstashSearchStoreOptions) {
     this.index = opts.index;
     this.pagesNs = opts.index.namespace(opts.pagesNamespace);
     this.chunksNs = opts.index.namespace(opts.chunksNamespace);
+    // Was a hardcoded 90 in nine separate places. Bounded to stay well within
+    // Upstash's per-request limits even with large chunk metadata.
+    // Clamped here as well as in the config schema: the store is exported, so
+    // a direct consumer can pass anything. A NaN batch size produced an empty
+    // first batch and silently wrote nothing; a negative retry count skipped
+    // the operation entirely.
+    this.batchSize = clampInt(opts.batchSize, DEFAULT_BATCH_SIZE, 1, 500);
+    this.maxRetries = clampInt(opts.maxRetries, DEFAULT_MAX_RETRIES, 0, 10);
+    this.retryBaseMs = clampInt(opts.retryBaseMs, DEFAULT_RETRY_BASE_MS, 1, 60_000);
+  }
+
+  /**
+   * Retry a transient failure with exponential backoff and jitter.
+   *
+   * Only rate limits, timeouts, and service errors are retried. An
+   * authorization or filter-syntax failure is retried zero times: it will fail
+   * identically every time, and retrying only delays the error the caller needs.
+   */
+  private async withRetry<T>(operation: string, fn: () => Promise<T>): Promise<T> {
+    // Safe to retry: every write is an upsert keyed by a deterministic record
+    // ID, and every delete names explicit IDs, so re-applying a batch that may
+    // have partially succeeded converges on the same state.
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error;
+        const code = classifyStorageError(error);
+        const retryable =
+          code === "RATE_LIMITED" || code === "TIMEOUT" || code === "SERVICE_UNAVAILABLE";
+        if (!retryable || attempt === this.maxRetries) break;
+
+        const backoff = this.retryBaseMs * 2 ** attempt;
+        // Jitter so concurrent workers do not retry in lockstep.
+        const delay = backoff + Math.floor(Math.random() * backoff);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+
+    throw toStorageError(operation, lastError);
   }
 
   async upsertChunks(
@@ -145,10 +307,10 @@ export class UpstashSearchStore {
   ): Promise<void> {
     if (chunks.length === 0) return;
 
-    const BATCH_SIZE = 90;
+    const BATCH_SIZE = this.batchSize;
     for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
       const batch = chunks.slice(i, i + BATCH_SIZE);
-      await this.chunksNs.upsert(
+      await this.withRetry("upsert chunks", () => this.chunksNs.upsert(
         // `c.id` is the logical chunk key; the physical record ID carries the
         // project, scope, and schema version so two tenants sharing one index
         // cannot overwrite each other.
@@ -164,7 +326,7 @@ export class UpstashSearchStore {
             type: (c.metadata.type as string) || "chunk"
           }
         }))
-      );
+      ));
     }
   }
 
@@ -181,14 +343,20 @@ export class UpstashSearchStore {
       filterParts.push(groupFilter(opts.filter));
     }
 
-    const results = await this.chunksNs.query<ChunkVectorMetadata>({
-      data,
-      topK: opts.limit,
-      includeMetadata: true,
-      filter: filterParts.join(" AND "),
-      queryMode: QueryMode.HYBRID,
-      fusionAlgorithm: FusionAlgorithm.DBSF
-    });
+    let results;
+    try {
+      results = await this.chunksNs.query<ChunkVectorMetadata>({
+        data,
+        topK: opts.limit,
+        includeMetadata: true,
+        filter: filterParts.join(" AND "),
+        queryMode: QueryMode.HYBRID,
+        fusionAlgorithm: FusionAlgorithm.DBSF
+      });
+    } catch (error) {
+      if (!isMissingNamespaceError(error)) throw toStorageError("chunk query", error);
+      return [];
+    }
 
     return results
       // Defence in depth: the server-side filter should already have excluded
@@ -246,6 +414,7 @@ export class UpstashSearchStore {
     try {
       filterParts.push(`url = ${filterStringLiteral(url, "url")}`);
     } catch {
+      // Not a backend failure — the URL simply cannot be expressed as a literal.
       urlFilterable = false;
     }
 
@@ -253,14 +422,20 @@ export class UpstashSearchStore {
       filterParts.push(groupFilter(opts.filter));
     }
 
-    const results = await this.chunksNs.query<ChunkVectorMetadata>({
-      data,
-      topK: urlFilterable ? opts.limit : Math.min(opts.limit * 10, 200),
-      includeMetadata: true,
-      filter: filterParts.join(" AND "),
-      queryMode: QueryMode.HYBRID,
-      fusionAlgorithm: FusionAlgorithm.DBSF
-    });
+    let results;
+    try {
+      results = await this.chunksNs.query<ChunkVectorMetadata>({
+        data,
+        topK: urlFilterable ? opts.limit : Math.min(opts.limit * 10, 200),
+        includeMetadata: true,
+        filter: filterParts.join(" AND "),
+        queryMode: QueryMode.HYBRID,
+        fusionAlgorithm: FusionAlgorithm.DBSF
+      });
+    } catch (error) {
+      if (!isMissingNamespaceError(error)) throw toStorageError("chunk query by url", error);
+      return [];
+    }
 
     return results
       // Defence in depth: the server-side filter should already have excluded
@@ -346,7 +521,11 @@ export class UpstashSearchStore {
         queryMode: QueryMode.HYBRID,
         fusionAlgorithm: FusionAlgorithm.DBSF
       });
-    } catch {
+    } catch (error) {
+      // A query failure is not "no results". Returning [] here made an outage
+      // indistinguishable from an empty index, and search silently answered
+      // every query with nothing.
+      if (!isMissingNamespaceError(error)) throw toStorageError("page query", error);
       return [];
     }
 
@@ -371,12 +550,14 @@ export class UpstashSearchStore {
   async deleteByIds(keys: string[], scope: Scope): Promise<void> {
     if (keys.length === 0) return;
 
-    const BATCH_SIZE = 90;
+    const BATCH_SIZE = this.batchSize;
     for (let i = 0; i < keys.length; i += BATCH_SIZE) {
       const batch = keys.slice(i, i + BATCH_SIZE);
       // Encoding here means a caller cannot delete outside its own scope even
       // if it passes an arbitrary key.
-      await this.chunksNs.delete(batch.map((key) => chunkId(scope, key)));
+      await this.withRetry("delete chunks", () =>
+        this.chunksNs.delete(batch.map((key) => chunkId(scope, key)))
+      );
     }
   }
 
@@ -406,15 +587,17 @@ export class UpstashSearchStore {
           if (!result.nextCursor || result.nextCursor === "0") break;
           cursor = result.nextCursor;
         }
-      } catch {
-        // Namespace may not exist yet
+      } catch (error) {
+        // A partial scan would delete only part of the scope while reporting
+        // success, so anything other than an absent namespace must fail.
+        if (!isMissingNamespaceError(error)) throw toStorageError("scan for deletion", error);
       }
 
       if (ids.length > 0) {
-        const BATCH_SIZE = 90;
+        const BATCH_SIZE = this.batchSize;
         for (let i = 0; i < ids.length; i += BATCH_SIZE) {
           const batch = ids.slice(i, i + BATCH_SIZE);
-          await ns.delete(batch);
+          await this.withRetry("delete scoped records", () => ns.delete(batch));
         }
       }
     }
@@ -459,11 +642,7 @@ export class UpstashSearchStore {
         // incomplete, and callers such as `prune` make deletion decisions from
         // it — so surface it rather than reporting a truncated scope list.
         if (!isMissingNamespaceError(error)) {
-          throw new SearchSocketError(
-            "VECTOR_BACKEND_UNAVAILABLE",
-            `Failed to list scopes for project "${projectId}": ${error instanceof Error ? error.message : String(error)}`,
-            { cause: error }
-          );
+          throw toStorageError(`list scopes for project "${projectId}"`, error);
         }
       }
     }
@@ -491,7 +670,7 @@ export class UpstashSearchStore {
     const map = new Map<string, string>();
     if (keys.length === 0) return map;
 
-    const BATCH_SIZE = 90;
+    const BATCH_SIZE = this.batchSize;
     for (let i = 0; i < keys.length; i += BATCH_SIZE) {
       const batch = keys.slice(i, i + BATCH_SIZE);
       try {
@@ -508,7 +687,7 @@ export class UpstashSearchStore {
           }
         }
       } catch (error) {
-        if (!isMissingNamespaceError(error)) throw error;
+        if (!isMissingNamespaceError(error)) throw toStorageError("fetch chunk hashes", error);
       }
     }
 
@@ -542,7 +721,7 @@ export class UpstashSearchStore {
         cursor = result.nextCursor;
       }
     } catch (error) {
-      if (!isMissingNamespaceError(error)) throw error;
+      if (!isMissingNamespaceError(error)) throw toStorageError("scan chunk ids", error);
     }
 
     return ids;
@@ -573,8 +752,8 @@ export class UpstashSearchStore {
         if (!result.nextCursor || result.nextCursor === "0") break;
         cursor = result.nextCursor;
       }
-    } catch {
-      // Namespace may not exist yet
+    } catch (error) {
+      if (!isMissingNamespaceError(error)) throw toStorageError("scan content hashes", error);
     }
 
     return map;
@@ -587,42 +766,65 @@ export class UpstashSearchStore {
     pages: Array<{ url: string; title: string; description: string; routeFile: string }>;
     nextCursor?: string;
   }> {
-    const cursor = opts?.cursor ?? "0";
-    const limit = opts?.limit ?? 50;
+    let cursor = opts?.cursor ?? "0";
+    const limit = Math.max(1, Math.min(opts?.limit ?? 50, 200));
+
+    const pages: Array<{ url: string; title: string; description: string; routeFile: string }> = [];
+    // Bounds the work a single call can do when a path prefix matches almost
+    // nothing, so an unfilterable request cannot walk the whole scope.
+    const MAX_PAGES_SCANNED = 10;
 
     try {
-      const result = await this.pagesNs.range<PageVectorMetadata>({
-        cursor,
-        prefix: recordPrefix(scope, "page"),
-        limit,
-        includeMetadata: true
-      });
+      for (let scanned = 0; scanned < MAX_PAGES_SCANNED; scanned += 1) {
+        // Request only what is still needed. Over-fetching would collect
+        // records that the `limit` slice then discards, while the cursor
+        // advanced past them — so those records would never be returned by any
+        // subsequent call either. The backend cursor is opaque, so a partially
+        // consumed page cannot be resumed.
+        const result = await this.pagesNs.range<PageVectorMetadata>({
+          cursor,
+          prefix: recordPrefix(scope, "page"),
+          limit: limit - pages.length,
+          includeMetadata: true
+        });
 
-      const pages = result.vectors
-        .filter(
-          (doc) =>
-            recordBelongsToScope(doc.metadata, scope) &&
-            (!opts?.pathPrefix || (doc.metadata?.url ?? "").startsWith(opts.pathPrefix))
-        )
-        .map((doc) => ({
-          url: doc.metadata?.url ?? "",
-          title: doc.metadata?.title ?? "",
-          description: doc.metadata?.description ?? "",
-          routeFile: doc.metadata?.routeFile ?? ""
-        }));
+        for (const doc of result.vectors) {
+          if (!recordBelongsToScope(doc.metadata, scope)) continue;
+          const url = doc.metadata?.url ?? "";
+          if (opts?.pathPrefix && !url.startsWith(opts.pathPrefix)) continue;
+          pages.push({
+            url,
+            title: doc.metadata?.title ?? "",
+            description: doc.metadata?.description ?? "",
+            routeFile: doc.metadata?.routeFile ?? ""
+          });
+        }
+
+        const exhausted = !result.nextCursor || result.nextCursor === "0";
+        cursor = exhausted ? "" : result.nextCursor;
+
+        // Keep reading until the page is full or the scope runs out. Returning
+        // "whatever matched inside one backend page" meant a request for 50
+        // pages could return 3 while thousands more matched, and the caller had
+        // no way to tell that from the end of the list.
+        if (exhausted || pages.length >= limit) break;
+      }
 
       const response: {
         pages: Array<{ url: string; title: string; description: string; routeFile: string }>;
         nextCursor?: string;
       } = { pages };
 
-      if (result.nextCursor && result.nextCursor !== "0") {
-        response.nextCursor = result.nextCursor;
+      // A cursor is returned when records remain, including the case where the
+      // local filter kept fewer than `limit` from a full backend page.
+      if (cursor !== "" && cursor !== "0") {
+        response.nextCursor = cursor;
       }
 
       return response;
-    } catch {
-      return { pages: [] };
+    } catch (error) {
+      if (isMissingNamespaceError(error)) return { pages: [] };
+      throw toStorageError("list pages", error);
     }
   }
 
@@ -653,11 +855,7 @@ export class UpstashSearchStore {
       // else would make this look like an empty index, and the pipeline treats
       // an empty page inventory as "nothing to compare against".
       if (!isMissingNamespaceError(error)) {
-        throw new SearchSocketError(
-          "VECTOR_BACKEND_UNAVAILABLE",
-          `Failed to read page hashes for scope "${scope.scopeName}": ${error instanceof Error ? error.message : String(error)}`,
-          { cause: error }
-        );
+        throw toStorageError(`read page hashes for scope "${scope.scopeName}"`, error);
       }
     }
 
@@ -668,10 +866,12 @@ export class UpstashSearchStore {
   async deletePagesByIds(urls: string[], scope: Scope): Promise<void> {
     if (urls.length === 0) return;
 
-    const BATCH_SIZE = 90;
+    const BATCH_SIZE = this.batchSize;
     for (let i = 0; i < urls.length; i += BATCH_SIZE) {
       const batch = urls.slice(i, i + BATCH_SIZE);
-      await this.pagesNs.delete(batch.map((url) => pageId(scope, url)));
+      await this.withRetry("delete pages", () =>
+        this.pagesNs.delete(batch.map((url) => pageId(scope, url)))
+      );
     }
   }
 
@@ -685,10 +885,10 @@ export class UpstashSearchStore {
   ): Promise<void> {
     if (pages.length === 0) return;
 
-    const BATCH_SIZE = 90;
+    const BATCH_SIZE = this.batchSize;
     for (let i = 0; i < pages.length; i += BATCH_SIZE) {
       const batch = pages.slice(i, i + BATCH_SIZE);
-      await this.pagesNs.upsert(
+      await this.withRetry("upsert pages", () => this.pagesNs.upsert(
         // `p.id` is the page URL; the physical record ID carries project,
         // scope, and schema version.
         batch.map((p) => ({
@@ -702,7 +902,7 @@ export class UpstashSearchStore {
             type: "page"
           }
         }))
-      );
+      ));
     }
   }
 
@@ -742,8 +942,9 @@ export class UpstashSearchStore {
         keywords: doc.metadata.keywords?.length ? doc.metadata.keywords : undefined,
         publishedAt: typeof doc.metadata.publishedAt === "number" ? doc.metadata.publishedAt : undefined
       };
-    } catch {
-      return null;
+    } catch (error) {
+      if (isMissingNamespaceError(error)) return null;
+      throw toStorageError("get page", error);
     }
   }
 
@@ -786,8 +987,8 @@ export class UpstashSearchStore {
         if (!result.nextCursor || result.nextCursor === "0") break;
         cursor = result.nextCursor;
       }
-    } catch {
-      // Namespace may not exist yet
+    } catch (error) {
+      if (!isMissingNamespaceError(error)) throw toStorageError("scan page chunks", error);
     }
 
     return chunks.sort((a, b) => a.ordinal - b.ordinal);
@@ -808,8 +1009,9 @@ export class UpstashSearchStore {
       if (!recordBelongsToScope(doc.metadata, scope)) return null;
 
       return { metadata: doc.metadata, vector: doc.vector as number[] };
-    } catch {
-      return null;
+    } catch (error) {
+      if (isMissingNamespaceError(error)) return null;
+      throw toStorageError("fetch page vector", error);
     }
   }
 
@@ -820,12 +1022,21 @@ export class UpstashSearchStore {
     if (urls.length === 0) return [];
 
     try {
-      const results = await this.pagesNs.fetch<PageVectorMetadata>(
-        urls.map((url) => pageId(scope, url)),
-        { includeMetadata: true }
-      );
-
       const out: Array<{ url: string; title: string; routeFile: string; outgoingLinkUrls: string[] }> = [];
+      const results: Array<{ metadata?: PageVectorMetadata } | null> = [];
+
+      // Batched: a page's outgoing-link list is uncapped, so related-page
+      // retrieval could otherwise hand the backend thousands of IDs at once.
+      const BATCH_SIZE = this.batchSize;
+      for (let i = 0; i < urls.length; i += BATCH_SIZE) {
+        const batch = urls.slice(i, i + BATCH_SIZE);
+        const fetched = await this.pagesNs.fetch<PageVectorMetadata>(
+          batch.map((url) => pageId(scope, url)),
+          { includeMetadata: true }
+        );
+        results.push(...fetched);
+      }
+
       for (const doc of results) {
         if (!doc || !doc.metadata) continue;
         if (!recordBelongsToScope(doc.metadata, scope)) continue;
@@ -837,8 +1048,9 @@ export class UpstashSearchStore {
         });
       }
       return out;
-    } catch {
-      return [];
+    } catch (error) {
+      if (isMissingNamespaceError(error)) return [];
+      throw toStorageError("fetch pages", error);
     }
   }
 
@@ -869,9 +1081,10 @@ export class UpstashSearchStore {
       if (!isMissingNamespaceError(error)) throw error;
     }
 
-    const BATCH_SIZE = 90;
+    const BATCH_SIZE = this.batchSize;
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
-      await this.pagesNs.delete(ids.slice(i, i + BATCH_SIZE));
+      const batch = ids.slice(i, i + BATCH_SIZE);
+      await this.withRetry("delete pages", () => this.pagesNs.delete(batch));
     }
   }
 
@@ -916,11 +1129,7 @@ export class UpstashSearchStore {
         }
       } catch (error) {
         if (!isMissingNamespaceError(error)) {
-          throw new SearchSocketError(
-            "VECTOR_BACKEND_UNAVAILABLE",
-            `Failed to scan legacy records: ${error instanceof Error ? error.message : String(error)}`,
-            { cause: error }
-          );
+          throw toStorageError("scan legacy records", error);
         }
       }
     }
@@ -940,7 +1149,7 @@ export class UpstashSearchStore {
     projectId: string,
     ids: { pages: string[]; chunks: string[] }
   ): Promise<{ deleted: number; skipped: number }> {
-    const BATCH_SIZE = 90;
+    const BATCH_SIZE = this.batchSize;
     let deleted = 0;
     let skipped = 0;
 
@@ -950,7 +1159,9 @@ export class UpstashSearchStore {
     ] as const) {
       for (let i = 0; i < list.length; i += BATCH_SIZE) {
         const batch = list.slice(i, i + BATCH_SIZE);
-        const docs = await ns.fetch<ChunkVectorMetadata>(batch, { includeMetadata: true });
+        const docs = await this.withRetry("fetch legacy records", () =>
+          ns.fetch<ChunkVectorMetadata>(batch, { includeMetadata: true })
+        );
 
         const confirmed: string[] = [];
         for (let j = 0; j < batch.length; j += 1) {
@@ -965,7 +1176,7 @@ export class UpstashSearchStore {
         }
 
         if (confirmed.length > 0) {
-          await ns.delete(confirmed);
+          await this.withRetry("delete legacy records", () => ns.delete(confirmed));
           deleted += confirmed.length;
         }
       }
@@ -981,7 +1192,9 @@ export class UpstashSearchStore {
     } catch (error) {
       return {
         ok: false,
-        details: error instanceof Error ? error.message : "unknown error"
+        // Categorised, not verbatim: this value is returned by the public
+        // health endpoint, and the raw SDK message can contain a credential.
+        details: classifyStorageError(error)
       };
     }
   }
@@ -1006,15 +1219,17 @@ export class UpstashSearchStore {
           if (!result.nextCursor || result.nextCursor === "0") break;
           cursor = result.nextCursor;
         }
-      } catch {
-        // Namespace may not exist yet
+      } catch (error) {
+        // A partial scan would delete only part of the scope while reporting
+        // success, so anything other than an absent namespace must fail.
+        if (!isMissingNamespaceError(error)) throw toStorageError("scan for deletion", error);
       }
 
       if (ids.length > 0) {
-        const BATCH_SIZE = 90;
+        const BATCH_SIZE = this.batchSize;
         for (let i = 0; i < ids.length; i += BATCH_SIZE) {
           const batch = ids.slice(i, i + BATCH_SIZE);
-          await ns.delete(batch);
+          await this.withRetry("delete scoped records", () => ns.delete(batch));
         }
       }
     }

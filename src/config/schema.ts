@@ -91,7 +91,11 @@ export const searchSocketConfigSchema = z.object({
           pages: z.string().min(1).optional(),
           chunks: z.string().min(1).optional()
         })
-        .optional()
+        .optional(),
+      /** Records per write/delete/fetch request. Default 90, max 500. */
+      batchSize: z.number().int().positive().max(500).optional(),
+      /** Retries for transient failures (rate limit, timeout, 5xx). Default 2. */
+      maxRetries: z.number().int().min(0).max(10).optional()
     })
     .optional(),
   embedding: z

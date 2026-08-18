@@ -79,6 +79,10 @@ export interface SearchSocketConfig {
       pages?: string;
       chunks?: string;
     };
+    /** Records per write/delete/fetch request. Default 90, max 500. */
+    batchSize?: number;
+    /** Retries for transient failures (rate limit, timeout, 5xx). Default 2. */
+    maxRetries?: number;
   };
   embedding?: {
     model?: string;
@@ -228,6 +232,8 @@ export interface ResolvedSearchSocketConfig {
       pages: string;
       chunks: string;
     };
+    batchSize: number;
+    maxRetries: number;
   };
   embedding: {
     model: string;

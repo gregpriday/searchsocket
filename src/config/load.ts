@@ -128,7 +128,9 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
       namespaces: {
         ...defaults.upstash.namespaces,
         ...parsed.upstash?.namespaces
-      }
+      },
+      batchSize: parsed.upstash?.batchSize ?? defaults.upstash.batchSize,
+      maxRetries: parsed.upstash?.maxRetries ?? defaults.upstash.maxRetries
     },
     embedding: {
       ...defaults.embedding,

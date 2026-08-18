@@ -58,7 +58,9 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       namespaces: {
         pages: "pages",
         chunks: "chunks"
-      }
+      },
+      batchSize: 90,
+      maxRetries: 2
     },
     embedding: {
       model: "bge-large-en-v1.5",

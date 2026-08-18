@@ -20,6 +20,8 @@ export async function createUpstashStore(config: ResolvedSearchSocketConfig): Pr
   return new UpstashSearchStore({
     index,
     pagesNamespace: config.upstash.namespaces.pages,
-    chunksNamespace: config.upstash.namespaces.chunks
+    chunksNamespace: config.upstash.namespaces.chunks,
+    batchSize: config.upstash.batchSize,
+    maxRetries: config.upstash.maxRetries
   });
 }
