@@ -152,16 +152,24 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
           return resolve(event);
         }
       } else {
-        // Config not yet loaded — if config is pending or available, resolve to learn mcpPath
-        if (configPromise || options.config || options.rawConfig) {
+        // Config not yet loaded, so the MCP path is not known yet. Load it —
+        // getConfig() memoizes, so only the first request pays.
+        //
+        // This used to run only when a config object had been supplied inline.
+        // A deployment that passed just `{ path }` and let the config load from
+        // disk therefore never learned mcpPath, and every MCP request fell
+        // through to the app as an unhandled route.
+        try {
           await getConfig();
-          if (mcpPath && event.url.pathname === mcpPath) {
-            return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
-          }
-          if (!(serveMarkdownVariants && isMarkdownVariant)) {
-            return resolve(event);
-          }
-        } else {
+        } catch {
+          // No usable config: this request is not ours to handle.
+          return resolve(event);
+        }
+
+        if (mcpPath && event.url.pathname === mcpPath) {
+          return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
+        }
+        if (!(serveMarkdownVariants && isMarkdownVariant)) {
           return resolve(event);
         }
       }
@@ -679,7 +687,9 @@ async function handleMcpRequest(
         jsonrpc: "2.0",
         error: {
           code: -32603,
-          message: error instanceof Error ? error.message : "Internal server error"
+          // Not the raw exception: transport failures can surface internal
+          // paths and configuration detail to the client.
+          message: "Internal server error"
         },
         id: null
       }),

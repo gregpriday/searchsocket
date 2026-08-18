@@ -9,8 +9,8 @@ on:
         description: "TTL cutoff (e.g. 30d, 12h)"
         required: false
         default: "30d"
-      dry-run:
-        description: "Dry-run only (no deletions)"
+      apply:
+        description: "Actually delete (default is plan-only)"
         required: false
         type: boolean
         default: false
@@ -86,20 +86,26 @@ jobs:
             echo "**Cutoff:** \`--older-than ${OLDER_THAN}\`"
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
-          node dist/cli.js prune --older-than "$OLDER_THAN" 2>&1 | tee /tmp/prune-preview.txt
+          node dist/cli.js prune --older-than "$OLDER_THAN" --protect main,develop 2>&1 | tee /tmp/prune-preview.txt
           {
             echo '```'
             cat /tmp/prune-preview.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Apply deletions (skipped on manual dry-run)
+      # Deletion requires an explicit manual dispatch with apply: true.
+      #
+      # The scheduled run is plan-only. `inputs.dry-run` is undefined on a
+      # schedule, so the previous `!inputs.dry-run` condition was always true
+      # and every nightly run deleted. Worse, `--older-than` measures the last
+      # time a scope's *content changed*, not the last time it was used, so a
+      # stable production scope looks stale after 30 quiet days.
       - name: Apply prune
-        if: ${{ steps.creds.outputs.configured == 'true' && !inputs.dry-run }}
+        if: ${{ steps.creds.outputs.configured == 'true' && github.event_name == 'workflow_dispatch' && inputs.apply }}
         env:
           OLDER_THAN: ${{ inputs.older-than || '30d' }}
           UPSTASH_VECTOR_REST_URL: ${{ secrets.UPSTASH_VECTOR_REST_URL }}
           UPSTASH_VECTOR_REST_TOKEN: ${{ secrets.UPSTASH_VECTOR_REST_TOKEN }}
         run: |
           set -o pipefail
-          node dist/cli.js prune --older-than "$OLDER_THAN" --apply
+          node dist/cli.js prune --older-than "$OLDER_THAN" --protect main,develop --apply

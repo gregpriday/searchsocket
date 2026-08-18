@@ -23,7 +23,7 @@ SearchSocket extracts content from your SvelteKit site, converts it to markdown,
 ## Features
 
 - **Semantic + keyword search** — Upstash Vector handles hybrid search with built-in reranking and input enrichment
-- **Dual search** — parallel page-level and chunk-level queries with configurable score blending
+- **Page-first search** — pages are ranked first, then the best-matching sections within the top pages are attached as sub-results
 - **Scroll-to-text** — auto-scroll to the matching section when a user clicks a search result, with CSS Highlight API and Text Fragment support
 - **SvelteKit integration** — server hook for the search API, Vite plugin for build-triggered indexing
 - **Svelte 5 components** — reactive `createSearch` store and `<SearchSocket>` metadata component
@@ -464,7 +464,7 @@ The highlight fades after 2 seconds. Customize with CSS:
 
 ## Search & Ranking
 
-### Dual search
+### Page-first search
 
 SearchSocket searches page-first: one query ranks page summaries, then the
 best-matching sections within the top pages are retrieved and attached as
@@ -598,7 +598,7 @@ SearchSocket includes an MCP server that gives Claude Code, Claude Desktop, and 
 | Tool | Description |
 |------|-------------|
 | `search` | Semantic search with filtering and section sub-results |
-| `get_page` | Retrieve full page markdown with frontmatter |
+| `get_page` | Retrieve a page's indexed markdown and frontmatter |
 | `get_related_pages` | Find related pages by links, semantics, and structure |
 
 ### Connecting to your deployed site

@@ -426,12 +426,8 @@ export function chunkPage(
     };
 
     const embeddingText = buildEmbeddingText(chunk, config.chunking.prependTitle);
-    const embeddingTitle = config.chunking.weightHeadings ? buildEmbeddingTitle(chunk) : undefined;
     const chunkMetaSuffix = page.meta ? JSON.stringify(page.meta, Object.keys(page.meta).sort()) : "";
-    const hashInput = embeddingTitle
-      ? `${normalizeText(embeddingText)}|title:${embeddingTitle}`
-      : normalizeText(embeddingText);
-    chunk.contentHash = sha256(hashInput + chunkMetaSuffix);
+    chunk.contentHash = sha256(normalizeText(embeddingText) + chunkMetaSuffix);
     chunks.push(chunk);
   }
 

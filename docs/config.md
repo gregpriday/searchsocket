@@ -76,7 +76,10 @@ SearchSocket reads `UPSTASH_VECTOR_REST_URL` and `UPSTASH_VECTOR_REST_TOKEN` fro
 - `chunking.dontSplitInside` (default `["code", "table", "blockquote"]`) — block types to keep intact
 - `chunking.prependTitle` (default `true`) — prepend page title to chunk text before indexing
 - `chunking.pageSummaryChunk` (default `true`) — generate a synthetic identity chunk per page
-- `chunking.weightHeadings` (default `true`) — boost heading text in chunks
+- `chunking.weightHeadings` — **removed in 1.0.** It only changed the chunk
+  content hash; the weighted heading text never reached the embedding model, so
+  it caused re-embedding churn without affecting relevance. Use
+  `chunking.prependTitle`.
 
 ## Upstash
 

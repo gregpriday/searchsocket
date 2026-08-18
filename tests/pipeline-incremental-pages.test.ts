@@ -16,10 +16,10 @@ const tempDirs: string[] = [];
 function createStatefulMockStore(): {
   store: UpstashSearchStore;
   getChunkHashes: () => Map<string, string>;
-  getPageHashes: () => Map<string, string>;
+  getPageHashes: () => Map<string, { contentHash: string; custom: boolean }>;
 } {
   const chunkHashes = new Map<string, string>();
-  const pageHashes = new Map<string, string>();
+  const pageHashes = new Map<string, { contentHash: string; custom: boolean }>();
 
   const store = {
     upsertChunks: vi.fn().mockImplementation(async (chunks: Array<{ id: string; metadata: { contentHash: string } }>) => {
@@ -49,7 +49,7 @@ function createStatefulMockStore(): {
       for (const page of pages) {
         const contentHash = page.metadata.contentHash as string;
         if (contentHash) {
-          pageHashes.set(page.id, contentHash);
+          pageHashes.set(page.id, { contentHash, custom: page.metadata.custom === true });
         }
       }
     }),

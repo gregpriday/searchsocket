@@ -99,6 +99,13 @@ const REMOVED_CONFIG_KEYS: Array<{ path: string; reason: string }> = [
       "path. Delete this option."
   },
   {
+    path: "chunking.weightHeadings",
+    reason:
+      "This only perturbed the chunk content hash — the weighted heading text was " +
+      "never sent to the embedding model — so enabling it caused re-embedding churn " +
+      "without changing relevance. Use chunking.prependTitle, which does reach the model."
+  },
+  {
     path: "embedding.images.enable",
     reason:
       "SearchSocket is text-only. Images are searchable through their text " +

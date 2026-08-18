@@ -559,7 +559,7 @@ program
     const cwd = path.resolve(rootOpts?.cwd ?? process.cwd());
 
     const config = await loadConfig({ cwd, configPath: rootOpts?.config });
-    const scope = resolveScope(config, opts.scope);
+    const scope = resolveScope(config, opts.scope, cwd);
 
     let store: UpstashSearchStore;
     let health: { ok: boolean; details?: string } = { ok: false, details: "not checked" };
@@ -794,7 +794,7 @@ program
       return;
     }
 
-    const scope = resolveScope(config, opts.scope);
+    const scope = resolveScope(config, opts.scope, cwd);
     process.stdout.write(
       `plan: delete remote records for project ${scope.projectId}, scope ${scope.scopeName}\n`
     );
@@ -821,7 +821,11 @@ migrate
   .option("--apply", "actually delete the legacy records", false)
   .option("--confirm-project <id>", "confirmation token; must equal the project id")
   .action(async (opts, command) => {
-    const rootOpts = getRootOptions(command.parent?.parent as Command);
+    // getRootOptions() reads its argument's *parent*, so for a nested command
+    // (`migrate cleanup-legacy`) the right argument is the `migrate` command.
+    // Passing the program itself overshot and returned {}, silently dropping
+    // --cwd and --config on a destructive operation.
+    const rootOpts = getRootOptions(command.parent as Command);
     const cwd = path.resolve(rootOpts?.cwd ?? process.cwd());
     const config = await loadConfig({ cwd, configPath: rootOpts?.config });
 
@@ -897,7 +901,7 @@ program
     const cwd = path.resolve(rootOpts?.cwd ?? process.cwd());
 
     const config = await loadConfig({ cwd, configPath: rootOpts?.config });
-    const baseScope = resolveScope(config);
+    const baseScope = resolveScope(config, undefined, cwd);
 
     let store: UpstashSearchStore;
     let scopes: ScopeInfo[];
@@ -1138,7 +1142,7 @@ program
       }
 
       try {
-        const scope = resolveScope(config);
+        const scope = resolveScope(config, undefined, cwd);
         const { statePath } = ensureStateDirs(cwd, config.state.dir, scope);
         const testPath = path.join(statePath, ".write-test");
         await fsp.writeFile(testPath, "ok\n", "utf8");
@@ -1386,7 +1390,14 @@ program
   });
 
 async function main(): Promise<void> {
-  dotenvConfig({ path: path.resolve(process.cwd(), ".env") });
+  // Resolve --cwd before loading .env. Loading from process.cwd() first meant
+  // `searchsocket --cwd ../site index` read the wrong directory's credentials —
+  // or none at all, and then reported the backend as unconfigured.
+  const cwdIndex = process.argv.findIndex((arg) => arg === "--cwd" || arg === "-C");
+  const cwdArg = cwdIndex !== -1 ? process.argv[cwdIndex + 1] : undefined;
+  const envDir = cwdArg ? path.resolve(process.cwd(), cwdArg) : process.cwd();
+
+  dotenvConfig({ path: path.resolve(envDir, ".env") });
   await program.parseAsync(process.argv);
 }
 

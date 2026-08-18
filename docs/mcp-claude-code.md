@@ -142,8 +142,12 @@ Parameters:
 
 ### `get_page`
 
-Fetch the full indexed markdown for a specific page, including frontmatter and
-`routeFile` mapping.
+Fetch a page's indexed markdown, including frontmatter and `routeFile` mapping.
+
+The markdown is reassembled from the indexed chunks, so it is complete enough to
+read and reason about but is **not byte-exact source**: it can contain overlap
+between adjacent sections, and a very long page may be truncated at the storage
+metadata cap. Read the file at `routeFile` when exact content matters.
 
 Parameters:
 - `path` (string, required) — URL path of the page, e.g. `/docs/auth`. This was

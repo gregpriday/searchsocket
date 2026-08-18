@@ -50,7 +50,6 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       dontSplitInside: ["code", "table", "blockquote"],
       prependTitle: true,
       pageSummaryChunk: true,
-      weightHeadings: true
     },
     upstash: {
       urlEnv: "UPSTASH_VECTOR_REST_URL",

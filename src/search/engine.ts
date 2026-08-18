@@ -258,7 +258,7 @@ export class SearchEngine {
       ? mergeRankingOverrides(this.config, input.rankingOverrides)
       : this.config;
 
-    const resolvedScope = resolveScope(this.config, input.scope);
+    const resolvedScope = resolveScope(this.config, input.scope, this.cwd);
 
     const topK = input.topK ?? 10;
     const maxSubResults = input.maxSubResults ?? 5;
@@ -516,7 +516,7 @@ export class SearchEngine {
     frontmatter: Record<string, unknown>;
     markdown: string;
   }> {
-    const resolvedScope = resolveScope(this.config, scope);
+    const resolvedScope = resolveScope(this.config, scope, this.cwd);
     const urlPath = this.resolveInputPath(pathOrUrl);
     const page = await this.requireStore().getPage(urlPath, resolvedScope);
 
@@ -550,7 +550,7 @@ export class SearchEngine {
     pages: Array<{ url: string; title: string; description: string; routeFile: string }>;
     nextCursor?: string;
   }> {
-    const resolvedScope = resolveScope(this.config, opts?.scope);
+    const resolvedScope = resolveScope(this.config, opts?.scope, this.cwd);
     const pathPrefix = opts?.pathPrefix
       ? (opts.pathPrefix.startsWith("/") ? opts.pathPrefix : `/${opts.pathPrefix}`)
       : undefined;
@@ -601,7 +601,7 @@ export class SearchEngine {
     pathOrUrl: string,
     opts?: { topK?: number; scope?: string }
   ): Promise<RelatedPagesResult> {
-    const resolvedScope = resolveScope(this.config, opts?.scope);
+    const resolvedScope = resolveScope(this.config, opts?.scope, this.cwd);
     const urlPath = this.resolveInputPath(pathOrUrl);
     const topK = Math.min(opts?.topK ?? 10, 25);
 

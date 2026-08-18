@@ -101,6 +101,9 @@ describe("classifyStorageError", () => {
     expect(classifyStorageError(boom("filter syntax error"))).toBe("INVALID_FILTER");
     expect(classifyStorageError(boom("internal error", 500))).toBe("SERVICE_UNAVAILABLE");
     expect(classifyStorageError(boom("ECONNREFUSED"))).toBe("SERVICE_UNAVAILABLE");
+    // A typo in this pattern meant a real connection reset classified as
+    // UNKNOWN and was never retried.
+    expect(classifyStorageError(boom("read ECONNRESET"))).toBe("SERVICE_UNAVAILABLE");
     expect(classifyStorageError(boom("something odd"))).toBe("UNKNOWN");
   });
 

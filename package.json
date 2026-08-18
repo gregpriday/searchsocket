@@ -82,7 +82,7 @@
     "check": "pnpm run typecheck && pnpm run build && pnpm run test && pnpm run check:package"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.12.0"
   },
   "packageManager": "pnpm@10.29.2",
   "dependencies": {

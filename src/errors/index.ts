@@ -53,10 +53,14 @@ export function toErrorPayload(error: unknown): {
     };
   }
 
+  // An unexpected error's message is not a deliberate public string — it can
+  // carry a credential, a file path, or an internal URL. Typed errors say what
+  // they mean and are safe; everything else is reported generically, with the
+  // detail left for the server log.
   return {
     error: {
       code: "INTERNAL_ERROR",
-      message: error instanceof Error ? error.message : "Unknown error"
+      message: "Internal error"
     }
   };
 }

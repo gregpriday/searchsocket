@@ -71,9 +71,16 @@ interface ChunkVectorMetadata {
 }
 
 /** Flat metadata stored alongside each page vector in Upstash Vector */
+/** One entry of the page inventory returned by `getPageHashes`. */
+export interface PageHashEntry {
+  contentHash: string;
+  custom: boolean;
+}
+
 interface PageVectorMetadata {
   projectId: string;
   scopeName: string;
+  custom?: boolean;
   incomingAnchorText?: string;
   weight?: number | null;
   /** Identity-layout version; see INDEX_SCHEMA_VERSION. */
@@ -98,8 +105,14 @@ interface PageVectorMetadata {
 }
 
 /**
- * Reassemble page markdown from ordered chunks.
- * Strips the title prefix added by buildEmbeddingText() from each chunk.
+ * Reassemble an approximation of a page's markdown from its indexed chunks.
+ *
+ * This is deliberately not the canonical source. Chunks are stored to be
+ * embedded, not to round-trip: they may include a synthetic page-summary chunk,
+ * overlap text repeated between adjacent chunks, a prepended title (stripped
+ * below), and text truncated at the metadata size cap. Callers must treat the
+ * result as a faithful-enough reading copy, never as the exact source, and
+ * nothing should promise byte-exact markdown on top of it.
  */
 function reconstructMarkdownFromChunks(
   chunks: Array<{ chunkText: string; ordinal: number; sectionTitle: string; headingPath: string[] }>,
@@ -216,7 +229,7 @@ export function classifyStorageError(error: unknown): StorageErrorCode {
     return "INVALID_FILTER";
   }
   if (
-    /\bunavailable\b|\beconnrefused\b|\benotfound\b|\becconnreset\b|socket hang up|fetch failed|\bnetwork\b|internal server error|bad gateway|service unavailable|exhausted all retries/.test(
+    /\bunavailable\b|\beconnrefused\b|\benotfound\b|\beconnreset\b|socket hang up|fetch failed|\bnetwork\b|internal server error|bad gateway|service unavailable|exhausted all retries/.test(
       message
     )
   ) {
@@ -832,8 +845,14 @@ export class UpstashSearchStore {
     }
   }
 
-  async getPageHashes(scope: Scope): Promise<Map<string, string>> {
-    const map = new Map<string, string>();
+  /**
+   * Content hash per indexed page URL, plus whether the page came from a
+   * caller-supplied custom record. The pipeline needs the distinction: a run
+   * that supplies no custom records must not treat previously-supplied ones as
+   * removed.
+   */
+  async getPageHashes(scope: Scope): Promise<Map<string, PageHashEntry>> {
+    const map = new Map<string, PageHashEntry>();
     let cursor = "0";
 
     try {
@@ -849,7 +868,12 @@ export class UpstashSearchStore {
           // Keyed by URL: callers reason about pages by URL, and the physical
           // ID is an encoding detail of this store.
           const url = doc.metadata.url ?? urlFromPageId(String(doc.id), scope);
-          if (url) map.set(url, doc.metadata.contentHash);
+          if (url) {
+            map.set(url, {
+              contentHash: doc.metadata.contentHash,
+              custom: doc.metadata.custom === true
+            });
+          }
         }
         if (!result.nextCursor || result.nextCursor === "0") break;
         cursor = result.nextCursor;

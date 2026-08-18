@@ -28,14 +28,19 @@ afterEach(async () => {
 
 /** A store that remembers what was written, so run 2 sees run 1's records. */
 function createStatefulMockStore() {
-  const pageHashes = new Map<string, string>();
+  const pageHashes = new Map<string, { contentHash: string; custom: boolean }>();
   const chunkIds = new Set<string>();
   const chunkHashes = new Map<string, string>();
 
   const store = {
     getPageHashes: vi.fn(async () => new Map(pageHashes)),
-    upsertPages: vi.fn(async (docs: Array<{ id: string; metadata: { contentHash?: string } }>) => {
-      for (const doc of docs) pageHashes.set(doc.id, doc.metadata.contentHash ?? "");
+    upsertPages: vi.fn(async (docs: Array<{ id: string; metadata: { contentHash?: string; custom?: boolean } }>) => {
+      for (const doc of docs) {
+        pageHashes.set(doc.id, {
+          contentHash: doc.metadata.contentHash ?? "",
+          custom: doc.metadata.custom === true
+        });
+      }
     }),
     deletePagesByIds: vi.fn(async (ids: string[]) => {
       for (const id of ids) pageHashes.delete(id);
@@ -347,5 +352,108 @@ describe("indexing safety — incomplete runs never delete", () => {
     expect(stats.documentsUpserted).toBe(0);
     expect(stats.deletes).toBe(0);
     expect(new Set(chunkIds)).toEqual(afterFirst);
+  });
+});
+
+describe("mutation ordering and custom-record authority", () => {
+  it("performs every upsert before any delete", async () => {
+    // Page deletion used to run before chunks were written, so a chunk-write
+    // failure left fresh pages, deleted old pages, and stale chunks — a state
+    // no run produced deliberately.
+    const { cwd, config } = await createFixture(THREE_PAGES);
+    const { store } = createStatefulMockStore();
+
+    await (await IndexPipeline.create({ cwd, config, store })).run({ changedOnly: true });
+    await fs.rm(path.join(cwd, "build", "docs", "beta"), { recursive: true, force: true });
+
+    const order: string[] = [];
+    for (const name of ["upsertPages", "upsertChunks", "deletePagesByIds", "deleteByIds"] as const) {
+      vi.mocked(store[name]).mockClear();
+      vi.mocked(store[name]).mockImplementation(async () => {
+        order.push(name);
+      });
+    }
+
+    await (await IndexPipeline.create({ cwd, config, store })).run({ changedOnly: true });
+
+    const firstDelete = order.findIndex((op) => op.startsWith("delete"));
+    const lastUpsert = order.map((op) => op.startsWith("upsert")).lastIndexOf(true);
+
+    expect(firstDelete).toBeGreaterThan(-1);
+    expect(lastUpsert).toBeLessThan(firstDelete);
+  });
+
+  it("does not delete custom records when the run supplies none", async () => {
+    // Custom records share the page namespace, so a site-only run saw them as
+    // absent and deleted them — taking a provider's content with it whenever
+    // that provider merely failed to run.
+    const { cwd, config } = await createFixture(THREE_PAGES);
+    const { store, pageHashes } = createStatefulMockStore();
+
+    await (await IndexPipeline.create({ cwd, config, store })).run({
+      changedOnly: true,
+      customRecords: [
+        { url: "/from-cms/post", title: "CMS post", content: "Body text from the CMS." }
+      ]
+    });
+    expect(pageHashes.has("/from-cms/post")).toBe(true);
+
+    vi.mocked(store.deletePagesByIds).mockClear();
+
+    // A later run that says nothing about custom records.
+    const stats = await (await IndexPipeline.create({ cwd, config, store })).run({
+      changedOnly: true
+    });
+
+    expect(stats.pagesDeleted).toBe(0);
+    expect(store.deletePagesByIds).not.toHaveBeenCalled();
+    expect(pageHashes.has("/from-cms/post")).toBe(true);
+  });
+
+  it("deletes a custom record when the run explicitly supplies an empty set", async () => {
+    const { cwd, config } = await createFixture(THREE_PAGES);
+    const { store, pageHashes } = createStatefulMockStore();
+
+    await (await IndexPipeline.create({ cwd, config, store })).run({
+      changedOnly: true,
+      customRecords: [
+        { url: "/from-cms/post", title: "CMS post", content: "Body text from the CMS." }
+      ]
+    });
+
+    // `customRecords: []` is an explicit assertion that there are none.
+    const stats = await (await IndexPipeline.create({ cwd, config, store })).run({
+      changedOnly: true,
+      customRecords: []
+    });
+
+    expect(stats.pagesDeleted).toBe(1);
+    expect(pageHashes.has("/from-cms/post")).toBe(false);
+  });
+
+  it("carries a custom record's metadata into the index", async () => {
+    // CustomRecord.metadata was documented and demonstrated but discarded, so
+    // a caller could set it and never filter on it.
+    const { cwd, config } = await createFixture(THREE_PAGES);
+    const { store } = createStatefulMockStore();
+
+    await (await IndexPipeline.create({ cwd, config, store })).run({
+      changedOnly: true,
+      customRecords: [
+        {
+          url: "/from-cms/post",
+          title: "CMS post",
+          content: "Body text from the CMS.",
+          metadata: { source: "cms" }
+        }
+      ]
+    });
+
+    const written = vi.mocked(store.upsertPages).mock.calls
+      .flatMap((call) => call[0] as Array<{ id: string; metadata: Record<string, unknown> }>)
+      .find((doc) => doc.id === "/from-cms/post");
+
+    expect(written?.metadata.meta).toEqual({ source: "cms" });
+    expect(written?.metadata.custom).toBe(true);
   });
 });

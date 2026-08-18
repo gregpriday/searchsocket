@@ -37,6 +37,7 @@ import type {
   RouteMatch,
   Scope
 } from "../types";
+import { toStoredMeta } from "../utils/structured-meta";
 
 /**
  * Build a plain-text summary of a page for the page search index.
@@ -159,7 +160,7 @@ export class IndexPipeline {
       stageTimingsMs[name] = Math.round(hrTimeMs(start));
     };
 
-    const scope = resolveScope(this.config, options.scopeOverride);
+    const scope = resolveScope(this.config, options.scopeOverride, this.cwd);
     ensureStateDirs(this.cwd, this.config.state.dir, scope);
 
     const sourceMode = options.sourceOverride ?? this.config.source.mode;
@@ -391,7 +392,14 @@ export class IndexPipeline {
           outgoingLinks: [],
           noindex: false,
           tags,
-          weight: record.weight
+          weight: record.weight,
+          custom: true,
+          // `CustomRecord.metadata` is documented and demonstrated, but was
+          // dropped here — so a caller could set structured metadata on a
+          // custom record and then never filter on it.
+          meta: record.metadata && Object.keys(record.metadata).length > 0
+            ? toStoredMeta(record.metadata)
+            : undefined
         };
 
         // Apply transformPage hook to custom records too
@@ -565,6 +573,7 @@ export class IndexPipeline {
         publishedAt: page.publishedAt,
         incomingAnchorText,
         weight: page.weight,
+        custom: page.custom,
         meta: page.meta
       };
 
@@ -596,6 +605,7 @@ export class IndexPipeline {
         publishedAt: p.publishedAt,
         incomingAnchorText: p.incomingAnchorText,
         weight: p.weight,
+        custom: p.custom,
         meta: p.meta
       };
     });
@@ -605,9 +615,20 @@ export class IndexPipeline {
     const changedPages = options.force
       ? pageRecords
       : pageRecords.filter((r) =>
-          !existingPageHashes.has(r.url) || existingPageHashes.get(r.url) !== r.contentHash
+          !existingPageHashes.has(r.url) || existingPageHashes.get(r.url)!.contentHash !== r.contentHash
         );
-    const staleCandidateUrls = [...existingPageHashes.keys()].filter((url) => !currentPageUrls.has(url));
+    const staleCandidateUrls = [...existingPageHashes.entries()]
+      .filter(([url, entry]) => {
+        if (currentPageUrls.has(url)) return false;
+        // A run that was not told about custom records has no opinion on them.
+        // Without this, indexing the site without passing `customRecords`
+        // deleted every custom record as "no longer present" — and a provider
+        // that merely failed to run once would take its content with it.
+        // Passing `customRecords: []` explicitly asserts there are none.
+        if (entry.custom && options.customRecords === undefined) return false;
+        return true;
+      })
+      .map(([url]) => url);
 
     stageEnd("pages", pagesStart);
     this.logger.info(`Indexed ${pages.length} page${pages.length === 1 ? "" : "s"} (${routeExact} exact, ${routeBestEffort} best-effort) (${stageTimingsMs["pages"]}ms)`);
@@ -824,15 +845,17 @@ export class IndexPipeline {
             publishedAt: r.publishedAt ?? null,
             incomingAnchorText: r.incomingAnchorText ?? "",
             weight: r.weight ?? null,
+            custom: r.custom ?? false,
             ...(r.meta && Object.keys(r.meta).length > 0 ? { meta: r.meta } : {})
           }
         }));
         if (pageDocs.length > 0) {
           await this.store.upsertPages(pageDocs, scope);
         }
-        if (deletedPageUrls.length > 0) {
-          await this.store.deletePagesByIds(deletedPageUrls, scope);
-        }
+        // Page deletion is deferred until after the chunks are written. Deleting
+        // here meant a chunk-write failure left the index with fresh pages, the
+        // old pages already removed, and stale chunks — a state no run produced
+        // deliberately. Every upsert now precedes every delete.
       }
     }
 
@@ -887,6 +910,11 @@ export class IndexPipeline {
       await this.store.upsertChunks(docs, scope);
       documentsUpserted = docs.length;
       this.logger.event("upserted", { count: docs.length });
+    }
+
+    // --- Deletions, after every upsert has landed ---
+    if (!options.dryRun && deletedPageUrls.length > 0) {
+      await this.store.deletePagesByIds(deletedPageUrls, scope);
     }
 
     if (!options.dryRun && deletes.length > 0) {

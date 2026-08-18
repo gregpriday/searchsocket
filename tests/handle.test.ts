@@ -335,10 +335,12 @@ describe("searchsocketHandle", () => {
     });
 
     expect(response.status).toBe(500);
+    // Generic, not the thrown message: an unexpected error can carry a
+    // credential or an internal path.
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "INTERNAL_ERROR",
-        message: "boom"
+        message: "Internal error"
       }
     });
   });
@@ -1503,7 +1505,8 @@ describe("MCP endpoint", () => {
     const response = await handle({ event, resolve });
     expect(response.status).toBe(500);
     const body = await response.json();
-    expect(body.error.message).toBe("transport boom");
+    expect(body.error.message).toBe("Internal server error");
+    expect(body.error.message).not.toContain("transport boom");
   });
 
   it("memoizes engine across MCP requests", async () => {

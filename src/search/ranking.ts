@@ -265,7 +265,7 @@ export function rankPageHits(
 }
 
 /**
- * Trim ranked pages by score gap (same logic as trimByScoreGap but for RankedPage[]).
+ * Trim ranked pages by score gap: drop pages scoring far below the best hit.
  */
 export function trimPagesByScoreGap(
   results: RankedPage[],

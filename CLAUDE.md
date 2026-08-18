@@ -9,7 +9,7 @@ Semantic site search and MCP retrieval for SvelteKit static sites. Published on 
 - **Indexing Pipeline (`src/indexing/pipeline.ts`)**:
   Source Pages (HTML/MD) -> Filtering (Exclude/Robots) -> Route Mapping -> Extraction (`cheerio`/`turndown`) -> Link Analysis -> Chunking (Split by headings/length) -> Hashing (for incremental updates) -> Upsert to Upstash Vector.
   The pipeline supports hooks (`transformPage`, `transformChunk`, `beforeIndex`, `afterIndex`) and dry-run mode.
-- **Dual Search**: The system indexes both full pages (summaries) and individual chunks. Search queries run parallel vector search at both page and chunk granularity with score blending for improved relevance.
+- **Page-first Search**: The system indexes both page summaries and individual chunks. A query ranks pages first, then retrieves the best-matching sections within the top pages as sub-results. Section lookups are bounded (`SUBRESULT_PAGE_LIMIT`, `SUBRESULT_CONCURRENCY` in `src/search/engine.ts`) so a large `topK` cannot fan out into one backend request per result. The older parallel/blended "dual search" path was removed in 1.0.
 - **Serverless First**: The core search engine (`SearchEngine`) and MCP Server must remain completely stateless and serverless-compatible. No in-memory rate limiting or persistent WebSocket connections.
 
 ## Tech Stack & Core Dependencies

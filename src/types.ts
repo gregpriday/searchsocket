@@ -68,7 +68,6 @@ export interface SearchSocketConfig {
     dontSplitInside?: Array<"code" | "table" | "blockquote">;
     prependTitle?: boolean;
     pageSummaryChunk?: boolean;
-    weightHeadings?: boolean;
   };
   upstash?: {
     url?: string;
@@ -224,7 +223,6 @@ export interface ResolvedSearchSocketConfig {
     dontSplitInside: Array<"code" | "table" | "blockquote">;
     prependTitle: boolean;
     pageSummaryChunk: boolean;
-    weightHeadings: boolean;
   };
   upstash: {
     url?: string;
@@ -341,6 +339,8 @@ export interface ExtractedPage {
   keywords?: string[];
   weight?: number;
   publishedAt?: number;
+  /** True when this page came from a caller-supplied CustomRecord. */
+  custom?: boolean;
   meta?: Record<string, string | number | boolean | string[]>;
 }
 
@@ -363,6 +363,8 @@ export interface IndexedPage {
   incomingAnchorText?: string;
   /** Per-page weight from `searchsocket-weight` / frontmatter, if set. */
   weight?: number;
+  /** True when this page came from a caller-supplied CustomRecord. */
+  custom?: boolean;
   meta?: Record<string, string | number | boolean | string[]>;
 }
 
@@ -439,6 +441,8 @@ export interface PageRecord {
   publishedAt?: number;
   incomingAnchorText?: string;
   weight?: number;
+  /** True when this page came from a caller-supplied CustomRecord. */
+  custom?: boolean;
   meta?: Record<string, string | number | boolean | string[]>;
 }
 

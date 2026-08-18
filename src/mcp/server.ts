@@ -8,6 +8,7 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { SearchEngine } from "../search/engine";
+import { SearchSocketError } from "../errors";
 import { loadConfig } from "../config/load";
 import type { ResolvedSearchSocketConfig } from "../types";
 
@@ -43,7 +44,7 @@ export function createServer(engine: SearchEngine): McpServer {
     "search",
     {
       description:
-        "Searches indexed site content using semantic similarity. Returns ranked results with url, title, snippet, chunkText (full section markdown), score, and routeFile (source file path for editing). The highest-ranked results include their best-matching sections; lower-ranked results carry a page summary only. Set groupBy to 'chunk' to search sections directly. Use routeFile to locate the source file when editing content. If snippets lack detail, call get_page with the result URL to retrieve the full page markdown.",
+        "Searches indexed site content using semantic similarity. Returns ranked results with url, title, snippet, chunkText (full section markdown), score, and routeFile (source file path for editing). The highest-ranked results include their best-matching sections; lower-ranked results carry a page summary only. Set groupBy to 'chunk' to search sections directly. Use routeFile to locate the source file when editing content. If snippets lack detail, call get_page with the result URL for the page's indexed markdown.",
       inputSchema: {
         query: z.string().min(1).describe("Search query. Use keywords or natural language, not full sentences."),
         topK: z.number().int().positive().max(100).optional().describe("Number of results to return (default: 10, max: 100)"),
@@ -94,7 +95,7 @@ export function createServer(engine: SearchEngine): McpServer {
     "get_page",
     {
       description:
-        "Retrieves the full markdown content and metadata for a specific page by its URL path. Use this after search when snippets lack the detail needed to answer a question. Returns reconstructed page markdown, frontmatter (title, routeFile, tags, link counts, indexedAt), and the source file path. Do NOT use this for discovery — use search first to find relevant pages.",
+        "Retrieves the indexed markdown and metadata for a page by its URL path. Use this after search when snippets lack the detail needed to answer a question. The markdown is reassembled from the indexed chunks: it is complete enough to read and reason about, but is NOT byte-exact source — it can contain section overlap and very long pages may be truncated. Read the file at routeFile when exact content matters. Do NOT use this for discovery — use search first.",
       inputSchema: {
         path: z.string().min(1).describe("URL path of the page (e.g. '/docs/auth'). Use a URL from search results."),
         scope: z.string().optional()
@@ -111,7 +112,22 @@ export function createServer(engine: SearchEngine): McpServer {
             }
           ]
         };
-      } catch {
+      } catch (error) {
+        // Only a genuine miss falls back to suggestions. A backend outage or a
+        // rejected scope reported as "page not found" sent the client looking
+        // for a spelling mistake instead of surfacing the real failure.
+        if (error instanceof SearchSocketError && error.code !== "INVALID_REQUEST") {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: `Could not retrieve '${input.path}': ${error.code}. This is a backend or configuration failure, not a missing page.`
+              }
+            ]
+          };
+        }
+
         const suggestions = await engine.search({ q: input.path, topK: 3, scope: input.scope });
         const similar = suggestions.results.map((r) => r.url);
         return {
