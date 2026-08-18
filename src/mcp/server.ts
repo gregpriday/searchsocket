@@ -161,8 +161,11 @@ export function verifyApiKey(provided: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+/**
+ * Keep stdout clean for the stdio JSON-RPC stream: anything a dependency logs
+ * via console must go to stderr or it corrupts the MCP protocol framing.
+ */
 function redirectConsoleToStderr(): void {
-  const originalLog = console.log;
   console.log = (...args: unknown[]) => {
     process.stderr.write(`[LOG] ${args.map(String).join(" ")}\n`);
   };
@@ -170,8 +173,6 @@ function redirectConsoleToStderr(): void {
   console.warn = (...args: unknown[]) => {
     process.stderr.write(`[WARN] ${args.map(String).join(" ")}\n`);
   };
-
-  void originalLog;
 }
 
 async function startHttpServer(serverFactory: () => McpServer, config: ResolvedSearchSocketConfig, opts: McpServerOptions): Promise<void> {

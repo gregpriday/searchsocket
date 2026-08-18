@@ -82,6 +82,39 @@ Disallow: /internal
     const rules = parseRobotsTxt(content, "Searchsocket");
     expect(rules.disallow).toEqual(["/internal"]);
   });
+
+  it("starts a new group when a user-agent line follows rule lines", () => {
+    // The AI-crawler block below must not leak into the wildcard group.
+    const content = `
+User-agent: *
+Disallow: /admin
+
+User-agent: GPTBot
+Disallow: /
+`;
+    expect(parseRobotsTxt(content, "Searchsocket").disallow).toEqual(["/admin"]);
+    expect(parseRobotsTxt(content, "GPTBot").disallow).toEqual(["/"]);
+  });
+
+  it("shares one group across consecutive user-agent lines", () => {
+    const content = `
+User-agent: Searchsocket
+User-agent: Googlebot
+Disallow: /private
+`;
+    expect(parseRobotsTxt(content, "Searchsocket").disallow).toEqual(["/private"]);
+    expect(parseRobotsTxt(content, "Googlebot").disallow).toEqual(["/private"]);
+  });
+
+  it("keeps the group intact across non-rule directives like crawl-delay", () => {
+    const content = `
+User-agent: *
+Crawl-delay: 10
+Disallow: /admin
+Sitemap: https://example.com/sitemap.xml
+`;
+    expect(parseRobotsTxt(content, "Searchsocket").disallow).toEqual(["/admin"]);
+  });
 });
 
 describe("isBlockedByRobots", () => {
