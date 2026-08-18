@@ -182,6 +182,8 @@ export const searchSocketConfigSchema = z.object({
         .object({
           path: z.string().optional(),
           apiKey: z.string().min(1).optional(),
+          /** Env var holding the key, so it need not be committed. */
+          apiKeyEnv: z.string().min(1).optional(),
           enableJsonResponse: z.boolean().optional()
         })
         .optional()

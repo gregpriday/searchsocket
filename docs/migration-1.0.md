@@ -98,6 +98,44 @@ replacement rather than being silently ignored:
 The same keys are also rejected in `rankingOverrides` on a search request, which
 previously stripped them silently.
 
+**The MCP endpoint now requires an API key, and `mcp.enable` is honoured.**
+Two changes, both of which can take a working deployment offline if ignored:
+
+1. `searchsocketHandle()` used to mount `/api/mcp` regardless of `mcp.enable`,
+   which was documented but never read. `mcp.enable` defaults to
+   `NODE_ENV !== "production"`, so a production deployment that relied on the
+   endpoint without setting the flag will lose it. Set `mcp.enable: true`.
+2. The endpoint's auth check was wrapped in `if (apiKey)`, so a deployment
+   without a configured key served MCP to anyone. MCP is privileged — its tools
+   return repository paths, full page markdown, and any scope the caller names —
+   so it now refuses to serve at all (503) without a key. Set
+   `mcp.handle.apiKey`, or the new `mcp.handle.apiKeyEnv` to read it from the
+   environment rather than committing it.
+
+```ts
+mcp: {
+  enable: true,
+  handle: { apiKeyEnv: "SEARCHSOCKET_MCP_API_KEY" }
+}
+```
+
+**Browser search responses no longer include `routeFile` or `chunkText`.**
+`routeFile` is a path inside your repository and `chunkText` is the full text of
+each matched section; both went to every public caller. They are now opt-in via
+`api.exposeInternalFields: true`. `routeFile` is also stripped from the page
+endpoint's frontmatter. The `SearchResult.routeFile` type is now optional to
+match — code reading it must handle its absence.
+
+**A browser request can no longer choose its scope.** `?scope=` (and `scope` in
+a POST body) is refused with a 403 unless the deployment lists it in
+`api.allowedScopes`. Any caller could previously read a preview or staging scope
+by naming it. Preview deployments should set `api.allowedScopes` explicitly.
+
+**POST /api/search requires `Content-Type: application/json`.** A missing or
+different type is a 415. Without this the endpoint accepted a form POST, which a
+browser sends cross-origin without a preflight — so the CORS policy was never
+consulted. The bundled client already sends the correct header.
+
 **Filter values may not contain a quote or backslash.** Upstash Vector's filter
 syntax documents single-quoted string literals but defines no escape sequence for
 an embedded quote or backslash, so SearchSocket now rejects such values in

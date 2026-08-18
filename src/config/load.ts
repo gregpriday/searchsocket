@@ -293,6 +293,10 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
     };
   }
 
+  // `mcp.access` governs the standalone MCP server only — it decides whether
+  // that process binds to loopback or to all interfaces. The SvelteKit handle
+  // route has its own rule and always requires `mcp.handle.apiKey` /
+  // `apiKeyEnv`, so it needs no check here.
   if (merged.mcp.access === "public") {
     const resolvedKey = merged.mcp.http.apiKey
       ?? (merged.mcp.http.apiKeyEnv ? process.env[merged.mcp.http.apiKeyEnv] : undefined);

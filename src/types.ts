@@ -146,6 +146,8 @@ export interface SearchSocketConfig {
     handle?: {
       path?: string;
       apiKey?: string;
+      /** Env var holding the key, so it need not be committed. */
+      apiKeyEnv?: string;
       enableJsonResponse?: boolean;
     };
   };
@@ -288,6 +290,7 @@ export interface ResolvedSearchSocketConfig {
     handle: {
       path: string;
       apiKey?: string;
+      apiKeyEnv?: string;
       enableJsonResponse: boolean;
     };
   };
@@ -522,9 +525,19 @@ export interface SearchResult {
   title: string;
   sectionTitle?: string;
   snippet: string;
+  /**
+   * Full text of the matched section. Present only when the deployment sets
+   * `api.exposeInternalFields`, or on a privileged surface such as MCP.
+   */
   chunkText?: string;
   score: number;
-  routeFile: string;
+  /**
+   * Path to the source file in the author's repository. Present only when the
+   * deployment sets `api.exposeInternalFields`, or on a privileged surface such
+   * as MCP — a public search response omits it, so this is optional and code
+   * reading it must handle its absence.
+   */
+  routeFile?: string;
   chunks?: SearchResultChunk[];
   breakdown?: ScoreBreakdown;
 }

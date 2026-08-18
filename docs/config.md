@@ -129,6 +129,26 @@ section — `search.dualSearch` and `search.pageSearchWeight` described a parall
 blended retrieval path that the default search stopped using, and setting either
 now produces a migration error. Tune ranking through `ranking.weights`.
 
+### API access policy
+
+- `api.allowedScopes` (default `[]`) — scopes a browser request may select with
+  `?scope=` or a `scope` field in a POST body. Empty means the caller cannot
+  choose and always gets the server's configured scope; anything else is a 403.
+- `api.exposeInternalFields` (default `false`) — include `routeFile` (a path in
+  your repository) and `chunkText` (the full matched section) in browser search
+  responses, and `routeFile` in page responses. Off by default.
+
+### MCP access
+
+- `mcp.enable` (default `NODE_ENV !== "production"`) — mount the MCP endpoint on
+  the SvelteKit handle.
+- `mcp.handle.apiKey` / `mcp.handle.apiKeyEnv` — **required** for the endpoint to
+  serve anything. MCP returns repository paths, full page markdown, and any
+  scope the caller names, so without a key the route answers 503.
+- `mcp.access` (default `private`) — governs the **standalone** MCP server only:
+  whether it binds to loopback or all interfaces. It has no effect on the
+  SvelteKit handle route, which always requires a key.
+
 ## Ranking
 
 - `ranking.enableIncomingLinkBoost` (default `true`) — boost pages with more incoming links
@@ -143,7 +163,27 @@ now produces a migration error. Tune ranking through `ranking.weights`.
   fraction of the best result
 - `ranking.scoreGapThreshold` (default `0.4`) — trim results below best score minus this threshold
 
-### Ranking weights
+#### API access policy
+
+- `api.allowedScopes` (default `[]`) — scopes a browser request may select with
+  `?scope=` or a `scope` field in a POST body. Empty means the caller cannot
+  choose and always gets the server's configured scope; anything else is a 403.
+- `api.exposeInternalFields` (default `false`) — include `routeFile` (a path in
+  your repository) and `chunkText` (the full matched section) in browser search
+  responses, and `routeFile` in page responses. Off by default.
+
+### MCP access
+
+- `mcp.enable` (default `NODE_ENV !== "production"`) — mount the MCP endpoint on
+  the SvelteKit handle.
+- `mcp.handle.apiKey` / `mcp.handle.apiKeyEnv` — **required** for the endpoint to
+  serve anything. MCP returns repository paths, full page markdown, and any
+  scope the caller names, so without a key the route answers 503.
+- `mcp.access` (default `private`) — governs the **standalone** MCP server only:
+  whether it binds to loopback or all interfaces. It has no effect on the
+  SvelteKit handle route, which always requires a key.
+
+## Ranking weights
 
 - `ranking.weights.incomingLinks` (default `0.05`)
 - `ranking.weights.depth` (default `0.03`)

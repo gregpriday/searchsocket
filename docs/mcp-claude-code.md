@@ -31,9 +31,12 @@ export const handle = searchsocketHandle({
   rawConfig: {
     // ... other config
     mcp: {
+      enable: true,                  // defaults to NODE_ENV !== 'production'
       handle: {
-        path: '/api/mcp',           // default
-        apiKey: 'your-secret-key',  // optional — require Bearer token auth
+        path: '/api/mcp',            // default
+        // Required. Without a key the endpoint answers 503 — it exposes
+        // repository paths, full page markdown, and arbitrary scopes.
+        apiKeyEnv: 'SEARCHSOCKET_MCP_API_KEY',
         enableJsonResponse: true     // default, required for serverless
       }
     }
@@ -83,7 +86,7 @@ Make sure your dev server is running (`pnpm dev`) before starting Claude Code.
 
 ### With API key authentication
 
-If you configured an `apiKey` on the server side, pass it via a Bearer token header:
+Pass the configured key via a Bearer token header:
 
 ```json
 {

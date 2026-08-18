@@ -605,22 +605,27 @@ Add `.mcp.json` to your project root:
 }
 ```
 
-That's it. Restart Claude Code and the six search tools are available. You can search your docs, retrieve page content, and find source files directly from the AI assistant.
-
-To protect the endpoint, add API key authentication:
+The MCP endpoint requires an API key. Its tools return repository paths, full
+page markdown, and any scope the caller names, so it refuses to serve without
+one:
 
 ```ts
 // src/hooks.server.ts
 export const handle = searchsocketHandle({
   rawConfig: {
     mcp: {
+      enable: true,
       handle: {
-        apiKey: process.env.SEARCHSOCKET_MCP_API_KEY
+        // Read from the environment rather than committing the key.
+        apiKeyEnv: "SEARCHSOCKET_MCP_API_KEY"
       }
     }
   }
 });
 ```
+
+`mcp.enable` defaults to `NODE_ENV !== "production"`, so set it explicitly for a
+production deployment.
 
 Then pass the key in `.mcp.json`:
 

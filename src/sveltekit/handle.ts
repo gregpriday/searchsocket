@@ -83,7 +83,9 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
         // never read, so the MCP route was mounted regardless — including on
         // deployments that had deliberately turned it off.
         mcpPath = config.mcp.enable ? config.mcp.handle.path : undefined;
-        mcpApiKey = config.mcp.handle.apiKey;
+        mcpApiKey =
+          config.mcp.handle.apiKey ??
+          (config.mcp.handle.apiKeyEnv ? process.env[config.mcp.handle.apiKeyEnv] : undefined);
         mcpEnableJsonResponse = config.mcp.handle.enableJsonResponse;
 
         if (config.llmsTxt.enable) {
@@ -332,6 +334,25 @@ function resolveRequestedScope(
 }
 
 /**
+ * Strip repository paths from a page-retrieval response.
+ *
+ * `getPage` returns the page's full markdown, which is fine — it is the same
+ * content the site already serves publicly. `routeFile` is not: it is a path
+ * inside the author's repository, useful to an editing agent and disclosed to
+ * nobody else.
+ */
+function toPublicPage<T extends { frontmatter?: Record<string, unknown> }>(
+  page: T,
+  config: ResolvedSearchSocketConfig
+): T {
+  if (config.api.exposeInternalFields) return page;
+  if (!page.frontmatter) return page;
+
+  const { routeFile: _routeFile, ...frontmatter } = page.frontmatter;
+  return { ...page, frontmatter };
+}
+
+/**
  * Strip fields a public search response should not carry.
  *
  * `routeFile` is a path inside the author's repository and `chunkText` is the
@@ -460,7 +481,7 @@ async function handleGetPage(
   const result = await engine.getPage(pagePath, scope);
 
   return withCors(
-    new Response(JSON.stringify(result), {
+    new Response(JSON.stringify(toPublicPage(result, config)), {
       status: 200,
       headers: { "content-type": "application/json", "cache-control": "no-store" }
     }),
@@ -478,9 +499,13 @@ async function handlePostSearch(
   // Require a JSON content type. Without this the endpoint accepts a form
   // POST, which browsers send cross-origin without a preflight — so a CORS
   // policy that denies the origin never gets consulted.
+  // The header must be present, not merely non-conflicting. Allowing an absent
+  // Content-Type let a browser send JSON bytes as an ArrayBuffer body, which is
+  // a simple cross-origin POST and never triggers a preflight — so the CORS
+  // policy is not consulted at all.
   const contentType = event.request.headers.get("content-type") ?? "";
   const mediaType = contentType.split(";")[0]!.trim().toLowerCase();
-  if (mediaType && mediaType !== "application/json") {
+  if (mediaType !== "application/json") {
     throw new SearchSocketError(
       "INVALID_REQUEST",
       "Content-Type must be application/json",
@@ -518,6 +543,13 @@ async function handlePostSearch(
     body = JSON.parse(rawBody);
   } catch {
     throw new SearchSocketError("INVALID_REQUEST", "Malformed JSON request body", 400);
+  }
+
+  // Reject a non-object body before touching its fields. `null` is valid JSON,
+  // and reading `.scope` off it threw a TypeError that surfaced as a 500 where
+  // the schema would have produced a 400.
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new SearchSocketError("INVALID_REQUEST", "Request body must be a JSON object", 400);
   }
 
   const engine = await getEngine();
@@ -578,22 +610,40 @@ async function handleMcpRequest(
     );
   }
 
-  // Auth check
-  if (apiKey) {
-    const authHeader = event.request.headers.get("authorization") ?? "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    const tokenBuf = Buffer.from(token);
-    const keyBuf = Buffer.from(apiKey);
-    if (tokenBuf.length !== keyBuf.length || !timingSafeEqual(tokenBuf, keyBuf)) {
-      return new Response(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          error: { code: -32001, message: "Unauthorized" },
-          id: null
-        }),
-        { status: 401, headers: { "content-type": "application/json" } }
-      );
-    }
+  // MCP is a privileged surface: its tools return repository paths, full page
+  // markdown, and any scope the caller names — none of which the browser API
+  // discloses. It must therefore fail closed. Previously the auth check was
+  // wrapped in `if (apiKey)`, so a deployment that never configured a key — or
+  // whose `apiKeyEnv` was unset in production — served all of that to anyone.
+  if (!apiKey) {
+    return new Response(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: {
+          code: -32001,
+          message:
+            "MCP endpoint is not configured with an API key. Set mcp.handle.apiKey " +
+            "(or mcp.handle.apiKeyEnv) to enable it, or set mcp.enable: false to disable the route."
+        },
+        id: null
+      }),
+      { status: 503, headers: { "content-type": "application/json" } }
+    );
+  }
+
+  const authHeader = event.request.headers.get("authorization") ?? "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  const tokenBuf = Buffer.from(token);
+  const keyBuf = Buffer.from(apiKey);
+  if (tokenBuf.length !== keyBuf.length || !timingSafeEqual(tokenBuf, keyBuf)) {
+    return new Response(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: { code: -32001, message: "Unauthorized" },
+        id: null
+      }),
+      { status: 401, headers: { "content-type": "application/json" } }
+    );
   }
 
   const transport = new WebStandardStreamableHTTPServerTransport({

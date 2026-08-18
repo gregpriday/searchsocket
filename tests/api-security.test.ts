@@ -45,8 +45,10 @@ function makeEvent(opts: {
     request: {
       method: opts.method,
       headers,
-      text: async () => JSON.stringify(opts.body ?? {}),
-      json: async () => opts.body ?? {}
+      // Preserves an explicit `null` rather than coercing it to `{}` — null is
+      // valid JSON and the handler must reject it as a 400, not crash.
+      text: async () => JSON.stringify(opts.body === undefined ? {} : opts.body),
+      json: async () => (opts.body === undefined ? {} : opts.body)
     } as unknown as Request
   };
 }
@@ -211,6 +213,44 @@ describe("request hardening", () => {
     expect(response.status).toBe(415);
   });
 
+  it("rejects a POST with no content type at all", async () => {
+    // `if (mediaType && ...)` let an absent header through, so JSON bytes sent
+    // as an ArrayBuffer body were a simple cross-origin POST — no preflight,
+    // so the CORS policy was never consulted.
+    stubEngine();
+    const handle = searchsocketHandle({ config: makeConfig() });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const url = new URL("https://site.example/api/search");
+    const response = await handle({
+      event: {
+        url,
+        request: {
+          method: "POST",
+          headers: new Headers(),
+          text: async () => JSON.stringify({ q: "test" }),
+          json: async () => ({ q: "test" })
+        } as unknown as Request
+      },
+      resolve
+    });
+
+    expect(response.status).toBe(415);
+  });
+
+  it("returns 400, not 500, for a JSON body of null", async () => {
+    stubEngine();
+    const handle = searchsocketHandle({ config: makeConfig() });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const response = await handle({
+      event: makeEvent({ pathname: "/api/search", method: "POST", body: null }),
+      resolve
+    });
+
+    expect(response.status).toBe(400);
+  });
+
   it("accepts application/json with a charset parameter", async () => {
     const search = stubEngine();
     const handle = searchsocketHandle({ config: makeConfig() });
@@ -280,5 +320,29 @@ describe("request hardening", () => {
 
     expect(response.headers.get("access-control-allow-origin")).toBe("https://app.example");
     expect(response.headers.get("vary")).toBe("Origin");
+  });
+});
+
+describe("page retrieval does not disclose repository paths", () => {
+  it("strips routeFile from the page response by default", async () => {
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn(),
+      getPage: vi.fn().mockResolvedValue({
+        url: "/docs/auth",
+        markdown: "# Auth",
+        frontmatter: { title: "Auth", routeFile: "src/routes/docs/auth/+page.svelte" }
+      })
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config: makeConfig() });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const response = await handle({
+      event: makeEvent({ pathname: "/api/search/pages/docs/auth", method: "GET" }),
+      resolve
+    });
+
+    const body = (await response.json()) as { frontmatter: Record<string, unknown> };
+    expect(body.frontmatter.routeFile).toBeUndefined();
+    expect(body.frontmatter.title).toBe("Auth");
   });
 });
