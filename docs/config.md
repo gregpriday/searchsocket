@@ -76,7 +76,7 @@ SearchSocket reads `UPSTASH_VECTOR_REST_URL` and `UPSTASH_VECTOR_REST_TOKEN` fro
 - `chunking.dontSplitInside` (default `["code", "table", "blockquote"]`) — block types to keep intact
 - `chunking.prependTitle` (default `true`) — prepend page title to chunk text before indexing
 - `chunking.pageSummaryChunk` (default `true`) — generate a synthetic identity chunk per page
-- `chunking.weightHeadings` — **removed in 1.0.** It only changed the chunk
+- `chunking.weightHeadings` — **removed in 0.8.** It only changed the chunk
   content hash; the weighted heading text never reached the embedding model, so
   it caused re-embedding churn without affecting relevance. Use
   `chunking.prependTitle`.
@@ -102,10 +102,10 @@ Upstash handles embedding server-side via the `data` field. These settings must 
 - `embedding.model` (default `bge-large-en-v1.5`) — embedding model name
 - `embedding.dimensions` (default `1024`) — vector dimensions
 - `embedding.taskType` (default `RETRIEVAL_DOCUMENT`) — embedding task type
-- `embedding.batchSize` — **removed in 1.0.** It never affected anything at
+- `embedding.batchSize` — **removed in 0.8.** It never affected anything at
   runtime. Use `upstash.batchSize`. Setting it now produces a migration error
   rather than being silently ignored.
-- `embedding.images.enable` — **removed in 1.0.** SearchSocket is text-only.
+- `embedding.images.enable` — **removed in 0.8.** SearchSocket is text-only.
   Images are made searchable via their text descriptions
   (`data-search-description`, `alt`, `figcaption`), never image embeddings.
 

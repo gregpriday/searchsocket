@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Stabilization pass toward 1.0. Every change below fixes something that was
-observably wrong, not merely untidy. See
-[docs/migration-1.0.md](docs/migration-1.0.md) — **a full reindex is required.**
+Stabilization pass on the road to 1.0, shipping first as 0.8.0. Every change
+below fixes something that was observably wrong, not merely untidy. See
+[docs/migration-0.8.md](docs/migration-0.8.md) — **a full reindex is required.**
 
 ### Fixed — data safety
 

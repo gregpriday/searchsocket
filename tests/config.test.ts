@@ -261,7 +261,7 @@ describe("mergeConfig", () => {
     expect(merged.upstash.maxRetries).toBe(2); // default preserved
   });
 
-  describe("removed 1.0 options", () => {
+  describe("removed 0.8 options", () => {
     // Zod strips unknown keys silently, so a config still setting one of these
     // would look accepted while the option did nothing — exactly how
     // search.pageSearchWeight came to be tuned despite having no effect.
@@ -274,7 +274,7 @@ describe("mergeConfig", () => {
       await fs.mkdir(path.join(dir, "build"), { recursive: true });
 
       expect(() => mergeConfig(dir, raw as never)).toThrow(new RegExp(key.replace(".", "\\.")));
-      expect(() => mergeConfig(dir, raw as never)).toThrow(/removed in 1\.0/);
+      expect(() => mergeConfig(dir, raw as never)).toThrow(/removed in 0\.8/);
     });
 
     it("still accepts a config that sets none of them", async () => {

@@ -1130,7 +1130,7 @@ export class UpstashSearchStore {
    * Find records written under an older identity layout.
    *
    * Records lacking the current `schemaVersion` are invisible to every read
-   * path, so a 1.0 index run writes a fresh generation beside them rather than
+   * path, so a 0.8 index run writes a fresh generation beside them rather than
    * overwriting them. They stay put — deliberately, so a rollback is possible —
    * until `searchsocket migrate cleanup-legacy` removes them.
    */
@@ -1155,7 +1155,7 @@ export class UpstashSearchStore {
           for (const doc of result.vectors) {
             if (doc.metadata?.projectId !== projectId) continue;
             // Only missing or older versions are legacy. Treating anything
-            // "!== current" as legacy would make a 1.0 cleanup delete records
+            // "!== current" as legacy would make a 0.8 cleanup delete records
             // written by a future version that shares the index.
             const version = doc.metadata?.schemaVersion;
             const isLegacy = typeof version !== "number" || version < INDEX_SCHEMA_VERSION;

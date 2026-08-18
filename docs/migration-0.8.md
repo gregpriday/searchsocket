@@ -1,6 +1,6 @@
-# Migrating an index from 0.7.x to 1.0
+# Migrating an index from 0.7.x to 0.8
 
-**A full reindex is required.** 1.0 changes how records are identified, and an
+**A full reindex is required.** 0.8 changes how records are identified, and an
 0.7.x index cannot be upgraded in place.
 
 ## Why
@@ -12,13 +12,13 @@ Upstash namespaces. Two sites indexed into one Upstash index, both serving
 and a lookup could return either. `getPage()` fetched by raw URL and returned
 whatever it found without checking which project or scope owned it.
 
-1.0 gives every record an ID that carries the schema version, project id, scope
+0.8 gives every record an ID that carries the schema version, project id, scope
 name, and record type, and verifies all four after any direct fetch.
 
 ## What happens on first run
 
-1.0 records carry `schemaVersion: 1`. Every read filters on it, so 0.7.x records
-are invisible to 1.0 rather than being misread. Your first 1.0 index run writes
+0.8 records carry `schemaVersion: 1`. Every read filters on it, so 0.7.x records
+are invisible to 0.8 rather than being misread. Your first 0.8 index run writes
 a complete new set of records **beside** the old ones. Nothing is deleted, and
 the old records remain available if you need to roll back to 0.7.x.
 

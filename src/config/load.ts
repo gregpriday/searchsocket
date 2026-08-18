@@ -53,7 +53,7 @@ function detectSourceMode(cwd: string, config: ResolvedSearchSocketConfig, parse
 }
 
 /**
- * Config keys removed in 1.0, mapped to what to do instead.
+ * Config keys removed in 0.8, mapped to what to do instead.
  *
  * Zod strips unknown keys silently, so without this a config that still sets a
  * removed option looks accepted while the option does nothing — which is how
@@ -64,7 +64,7 @@ const REMOVED_CONFIG_KEYS: Array<{ path: string; reason: string }> = [
   {
     path: "search.dualSearch",
     reason:
-      "Dual page+chunk retrieval was removed in 1.0. Search is page-first: pages are " +
+      "Dual page+chunk retrieval was removed in 0.8. Search is page-first: pages are " +
       "ranked, then the best sections within each are retrieved. Delete this option."
   },
   {
@@ -138,8 +138,8 @@ function assertNoRemovedKeys(rawConfig: SearchSocketConfig): void {
   const details = found.map((entry) => `  ${entry.path}\n    ${entry.reason}`).join("\n");
   throw new SearchSocketError(
     "CONFIG_MISSING",
-    `searchsocket.config.ts sets options that were removed in 1.0:\n${details}\n\n` +
-      "See https://github.com/gregpriday/searchsocket/blob/main/docs/migration-1.0.md"
+    `searchsocket.config.ts sets options that were removed in 0.8:\n${details}\n\n` +
+      "See https://github.com/gregpriday/searchsocket/blob/main/docs/migration-0.8.md"
   );
 }
 
