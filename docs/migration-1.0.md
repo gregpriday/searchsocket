@@ -136,6 +136,16 @@ different type is a 415. Without this the endpoint accepted a form POST, which a
 browser sends cross-origin without a preflight — so the CORS policy was never
 consulted. The bundled client already sends the correct header.
 
+**`UpstashSearchStore` is no longer exported from the package root.** It was
+public by accident, which made its internals part of the compatibility surface.
+Use `createUpstashStore(config)`. `SearchSocketError`, `INDEX_SCHEMA_VERSION`,
+and the result types (`SearchResult`, `PageRecord`, `RelatedPagesResult`,
+`RunWarning`, …) are now exported instead, so consumer code can name what public
+methods return without importing from internal paths.
+
+**Node 22 is the minimum.** Node 20 reached end of life in March 2026. CI tests
+22 and 24.
+
 **Filter values may not contain a quote or backslash.** Upstash Vector's filter
 syntax documents single-quoted string literals but defines no escape sequence for
 an embedded quote or backslash, so SearchSocket now rejects such values in

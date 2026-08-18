@@ -1220,7 +1220,7 @@ pnpm run test        # vitest run
 pnpm run build       # tsup → dist/
 ```
 
-CI runs typecheck, build, and the test suite on Node 20, 22, and 24 for every push to
+CI runs typecheck, build, the test suite, and the packed-tarball check on Node 22 and 24 for every push to
 `main`/`develop`/`release/*`/`hotfix/*` and every PR into `main` or `develop`.
 
 `pnpm run test:quality` runs Mean Reciprocal Rank assertions against a live index. It needs

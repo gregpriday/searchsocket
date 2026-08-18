@@ -19,7 +19,7 @@ export default defineConfig([
     outDir: "dist",
     sourcemap: true,
     clean: true,
-    target: "node20",
+    target: "node22",
     splitting: false,
     shims: false,
     treeshake: true,
@@ -38,7 +38,7 @@ export default defineConfig([
     outDir: "dist",
     sourcemap: true,
     clean: false,
-    target: "node20",
+    target: "node22",
     define,
     banner: {
       js: "#!/usr/bin/env node"

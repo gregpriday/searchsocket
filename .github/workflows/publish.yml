@@ -17,6 +17,9 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Needed by the "tag is on main" ancestry check below.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v6
 
@@ -26,6 +29,33 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: 'pnpm'
 
+      - name: Verify the tag matches package.json
+        # An npm version is permanent, so publishing v0.8.0 from a tree that
+        # still says 0.7.9 cannot be undone — only superseded. Check before any
+        # build work runs.
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $PKG"
+            exit 1
+          fi
+          if ! printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::tag $GITHUB_REF_NAME is not valid semver"
+            exit 1
+          fi
+          echo "publishing $PKG"
+
+      - name: Verify the tag is on main
+        # Guards against publishing from a branch that never went through the
+        # release merge.
+        run: |
+          git fetch --depth=1 origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::tagged commit is not reachable from main"
+            exit 1
+          fi
+
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm run typecheck
@@ -34,4 +64,19 @@ jobs:
 
       - run: pnpm run test
 
+      - name: Verify the tarball is complete
+        run: pnpm run check:package
+
       - run: pnpm publish --no-git-checks --access public --provenance
+
+      - name: Smoke test the published package
+        # Confirms the registry actually serves what we just pushed, rather
+        # than assuming a successful publish means a working install.
+        run: |
+          sleep 15
+          cd "$(mktemp -d)"
+          npm init -y > /dev/null
+          npm install "searchsocket@${GITHUB_REF_NAME#v}"
+          node -e "import('searchsocket').then(m => { if (!m) process.exit(1); console.log('root import ok'); })"
+          node -e "import('searchsocket/client').then(() => console.log('client import ok'))"
+          node ./node_modules/searchsocket/dist/cli.js --version

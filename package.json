@@ -77,10 +77,12 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:quality": "SEARCHSOCKET_QUALITY_TESTS=1 vitest run tests/quality.test.ts"
+    "test:quality": "SEARCHSOCKET_QUALITY_TESTS=1 vitest run tests/quality.test.ts",
+    "check:package": "node scripts/check-package.mjs",
+    "check": "pnpm run typecheck && pnpm run build && pnpm run test && pnpm run check:package"
   },
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=22.0.0"
   },
   "packageManager": "pnpm@10.29.2",
   "dependencies": {
