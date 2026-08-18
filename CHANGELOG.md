@@ -5,6 +5,82 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Stabilization pass toward 1.0. Every change below fixes something that was
+observably wrong, not merely untidy. See
+[docs/migration-1.0.md](docs/migration-1.0.md) — **a full reindex is required.**
+
+### Fixed — data safety
+
+- An indexing run truncated by `--max-pages`/`--max-chunks`, or one that failed
+  to fetch or extract a page, or whose source unexpectedly returned nothing, no
+  longer deletes the records it did not see. Any of these could previously erase
+  a valid production index.
+- `clean --remote --scope X` resolved the scope flag and then dropped the entire
+  project. Remote deletion is now a dry run until `--apply`, single-scope by
+  default, and project-wide only with `--all-scopes --confirm-project <id>`.
+- `prune` fails closed when the remote branch list cannot be trusted (shallow
+  clone, no remotes, empty scopes file), no longer treats an unknown timestamp
+  as old, and requires a scope to be both orphaned and inactive by default.
+- `listScopes` stamped `new Date()` on every scope, making TTL pruning
+  meaningless. It reports the newest real `indexedAt`, or `"unknown"`.
+- Force mode wiped the page namespace before re-upserting, so a crash between
+  the two served an empty index. It now upserts first and deletes stale records
+  after.
+
+### Fixed — isolation
+
+- Page IDs were raw URLs and chunk keys omitted the project id, while all
+  projects shared two namespaces. Two sites in one Upstash index both serving
+  `/docs` wrote to the same record. IDs now carry schema version, project,
+  scope, and type, verified on every read.
+- `getPage()` returned whatever the backend gave it without checking ownership.
+- Project ids and scope names were concatenated into filter expressions
+  unescaped and unvalidated.
+
+### Fixed — reliability
+
+- Sixteen `catch {}` blocks returned empty results for every backend failure, so
+  an outage was indistinguishable from an empty index. Failures are now typed
+  and only a genuinely absent namespace reads as empty.
+- Error messages reaching callers no longer carry raw SDK text, which can
+  contain credentials.
+- `listPages` returned whatever survived filtering one backend page, so a
+  request for 50 could return 3 with no way to tell that from the end.
+
+### Fixed — security
+
+- Any caller could select any scope via `?scope=` or a POST body. Scope
+  selection now requires `api.allowedScopes`.
+- Browser search responses carried `routeFile` (a repository path) and
+  `chunkText` (the full matched section). Both are opt-in via
+  `api.exposeInternalFields`.
+- The MCP endpoint's auth check was skipped entirely when no key was configured.
+  It now refuses to serve without one.
+- Crawl requests gained timeouts, response size caps, and a same-origin redirect
+  policy.
+- External links were counted as internal, inflating pages' incoming-link
+  ranking with other sites' links.
+
+### Removed
+
+- `search.dualSearch`, `search.pageSearchWeight`, `ranking.aggregationCap`,
+  `ranking.aggregationDecay`, `ranking.minChunkScoreRatio`,
+  `ranking.weights.aggregation`, `embedding.batchSize`,
+  `embedding.images.enable` — all tunable, none had any runtime effect. Setting
+  one now produces a migration error.
+- `UpstashSearchStore` from the package root.
+- Node 20 support; the floor is Node 22.
+
+### Changed
+
+- Per-page weights and `ranking.enableAnchorTextBoost` now affect ranking; both
+  were documented but inert in the default search path.
+- Chunk keys no longer depend on chunk position, so editing one section stops
+  re-embedding the whole page.
+- Search issues a bounded number of backend requests regardless of `topK`.
+
 ## [0.7.1] - 2026-04-11
 
 ### Fixed

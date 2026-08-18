@@ -191,7 +191,6 @@ With `groupBy: "page"` (the default):
       "sectionTitle": "Installation",
       "snippet": "Install SearchSocket with pnpm add searchsocket...",
       "score": 0.89,
-      "routeFile": "src/routes/docs/intro/+page.svelte",
       "chunks": [
         {
           "sectionTitle": "Installation",
@@ -376,7 +375,21 @@ A reactive search store built on Svelte 5 runes with debouncing and LRU caching.
 {/each}
 ```
 
-Call `search.destroy()` to clean up when no longer needed (automatic in component context).
+Call `search.destroy()` when the search is no longer needed. This is **not**
+automatic: `createSearch()` uses `$effect.root`, which returns a teardown
+function rather than registering one with the surrounding component. In a
+component, call it from `onDestroy`:
+
+```svelte
+<script>
+  import { onDestroy } from "svelte";
+  import { createSearch } from "searchsocket/svelte";
+
+  const search = createSearch();
+  onDestroy(search.destroy);
+</script>
+```
+
 
 ### `<SearchSocket>` component
 
