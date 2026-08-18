@@ -618,9 +618,9 @@ Add `.mcp.json` to your project root:
 }
 ```
 
-The MCP endpoint requires an API key. Its tools return repository paths, full
-page markdown, and any scope the caller names, so it refuses to serve without
-one:
+The MCP endpoint requires an API key. Its tools return repository paths, a
+page's indexed markdown, and any scope the caller names, so it refuses to serve
+without one:
 
 ```ts
 // src/hooks.server.ts

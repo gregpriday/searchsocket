@@ -344,7 +344,7 @@ function resolveRequestedScope(
 /**
  * Strip repository paths from a page-retrieval response.
  *
- * `getPage` returns the page's full markdown, which is fine — it is the same
+ * `getPage` returns the page's indexed markdown, which is fine — it is the same
  * content the site already serves publicly. `routeFile` is not: it is a path
  * inside the author's repository, useful to an editing agent and disclosed to
  * nobody else.
@@ -364,7 +364,7 @@ function toPublicPage<T extends { frontmatter?: Record<string, unknown> }>(
  * Strip fields a public search response should not carry.
  *
  * `routeFile` is a path inside the author's repository and `chunkText` is the
- * full text of a section rather than a snippet. Both are useful to an MCP
+ * indexed text of a whole section rather than a snippet. Both are useful to an MCP
  * client editing the site and neither belongs in a public search box, so they
  * are opt-in via `api.exposeInternalFields`.
  */

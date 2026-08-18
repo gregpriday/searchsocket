@@ -138,8 +138,8 @@ now produces a migration error. Tune ranking through `ranking.weights`.
   `?scope=` or a `scope` field in a POST body. Empty means the caller cannot
   choose and always gets the server's configured scope; anything else is a 403.
 - `api.exposeInternalFields` (default `false`) — include `routeFile` (a path in
-  your repository) and `chunkText` (the full matched section) in browser search
-  responses, and `routeFile` in page responses. Off by default.
+  your repository) and `chunkText` (the matched section's indexed text) in
+  browser search responses, and `routeFile` in page responses. Off by default.
 
 ### MCP access
 
@@ -172,8 +172,8 @@ now produces a migration error. Tune ranking through `ranking.weights`.
   `?scope=` or a `scope` field in a POST body. Empty means the caller cannot
   choose and always gets the server's configured scope; anything else is a 403.
 - `api.exposeInternalFields` (default `false`) — include `routeFile` (a path in
-  your repository) and `chunkText` (the full matched section) in browser search
-  responses, and `routeFile` in page responses. Off by default.
+  your repository) and `chunkText` (the matched section's indexed text) in
+  browser search responses, and `routeFile` in page responses. Off by default.
 
 ### MCP access
 

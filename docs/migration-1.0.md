@@ -121,8 +121,8 @@ mcp: {
 ```
 
 **Browser search responses no longer include `routeFile` or `chunkText`.**
-`routeFile` is a path inside your repository and `chunkText` is the full text of
-each matched section; both went to every public caller. They are now opt-in via
+`routeFile` is a path inside your repository and `chunkText` is the indexed text
+of each matched section; both went to every public caller. They are now opt-in via
 `api.exposeInternalFields: true`. `routeFile` is also stripped from the page
 endpoint's frontmatter. The `SearchResult.routeFile` type is now optional to
 match — code reading it must handle its absence.

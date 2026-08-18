@@ -500,3 +500,144 @@ describe("mutation ordering and custom-record authority", () => {
     expect(written?.metadata.custom).toBe(true);
   });
 });
+
+describe("custom-record protection does not strand records", () => {
+  it("replaces a custom record's chunks when its content changes", async () => {
+    // The protection must not prevent a provider from updating its own
+    // records: supplying customRecords at all means the caller is speaking
+    // authoritatively about them.
+    const { cwd, config } = await createFixture(THREE_PAGES);
+    const { store, chunkIds } = createStatefulMockStore();
+
+    await (await IndexPipeline.create({ cwd, config, store })).run({
+      changedOnly: true,
+      customRecords: [
+        { url: "/from-cms/post", title: "CMS post", content: "The original body text." }
+      ]
+    });
+
+    // Only the custom record's own chunks; the site pages' chunks correctly
+    // survive both runs.
+    const originalCustomChunks = vi
+      .mocked(store.upsertChunks)
+      .mock.calls.flatMap((call) => call[0] as Array<{ id: string; metadata: { url?: string } }>)
+      .filter((doc) => doc.metadata.url === "/from-cms/post")
+      .map((doc) => doc.id);
+    expect(originalCustomChunks.length).toBeGreaterThan(0);
+
+    await (await IndexPipeline.create({ cwd, config, store })).run({
+      changedOnly: true,
+      customRecords: [
+        { url: "/from-cms/post", title: "CMS post", content: "Completely different body text now." }
+      ]
+    });
+
+    const rewritten = vi
+      .mocked(store.upsertChunks)
+      .mock.calls.flatMap((call) => call[0] as Array<{ id: string; metadata: { url?: string } }>)
+      .filter((doc) => doc.metadata.url === "/from-cms/post")
+      .map((doc) => doc.id);
+
+    // Body chunks are keyed by their own text, so changing the content
+    // replaces them: the old keys must not linger.
+    const stranded = originalCustomChunks.filter(
+      (id) => chunkIds.has(id) && !rewritten.includes(id)
+    );
+    expect(stranded).toEqual([]);
+
+    // The page-summary chunk keeps its key deliberately — it identifies the
+    // page rather than a passage — and is re-upserted with the new content.
+    expect(rewritten.length).toBeGreaterThan(0);
+  });
+
+  it("removes a custom record's chunks when the caller retracts it", async () => {
+    const { cwd, config } = await createFixture(THREE_PAGES);
+    const { store, chunkIds, pageHashes } = createStatefulMockStore();
+
+    await (await IndexPipeline.create({ cwd, config, store })).run({
+      changedOnly: true,
+      customRecords: [
+        { url: "/from-cms/post", title: "CMS post", content: "Body text from the CMS." }
+      ]
+    });
+    const withCustom = new Set(chunkIds);
+
+    await (await IndexPipeline.create({ cwd, config, store })).run({
+      changedOnly: true,
+      customRecords: []
+    });
+
+    expect(pageHashes.has("/from-cms/post")).toBe(false);
+    expect(chunkIds.size).toBeLessThan(withCustom.size);
+  });
+});
+
+describe("provenance transitions", () => {
+  it("re-upserts chunks when a page changes from custom to site-owned", async () => {
+    // Provenance decides whether a site-only run may delete a chunk. If a
+    // transition does not change the hash, the stored flag stays stale: a
+    // custom→site chunk keeps its protection and is stranded once the page
+    // goes away, and a site→custom chunk stays deletable.
+    const { cwd, config } = await createFixture({ "docs/alpha": "Alpha content here." });
+    const { store } = createStatefulMockStore();
+
+    const sharedBody = "Exactly the same body text in both runs.";
+
+    await (await IndexPipeline.create({ cwd, config, store })).run({
+      changedOnly: true,
+      customRecords: [{ url: "/shared", title: "Shared", content: sharedBody }]
+    });
+
+    vi.mocked(store.upsertChunks).mockClear();
+
+    // Same URL, same content — now produced by the site rather than supplied.
+    await fs.mkdir(path.join(cwd, "build", "shared"), { recursive: true });
+    await fs.writeFile(
+      path.join(cwd, "build", "shared", "index.html"),
+      `<html><head><title>Shared</title></head><body><main><h1>Shared</h1><p>${sharedBody}</p></main></body></html>`,
+      "utf8"
+    );
+
+    await (await IndexPipeline.create({ cwd, config, store })).run({
+      changedOnly: true,
+      customRecords: []
+    });
+
+    const rewritten = vi
+      .mocked(store.upsertChunks)
+      .mock.calls.flatMap((call) => call[0] as Array<{ metadata: { url?: string; custom?: boolean } }>)
+      .filter((doc) => doc.metadata.url === "/shared");
+
+    expect(rewritten.length).toBeGreaterThan(0);
+    expect(rewritten.every((doc) => doc.metadata.custom === false)).toBe(true);
+  });
+
+  it("keeps provenance when a chunk hook rebuilds the chunk", async () => {
+    // A hook returning newly constructed chunks would otherwise drop the
+    // marker, leaving a custom record's sections deletable.
+    const { cwd, config } = await createFixture({ "docs/alpha": "Alpha content here." });
+    const { store } = createStatefulMockStore();
+
+    await (
+      await IndexPipeline.create({
+        cwd,
+        config,
+        store,
+        hooks: {
+          transformChunk: async (chunk) => ({ ...chunk, custom: undefined }) as never
+        }
+      })
+    ).run({
+      changedOnly: true,
+      customRecords: [{ url: "/from-cms/post", title: "CMS", content: "Body from the CMS." }]
+    });
+
+    const written = vi
+      .mocked(store.upsertChunks)
+      .mock.calls.flatMap((call) => call[0] as Array<{ metadata: { url?: string; custom?: boolean } }>)
+      .filter((doc) => doc.metadata.url === "/from-cms/post");
+
+    expect(written.length).toBeGreaterThan(0);
+    expect(written.every((doc) => doc.metadata.custom === true)).toBe(true);
+  });
+});

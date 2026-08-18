@@ -682,6 +682,15 @@ export class IndexPipeline {
       chunks = await this.hooks.beforeIndex(chunks);
     }
 
+    // Provenance belongs to the pipeline, not to a hook. `transformChunk` and
+    // `beforeIndex` may return freshly constructed chunks, which would drop the
+    // marker and leave a custom record's sections deletable by the next
+    // site-only run. Reassert it from the page each chunk came from.
+    const customUrls = new Set(pages.filter((page) => page.custom).map((page) => page.url));
+    for (const chunk of chunks) {
+      chunk.custom = customUrls.has(chunk.url);
+    }
+
     stageEnd("chunk", chunkStart);
     this.logger.info(`Chunked into ${chunks.length} chunk${chunks.length === 1 ? "" : "s"} (${stageTimingsMs["chunk"]}ms)`);
 

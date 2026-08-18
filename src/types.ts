@@ -532,8 +532,10 @@ export interface SearchResult {
   sectionTitle?: string;
   snippet: string;
   /**
-   * Full text of the matched section. Present only when the deployment sets
-   * `api.exposeInternalFields`, or on a privileged surface such as MCP.
+   * The matched section's indexed text. This is the text that was embedded,
+   * capped at the storage metadata limit — not necessarily the section's full
+   * source. Present only when the deployment sets `api.exposeInternalFields`,
+   * or on a privileged surface such as MCP.
    */
   chunkText?: string;
   score: number;

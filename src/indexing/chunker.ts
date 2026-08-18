@@ -298,6 +298,11 @@ export function buildSummaryChunkText(page: IndexedPage): string {
   return parts.join("\n\n");
 }
 
+/** Marker mixed into a chunk's hash so provenance changes invalidate it. */
+function provenanceTag(page: { custom?: boolean }): string {
+  return page.custom ? "|custom" : "|site";
+}
+
 export function buildEmbeddingTitle(chunk: Chunk): string | undefined {
   if (!chunk.sectionTitle || chunk.headingLevel === undefined) return undefined;
 
@@ -368,7 +373,14 @@ export function chunkPage(
 
     const embeddingText = buildEmbeddingText(summaryChunk, config.chunking.prependTitle);
     const metaSuffix = page.meta ? JSON.stringify(page.meta, Object.keys(page.meta).sort()) : "";
-    summaryChunk.contentHash = sha256(normalizeText(embeddingText) + metaSuffix);
+    // Provenance is stored on the record and decides whether a site-only run
+    // may delete it, so a page changing between custom-supplied and site-owned
+    // must re-upsert its chunks even when the text is identical. Otherwise the
+    // stored flag stays stale: site→custom chunks stay deletable, and
+    // custom→site chunks stay protected after the page itself is gone.
+    summaryChunk.contentHash = sha256(
+      normalizeText(embeddingText) + metaSuffix + provenanceTag(page)
+    );
     chunks.push(summaryChunk);
   }
 
@@ -429,7 +441,9 @@ export function chunkPage(
 
     const embeddingText = buildEmbeddingText(chunk, config.chunking.prependTitle);
     const chunkMetaSuffix = page.meta ? JSON.stringify(page.meta, Object.keys(page.meta).sort()) : "";
-    chunk.contentHash = sha256(normalizeText(embeddingText) + chunkMetaSuffix);
+    chunk.contentHash = sha256(
+      normalizeText(embeddingText) + chunkMetaSuffix + provenanceTag(page)
+    );
     chunks.push(chunk);
   }
 

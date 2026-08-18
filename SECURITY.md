@@ -25,7 +25,7 @@ interchangeable.
 **Public** — the browser search API mounted by `searchsocketHandle()`:
 
 - Returns URLs, titles, and snippets. It omits `routeFile` (a path inside your
-  repository) and `chunkText` (the full text of a matched section) unless you
+  repository) and `chunkText` (the matched section's indexed text) unless you
   set `api.exposeInternalFields: true`.
 - Cannot choose which scope it reads. A `?scope=` parameter, or a `scope` field
   in a POST body, is refused with a 403 unless the scope appears in
