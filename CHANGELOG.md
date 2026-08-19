@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0] - 2026-08-19
+
+A search UI release. The copy-paste templates behind `searchsocket add` are now a
+polished, themeable command palette that needs no CSS framework.
+
+**Existing integrations are unaffected.** Components you have already copied are
+never modified, and `createSearch()` keeps its published interface, defaults and
+request payload. Only what `searchsocket add` generates from now on has changed.
 
 ### Added
 
@@ -87,7 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Breadcrumbs use only the path of an absolute result URL, rather than turning
   the scheme and host into segments.
 - A response that resolves after its request was aborted no longer overwrites
-  newer state.
+  newer state. This is reachable only through a custom `fetchImpl` that ignores
+  its `AbortSignal`; with the platform `fetch`, an aborted request rejects and
+  never reached this path. Previously a superseded request could replace the
+  results of the query that succeeded it.
 
 ### Changed
 
@@ -99,10 +109,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directories, not just top-level `.svelte` files. Existing files are still
   skipped unless `--overwrite` is passed, per file — so adding a second
   component preserves any edits made to the shared files.
-
-**Already-copied components are not modified.** These changes affect what
-`searchsocket add` generates from now on; existing files in your project are
-untouched, and re-running `add` skips them unless you pass `--overwrite`.
 
 ## [0.8.0] - 2026-08-19
 
