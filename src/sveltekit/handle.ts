@@ -631,7 +631,10 @@ async function handleMcpRequest(
           code: -32001,
           message:
             "MCP endpoint is not configured with an API key. Set mcp.handle.apiKey " +
-            "(or mcp.handle.apiKeyEnv) to enable it, or set mcp.enable: false to disable the route."
+            "(or mcp.handle.apiKeyEnv) to enable it, or set mcp.enable: false to disable the route. " +
+            "If the key is set and this still fails under `vite dev`: apiKeyEnv reads process.env, " +
+            "which a SvelteKit dev server does not populate from .env. Pass it explicitly instead — " +
+            "mcp.handle.apiKey: env.YOUR_KEY from $env/dynamic/private."
         },
         id: null
       }),
