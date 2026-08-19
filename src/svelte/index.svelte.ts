@@ -14,7 +14,32 @@ export interface CreateSearchOptions {
   filters?: Record<string, string | number | boolean>;
   groupBy?: "page" | "chunk";
   maxSubResults?: number;
+  /**
+   * Shortest query that triggers a request, measured after trimming. `0`
+   * (the default) keeps the historical behaviour: any non-empty query searches.
+   */
+  minQueryLength?: number;
+  /**
+   * Whether results from the previous query stay visible while the next one
+   * loads. Defaults to `true`, matching every release before this option
+   * existed. Render with `resolvedQuery` rather than `query` so retained rows
+   * are never highlighted against a query that did not produce them.
+   */
+  keepPreviousResults?: boolean;
 }
+
+/**
+ * Where the search is in its lifecycle. Lets a UI pick one state to render
+ * instead of reconstructing it from a combination of `loading`, `error`,
+ * `results.length` and `query`.
+ */
+export type SearchStatus =
+  | "idle"
+  | "debouncing"
+  | "loading"
+  | "success"
+  | "empty"
+  | "error";
 
 class LruCache<K, V> {
   private map = new Map<K, V>();
@@ -39,12 +64,19 @@ class LruCache<K, V> {
     }
   }
 
+  delete(key: K): void {
+    this.map.delete(key);
+  }
+
   get size(): number {
     return this.map.size;
   }
 }
 
 function buildCacheKey(query: string, options: CreateSearchOptions): string {
+  // Keyed on the query exactly as typed. Collapsing whitespace here would let
+  // one query serve another's cached response, and a custom endpoint is free to
+  // treat the two differently.
   const parts: Record<string, unknown> = { q: query };
   if (options.topK !== undefined) parts.topK = options.topK;
   if (options.scope !== undefined) parts.scope = options.scope;
@@ -56,6 +88,10 @@ function buildCacheKey(query: string, options: CreateSearchOptions): string {
   return JSON.stringify(parts);
 }
 
+/**
+ * The original store surface. Unchanged since it was first published — anything
+ * that annotates or implements this type keeps compiling.
+ */
 export interface SearchState {
   query: string;
   readonly results: SearchResult[];
@@ -64,12 +100,28 @@ export interface SearchState {
   readonly destroy: () => void;
 }
 
-export function createSearch(options: CreateSearchOptions = {}): SearchState {
+/** What {@link createSearch} actually returns: {@link SearchState} plus state helpers. */
+export interface SearchStore extends SearchState {
+  /** Coarse lifecycle state — see {@link SearchStatus}. */
+  readonly status: SearchStatus;
+  /** The query that produced the currently visible `results`. */
+  readonly resolvedQuery: string;
+  /** True once any query has settled, so an empty list can be told from a fresh store. */
+  readonly hasSearched: boolean;
+  /** Reset query, results, error and `hasSearched` back to the initial state. */
+  readonly clear: () => void;
+  /** Re-run the current query, bypassing the cache. No query mutation needed. */
+  readonly retry: () => void;
+}
+
+export function createSearch(options: CreateSearchOptions = {}): SearchStore {
   const endpoint = options.endpoint ?? "/api/search";
   const debounceMs = options.debounce ?? 250;
   const cacheEnabled = options.cache !== false;
   const cacheSize = options.cacheSize ?? 50;
   const fetchFn = options.fetchImpl ?? fetch;
+  const minQueryLength = options.minQueryLength ?? 0;
+  const keepPreviousResults = options.keepPreviousResults !== false;
 
   const resultCache = new LruCache<string, SearchResult[]>(cacheSize);
 
@@ -77,34 +129,72 @@ export function createSearch(options: CreateSearchOptions = {}): SearchState {
   let results = $state<SearchResult[]>([]);
   let loading = $state(false);
   let error = $state<Error | null>(null);
+  let status = $state<SearchStatus>("idle");
+  let resolvedQuery = $state("");
+  let hasSearched = $state(false);
+
+  // Bumped by retry() to re-enter the effect without touching `query`.
+  let generation = $state(0);
+  // The query a retry was requested for. Read and consumed inside the effect,
+  // deliberately not reactive. Matching on the query means `retry()` followed by
+  // a query change in the same turn does not make the new query skip its cache.
+  let retryFor: string | null = null;
+
+  function settle(nextResults: SearchResult[], forQuery: string): void {
+    results = nextResults;
+    resolvedQuery = forQuery;
+    error = null;
+    hasSearched = true;
+    // Optional chaining so a malformed response (`results: null` from a custom
+    // endpoint) is passed through exactly as it always was, rather than being
+    // turned into an error by this new line.
+    status = (nextResults?.length ?? 0) > 0 ? "success" : "empty";
+  }
 
   const destroy = $effect.root(() => {
     $effect(() => {
       const currentQuery = query;
+      // Subscribe to retry() without using the value for anything else.
+      void generation;
 
-      if (!currentQuery.trim()) {
+      const trimmed = currentQuery.trim();
+
+      if (!trimmed || trimmed.length < minQueryLength) {
+        retryFor = null;
         results = [];
         loading = false;
         error = null;
+        status = "idle";
+        resolvedQuery = "";
         return;
       }
 
       const cacheKey = buildCacheKey(currentQuery, options);
+      const bypassCache = retryFor === currentQuery;
+      retryFor = null;
+      if (bypassCache) resultCache.delete(cacheKey);
 
-      if (cacheEnabled) {
+      if (cacheEnabled && !bypassCache) {
         const cached = resultCache.get(cacheKey);
         if (cached) {
-          results = cached;
           loading = false;
-          error = null;
+          settle(cached, currentQuery);
           return;
         }
       }
 
+      if (!keepPreviousResults) {
+        results = [];
+        resolvedQuery = "";
+      }
+
       loading = true;
+      status = "debouncing";
       const controller = new AbortController();
 
       const timer = setTimeout(async () => {
+        status = "loading";
+
         const request: SearchRequest = { q: currentQuery };
         if (options.topK !== undefined) request.topK = options.topK;
         if (options.scope !== undefined) request.scope = options.scope;
@@ -139,13 +229,18 @@ export function createSearch(options: CreateSearchOptions = {}): SearchState {
           if (cacheEnabled) {
             resultCache.set(cacheKey, data.results);
           }
-          results = data.results;
-          error = null;
+          // A response that resolved after the request was abandoned must not
+          // overwrite the state the newer query (or clear()) already set.
+          if (controller.signal.aborted) return;
+          settle(data.results, currentQuery);
         } catch (err) {
           if (err instanceof DOMException && err.name === "AbortError") return;
           if (controller.signal.aborted) return;
           error = err instanceof Error ? err : new Error(String(err));
           results = [];
+          resolvedQuery = currentQuery;
+          hasSearched = true;
+          status = "error";
         } finally {
           if (!controller.signal.aborted) {
             loading = false;
@@ -175,6 +270,30 @@ export function createSearch(options: CreateSearchOptions = {}): SearchState {
     },
     get error() {
       return error;
+    },
+    get status() {
+      return status;
+    },
+    get resolvedQuery() {
+      return resolvedQuery;
+    },
+    get hasSearched() {
+      return hasSearched;
+    },
+    clear() {
+      // Reset synchronously: reading `results` immediately after clear() should
+      // not still see the previous query's rows while the effect is pending.
+      query = "";
+      results = [];
+      error = null;
+      loading = false;
+      status = "idle";
+      resolvedQuery = "";
+      hasSearched = false;
+    },
+    retry() {
+      retryFor = query;
+      generation += 1;
     },
     destroy,
   };

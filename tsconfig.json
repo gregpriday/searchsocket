@@ -17,7 +17,13 @@
     "noFallthroughCasesInSwitch": true,
     "useDefineForClassFields": true,
     "verbatimModuleSyntax": true,
-    "outDir": "dist"
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "searchsocket": ["./src/index.ts"],
+      "searchsocket/client": ["./src/client.ts"],
+      "searchsocket/svelte": ["./src/svelte/index.svelte.ts"]
+    }
   },
   "include": ["src", "tests", "vitest.config.ts"],
   "exclude": ["dist", "node_modules"]

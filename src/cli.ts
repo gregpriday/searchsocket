@@ -1381,12 +1381,41 @@ program
       process.stdout.write(`skipped (exists): ${path.relative(cwd, filePath)}\n`);
     }
 
-    const firstWritten = result.written[0];
-    if (firstWritten) {
-      process.stdout.write(`\nUsage:\n`);
-      const fileName = path.basename(firstWritten, ".svelte");
-      process.stdout.write(`  import ${fileName} from "${path.relative(cwd, firstWritten).replace(/\\/g, "/")}";\n`);
+    const entryName = path.basename(result.entry, ".svelte");
+    const relativeEntry = path.relative(cwd, result.entry).replace(/\\/g, "/");
+
+    if (result.skipped.length > 0 && result.entryWritten) {
+      process.stdout.write(
+        `\nnote: ${result.skipped.length} existing file(s) were kept. ` +
+          `${entryName} uses those, not the versions in this release.\n` +
+          `Pass --overwrite to replace them.\n`
+      );
     }
+
+    if (!result.entryWritten) {
+      // Your copy was kept. Describing the new template's props here would be
+      // describing a component you do not have.
+      process.stdout.write(
+        `\n${relativeEntry} already exists and was kept.\n` +
+          `Pass --overwrite to replace it with the current template.\n`
+      );
+      return;
+    }
+
+    // SvelteKit projects address src/lib through the $lib alias; printing the
+    // raw relative path there gives an import that does not resolve.
+    const entryPath = relativeEntry.startsWith("src/lib/")
+      ? `$lib/${relativeEntry.slice("src/lib/".length)}`
+      : `./${relativeEntry}`;
+    process.stdout.write(`\nImport:\n`);
+    process.stdout.write(`  import ${entryName} from "${entryPath}";\n`);
+    process.stdout.write(`\nTheme:\n`);
+    process.stdout.write(`  <${entryName} theme="inherit" />   inherit | system | light | dark\n`);
+    process.stdout.write(`\nCustomize:\n`);
+    process.stdout.write(
+      `  override --ss-search-accent and the other tokens in search-theme.css,\n`
+    );
+    process.stdout.write(`  globally or per instance via the style prop.\n`);
   });
 
 async function main(): Promise<void> {

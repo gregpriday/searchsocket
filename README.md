@@ -107,7 +107,7 @@ Copy the search dialog template into your project:
 pnpm searchsocket add search-dialog
 ```
 
-This copies a Svelte 5 component to `src/lib/components/search/SearchDialog.svelte` with Cmd+K built in. Import it in your layout and add the scroll-to-text handler:
+This copies a styled Svelte 5 command palette into `src/lib/components/search/`, alongside its stylesheet and helpers. It needs no CSS framework — Tailwind optional — and follows your app's light/dark theme by default. Import it in your layout and add the scroll-to-text handler:
 
 ```svelte
 <!-- src/routes/+layout.svelte -->
@@ -115,14 +115,31 @@ This copies a Svelte 5 component to `src/lib/components/search/SearchDialog.svel
   import { afterNavigate } from "$app/navigation";
   import { searchsocketScrollToText } from "searchsocket/sveltekit";
   import SearchDialog from "$lib/components/search/SearchDialog.svelte";
+  import SearchTrigger from "$lib/components/search/SearchTrigger.svelte";
 
+  let searchOpen = $state(false);
   afterNavigate(searchsocketScrollToText);
 </script>
 
-<SearchDialog />
+<SearchTrigger bind:open={searchOpen} />
+<SearchDialog bind:open={searchOpen} />
 
 <slot />
 ```
+
+Brand it by overriding a few semantic CSS variables — no need to touch the component:
+
+```svelte
+<SearchDialog
+  bind:open={searchOpen}
+  label="Search documentation"
+  pathPrefix="/docs"
+  topK={10}
+  style="--ss-search-accent: #0f766e; --ss-search-radius: 20px"
+/>
+```
+
+See [docs/search-ui.md](docs/search-ui.md) for the full token list, prop tables, and theme modes.
 
 Users can now press Cmd+K to search. See [Building a Search UI](docs/search-ui.md) for scoped search, custom styling, and more patterns.
 
@@ -420,12 +437,15 @@ The component renders `<meta>` tags in `<svelte:head>` that SearchSocket reads d
 Copy ready-made search UI components into your project:
 
 ```bash
-pnpm searchsocket add search-dialog
-pnpm searchsocket add search-input
-pnpm searchsocket add search-results
+pnpm searchsocket add search-dialog     # Cmd+K command palette
+pnpm searchsocket add search-input      # inline field with a dropdown
+pnpm searchsocket add search-results    # standalone result list
+pnpm searchsocket add search-trigger    # the button that opens the dialog
 ```
 
-These are Svelte 5 components copied to `src/lib/components/search/` (configurable via `--dir`). They're starting points to customize, not dependencies.
+Each command writes a self-contained kit to `src/lib/components/search/` (configurable via `--dir`): the component, a shared `SearchResultRow.svelte`, pure helpers in `search-ui.ts`, and `search-theme.css`. They are Svelte 5 source you own, not dependencies — nothing imports back into `node_modules`.
+
+The default is styled with plain CSS and semantic `--ss-search-*` variables, so it works with or without Tailwind and looks finished without edits. Existing files are never overwritten without `--overwrite`, so adding a second component keeps any changes you made to the shared files.
 
 ## Scroll-to-Text Navigation
 
@@ -902,7 +922,9 @@ Copy Svelte 5 search UI template components into your project.
 pnpm searchsocket add search-dialog
 pnpm searchsocket add search-input
 pnpm searchsocket add search-results
+pnpm searchsocket add search-trigger
 pnpm searchsocket add search-dialog --dir src/lib/components/ui  # custom dir
+pnpm searchsocket add search-dialog --overwrite                  # replace existing files
 ```
 
 ## Real-World Example

@@ -1,76 +1,127 @@
 <!--
-  SearchResults — Standalone result list for SearchSocket
-  Minimal Tailwind 4 starting point. Customize freely.
-  Use this when you manage search state yourself and just need a result display.
+  SearchResults — standalone result list for SearchSocket.
+
+  Use this when you own the search state (a /search page, a filtered listing)
+  and only need the display. It is a plain list of links, not a combobox
+  listbox, so sub-results can be links of their own.
+
+  Styling comes from ./search-theme.css and the --ss-search-* tokens. Framework
+  agnostic — nothing here imports SvelteKit.
 -->
 <script lang="ts">
   import { buildResultUrl } from "searchsocket/client";
-
-  interface SearchResultItem {
-    url: string;
-    title: string;
-    sectionTitle?: string;
-    snippet: string;
-    score: number;
-    /** Present only when the deployment enables api.exposeInternalFields. */
-    routeFile?: string;
-    chunks?: { sectionTitle?: string; snippet: string; headingPath: string[]; score: number }[];
-  }
+  import type { SearchResult } from "searchsocket";
+  import SearchResultRow from "./SearchResultRow.svelte";
+  import { chunkAsResult, subResultsFor } from "./search-ui";
+  import "./search-theme.css";
 
   let {
     results = [],
     query = "",
     loading = false,
     error = null,
+    theme = "inherit",
+    density = "comfortable",
+    variant = "list",
+    showSnippets = true,
+    showBreadcrumbs = true,
+    showSectionTitle = true,
+    showSubResults = true,
+    maxVisibleSubResults = 3,
+    showCount = false,
+    emptyMessage = "Try fewer words or a broader phrase.",
+    class: className = "",
+    style = "",
   }: {
-    results?: SearchResultItem[];
+    results?: SearchResult[];
     query?: string;
     loading?: boolean;
     error?: Error | null;
+    theme?: "inherit" | "system" | "light" | "dark";
+    density?: "comfortable" | "compact";
+    variant?: "list" | "cards";
+    showSnippets?: boolean;
+    showBreadcrumbs?: boolean;
+    showSectionTitle?: boolean;
+    showSubResults?: boolean;
+    maxVisibleSubResults?: number;
+    showCount?: boolean;
+    emptyMessage?: string;
+    class?: string;
+    style?: string;
   } = $props();
 
-  function highlightParts(text: string, q: string): Array<{ text: string; match: boolean }> {
-    if (!q.trim()) return [{ text, match: false }];
-    const escaped = q.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-    const splitter = new RegExp(`(${escaped})`, "gi");
-    const tester = new RegExp(`^(?:${escaped})$`, "i");
-    return text.split(splitter).filter(Boolean).map((part) => ({ text: part, match: tester.test(part) }));
-  }
+  const state = $derived(
+    error ? "error" : loading ? "loading" : results.length > 0 ? "success" : query ? "empty" : "idle"
+  );
 </script>
 
-<div class="w-full">
-  {#if loading}
-    <div class="py-3 text-sm text-neutral-500" aria-live="polite">Searching...</div>
-  {/if}
-
+<div
+  class="ss-search ss-search--results {className}"
+  data-theme={theme}
+  data-density={density}
+  data-variant={variant}
+  data-state={state}
+  {style}
+>
   {#if error}
-    <div class="py-3 text-sm text-red-600" role="alert">{error.message}</div>
+    <div class="ss-search__state ss-search__state--error" role="alert">
+      <span class="ss-search__state-title">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" aria-hidden="true">
+          <circle cx="10" cy="10" r="7.5" />
+          <path d="M10 6v5M10 13.6v.1" />
+        </svg>
+        Search is temporarily unavailable
+      </span>
+      <span class="ss-search__state-description">Check your connection and try again.</span>
+    </div>
   {/if}
 
   {#if results.length > 0}
-    <ul class="divide-y divide-neutral-200 dark:divide-neutral-700">
-      {#each results as result}
-        <li>
-          <a href={buildResultUrl(result)} class="flex flex-col gap-1 py-3 no-underline hover:opacity-80">
-            <span class="font-medium">
-              {#each highlightParts(result.title, query) as part}
-                {#if part.match}<mark class="rounded-sm bg-yellow-200 dark:bg-yellow-500/30">{part.text}</mark>{:else}{part.text}{/if}
-              {/each}
-            </span>
-            {#if result.snippet}
-              <span class="text-sm text-neutral-500 dark:text-neutral-400">
-                {#each highlightParts(result.snippet, query) as part}
-                  {#if part.match}<mark class="rounded-sm bg-yellow-200 dark:bg-yellow-500/30">{part.text}</mark>{:else}{part.text}{/if}
-                {/each}
-              </span>
-            {/if}
+    {#if showCount}
+      <p class="ss-search__results-count">
+        {results.length} {results.length === 1 ? "result" : "results"}
+        {#if query}for “{query}”{/if}
+      </p>
+    {/if}
+
+    <ul class="ss-search__results-list" aria-busy={loading}>
+      {#each results as result, index (index)}
+        {@const subResults = showSubResults ? subResultsFor(result, maxVisibleSubResults) : []}
+        <li class="ss-search__results-item">
+          <a class="ss-search__link" href={buildResultUrl(result)}>
+            <SearchResultRow
+              {result}
+              {query}
+              {showSnippets}
+              {showBreadcrumbs}
+              {showSectionTitle}
+            />
           </a>
+
+          {#if subResults.length > 0}
+            <ul class="ss-search__subresults">
+              {#each subResults as chunk}
+                <li>
+                  <a class="ss-search__subresult-link" href={buildResultUrl(chunkAsResult(result, chunk))}>
+                    {chunk.sectionTitle}
+                  </a>
+                </li>
+              {/each}
+            </ul>
+          {/if}
         </li>
       {/each}
     </ul>
-  {/if}
-
-  {#if query && !loading && results.length === 0 && !error}
-    <div class="py-3 text-sm text-neutral-500">No results found.</div>
+  {:else if loading}
+    <div class="ss-search__state ss-search__state--idle" aria-live="polite">
+      <span class="ss-search__state-description">Searching…</span>
+    </div>
+  {:else if query && !error}
+    <div class="ss-search__state">
+      <span class="ss-search__state-title">No results for “{query}”</span>
+      <span class="ss-search__state-description">{emptyMessage}</span>
+    </div>
   {/if}
 </div>
