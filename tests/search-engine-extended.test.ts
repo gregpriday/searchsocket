@@ -58,7 +58,7 @@ function createMockStore(hits: VectorHit[] = [], pageHits?: PageHit[]): UpstashS
     health: vi.fn(async () => ({ ok: true })),
     getContentHashes: vi.fn(async () => new Map<string, string>()),
     fetchContentHashesForKeys: vi.fn(async () => new Map<string, string>()),
-    scanChunkIds: vi.fn(async () => new Set<string>()),
+    scanChunkIds: vi.fn(async () => new Map<string, boolean>()),
     upsertPages: vi.fn(async () => undefined),
     getPage: vi.fn(async (url: string, scope: { projectId: string; scopeName: string }) => {
       return pages.get(`${scope.projectId}:${scope.scopeName}:${url}`) ?? null;
@@ -360,7 +360,6 @@ describe("SearchEngine - adversarial cases", () => {
   it("filters sub-chunks below minChunkScoreRatio in chunk mode", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minChunkScoreRatio = 0.8; // strict: chunks must be >= 80% of best
 
     const hits: VectorHit[] = [
       { ...makeHit("chunk-1", "/page"), score: 1.0 },
@@ -684,10 +683,11 @@ describe("SearchEngine - dual search", () => {
     expect(result.results[0]!.url).toBe("/docs");
   });
 
-  it("page-first pipeline still calls searchPages when dualSearch is disabled", async () => {
+  it("always uses the page-first pipeline for the default groupBy", async () => {
+    // There is one search architecture in 1.0; the removed `dualSearch` switch
+    // could not turn it off even when it still existed.
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.search.dualSearch = false;
 
     const store = createMockStore([makeHit("chunk-1", "/home")]);
     const engine = await SearchEngine.create({ cwd, config, store });
@@ -787,7 +787,6 @@ describe("SearchEngine - maxSubResults", () => {
   it("defaults to 5 sub-results when maxSubResults is not specified", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minChunkScoreRatio = 0;
 
     // Create 7 chunks for the same page
     const hits: VectorHit[] = Array.from({ length: 7 }, (_, i) => ({
@@ -811,7 +810,6 @@ describe("SearchEngine - maxSubResults", () => {
   it("respects maxSubResults cap", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minChunkScoreRatio = 0;
 
     const hits: VectorHit[] = Array.from({ length: 7 }, (_, i) => ({
       ...makeHit(`chunk-${i}`, "/docs"),
@@ -834,7 +832,6 @@ describe("SearchEngine - maxSubResults", () => {
   it("returns exactly 1 chunk when maxSubResults is 1", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minChunkScoreRatio = 0;
 
     const hits: VectorHit[] = [
       { ...makeHit("chunk-1", "/page"), score: 0.9 },
@@ -858,7 +855,6 @@ describe("SearchEngine - maxSubResults", () => {
   it("returns all available chunks when maxSubResults exceeds actual count", async () => {
     const cwd = await makeTempCwd();
     const config = createDefaultConfig("searchsocket-engine-test");
-    config.ranking.minChunkScoreRatio = 0;
 
     const hits: VectorHit[] = [
       { ...makeHit("chunk-1", "/page"), score: 0.9 },
@@ -1074,12 +1070,12 @@ describe("SearchEngine - ranking overrides", () => {
     const store = createMockStore(chunkHits);
     const engine = await SearchEngine.create({ cwd, config, store });
 
-    // pageSearchWeight override should be accepted without error
+    // Ranking overrides are accepted and applied to the live path.
     const result = await engine.search({
       q: "docs",
       topK: 10,
       debug: true,
-      rankingOverrides: { search: { pageSearchWeight: 0.8 } }
+      rankingOverrides: { ranking: { weights: { titleMatch: 0.8 } } }
     });
 
     expect(result.results.length).toBeGreaterThan(0);

@@ -28,8 +28,24 @@ describe("resolveScope", () => {
     const config = createDefaultConfig("test-proj");
     config.scope.sanitize = false;
 
-    const scope = resolveScope(config, "Feature/Branch Name");
-    expect(scope.scopeName).toBe("Feature/Branch Name");
+    const scope = resolveScope(config, "Feature.Branch-Name_2");
+    expect(scope.scopeName).toBe("Feature.Branch-Name_2");
+  });
+
+  it("rejects a raw scope name that cannot be embedded safely", () => {
+    // With sanitize disabled the raw branch name reaches record IDs and
+    // Upstash filter literals unchanged, so unsafe characters must be refused
+    // rather than silently producing a malformed ID or escaping the filter.
+    const config = createDefaultConfig("test-proj");
+    config.scope.sanitize = false;
+
+    expect(() => resolveScope(config, "Feature/Branch Name")).toThrow(/Invalid scope name/);
+    expect(() => resolveScope(config, "main' OR '1'='1")).toThrow(/Invalid scope name/);
+  });
+
+  it("rejects an unsafe project id", () => {
+    const config = createDefaultConfig("bad'project");
+    expect(() => resolveScope(config)).toThrow(/Invalid project id/);
   });
 
   it("uses env var when mode is env", () => {

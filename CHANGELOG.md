@@ -5,6 +5,132 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-08-19
+
+A stabilization release on the road to 1.0. Every change below fixes something
+that was observably wrong, not merely untidy — several could destroy a
+production index or expose unpublished content.
+
+**Upgrading requires a full reindex.** Record identity changed, so 0.7.x records
+are invisible to 0.8 rather than misread. Nothing is deleted: the new generation
+is written alongside the old one, and `searchsocket migrate cleanup-legacy`
+removes the old records once you are satisfied. See
+[docs/migration-0.8.md](docs/migration-0.8.md).
+
+### Changed
+
+- **Breaking:** A full reindex is required. Record IDs now carry the schema
+  version, project id, scope name, and record type, and all four are verified on
+  every read.
+- **Breaking:** The MCP endpoint requires an API key. Its auth check was
+  previously skipped entirely when none was configured, so it served anyone. Set
+  `mcp.handle.apiKey` or `mcp.handle.apiKeyEnv`, or it answers 503.
+- **Breaking:** `mcp.enable` is now honoured. It defaults to
+  `NODE_ENV !== "production"`, so a production deployment relying on the
+  endpoint must set it explicitly.
+- **Breaking:** Browser requests can no longer choose their scope. `?scope=`,
+  and `scope` in a POST body, are refused with 403 unless listed in
+  `api.allowedScopes`.
+- **Breaking:** Browser search responses omit `routeFile` and `chunkText`, and
+  page responses omit `routeFile`. Enable `api.exposeInternalFields` to restore
+  them. `SearchResult.routeFile` is now optional.
+- **Breaking:** `POST /api/search` requires `Content-Type: application/json`.
+- **Breaking:** Filter values containing a quote or backslash are rejected with
+  400. Upstash's filter syntax defines no escape sequence for either, so
+  escaping them was a guess that could widen a query across tenants.
+- **Breaking:** Project ids and scope names are restricted to
+  `[A-Za-z0-9._-]`, up to 80 characters. Relevant if you set
+  `scope.sanitize: false`.
+- **Breaking:** `searchsocket index` exits 5 when no vector backend is
+  configured, instead of exiting 0. Pass `--allow-unconfigured` for the old
+  behaviour.
+- **Breaking:** `searchsocket clean --remote` is a dry run until `--apply`, and
+  deletes a single scope. Project-wide deletion needs
+  `--all-scopes --confirm-project <id>`.
+- **Breaking:** Node 22.12 is the minimum. Node 20 reached end of life in March
+  2026, and the CommonJS build needs unflagged `require(ESM)`.
+- Per-page weights (`searchsocket-weight`, frontmatter) and
+  `ranking.enableAnchorTextBoost` now affect ranking. Both were documented but
+  inert in the default search path, so enabling them may shift your results.
+- Chunk keys no longer depend on a chunk's position, so editing one section stops
+  re-embedding the whole page.
+- Search issues a bounded number of backend requests regardless of `topK`.
+
+### Removed
+
+- **Breaking:** `search.dualSearch`, `search.pageSearchWeight`,
+  `ranking.aggregationCap`, `ranking.aggregationDecay`,
+  `ranking.minChunkScoreRatio`, `ranking.weights.aggregation`,
+  `embedding.batchSize`, `embedding.images.enable`, and
+  `chunking.weightHeadings`. All were tunable and documented; none had any
+  runtime effect. Setting one now produces a migration error naming its
+  replacement rather than being silently ignored.
+- **Breaking:** `UpstashSearchStore` is no longer exported from the package
+  root. Use `createUpstashStore(config)`.
+
+### Added
+
+- `searchsocket migrate cleanup-legacy` removes records written under an older
+  index schema, dry-run by default.
+- `api.allowedScopes` and `api.exposeInternalFields` for browser access policy.
+- `upstash.batchSize` and `upstash.maxRetries` for request batching and
+  transient-failure retry.
+- `indexing.maxDeletionRatio`, plus `--allow-empty` and
+  `--accept-large-deletion` on `searchsocket index`.
+- `mcp.handle.apiKeyEnv`, so the MCP key need not be committed.
+- `SECURITY.md` documenting the public/privileged split, and
+  `CONTRIBUTING.md` documenting the test tiers.
+
+### Fixed — data safety
+
+- An indexing run truncated by `--max-pages`/`--max-chunks`, or one that failed
+  to fetch or extract a page, or whose source unexpectedly returned nothing, no
+  longer deletes the records it did not see. Any of these could previously erase
+  a valid production index.
+- `clean --remote --scope X` resolved the scope flag and then dropped the entire
+  project.
+- `prune` fails closed when the remote branch list cannot be trusted (shallow
+  clone, no remotes, empty scopes file), no longer treats an unknown timestamp
+  as old, and requires a scope to be both orphaned and inactive by default.
+- `listScopes` stamped `new Date()` on every scope, making TTL pruning
+  meaningless. It reports the newest real `indexedAt`, or `"unknown"`.
+- Force mode wiped the page namespace before re-upserting, so a crash between
+  the two served an empty index. It now upserts first and deletes after.
+- Custom records supplied through `customRecords` are no longer deleted by a
+  site-only indexing run that does not mention them.
+
+### Fixed — isolation
+
+- Page IDs were raw URLs and chunk keys omitted the project id, while all
+  projects shared two namespaces. Two sites in one Upstash index both serving
+  `/docs` wrote to the same record.
+- `getPage()` returned whatever the backend gave it without checking ownership.
+- Project ids and scope names were concatenated into filter expressions
+  unescaped and unvalidated.
+- `git rev-parse` ran without a working directory, so `--cwd` read one project's
+  config while resolving another repository's branch as the scope.
+
+### Fixed — reliability
+
+- Sixteen `catch {}` blocks returned empty results for every backend failure, so
+  an outage was indistinguishable from an empty index. Failures are now typed
+  and only a genuinely absent namespace reads as empty.
+- Error messages reaching callers no longer carry raw SDK text, which can
+  contain credentials.
+- `listPages` returned whatever survived filtering one backend page, so a
+  request for 50 could return 3 with no way to tell that from the end of the
+  list.
+
+### Fixed — security
+
+- Any caller could select any scope via `?scope=` or a POST body.
+- Browser search responses carried `routeFile` and `chunkText` to every caller.
+- The MCP endpoint's auth check was skipped entirely when no key was configured.
+- Crawl requests gained timeouts, response size caps, an accepted content type,
+  and a same-origin redirect policy.
+- External links were counted as internal, inflating pages' incoming-link
+  ranking with links pointing at other sites.
+
 ## [0.7.1] - 2026-04-11
 
 ### Fixed

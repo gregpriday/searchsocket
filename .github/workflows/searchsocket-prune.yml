@@ -9,8 +9,8 @@ on:
         description: "TTL cutoff (e.g. 30d, 12h)"
         required: false
         default: "30d"
-      dry-run:
-        description: "Dry-run only (no deletions)"
+      apply:
+        description: "Actually delete (default is plan-only)"
         required: false
         type: boolean
         default: false
@@ -19,48 +19,93 @@ concurrency:
   group: searchsocket-prune
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   prune:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      # Credentials are checked before any setup work so an unconfigured repo
+      # skips cleanly instead of burning a runner and failing every night.
+      - name: Check backend credentials
+        id: creds
+        env:
+          UPSTASH_VECTOR_REST_URL: ${{ secrets.UPSTASH_VECTOR_REST_URL }}
+          UPSTASH_VECTOR_REST_TOKEN: ${{ secrets.UPSTASH_VECTOR_REST_TOKEN }}
+        run: |
+          if [ -n "$UPSTASH_VECTOR_REST_URL" ] && [ -n "$UPSTASH_VECTOR_REST_TOKEN" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::UPSTASH_VECTOR_REST_URL / UPSTASH_VECTOR_REST_TOKEN are not set — skipping prune."
+            {
+              echo "## SearchSocket Prune — skipped"
+              echo ""
+              echo "Upstash Vector credentials are not configured for this repository."
+              echo "Add \`UPSTASH_VECTOR_REST_URL\` and \`UPSTASH_VECTOR_REST_TOKEN\` as repository secrets to enable this job."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.creds.outputs.configured == 'true'
         with:
           fetch-depth: 0 # Required: prune uses git branch -r to detect active scopes
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
+        if: steps.creds.outputs.configured == 'true'
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
+        if: steps.creds.outputs.configured == 'true'
         with:
-          node-version: 20
+          node-version: '24'
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
+        if: steps.creds.outputs.configured == 'true'
 
-      # Dry-run first to capture what will be pruned
+      - run: pnpm run build
+        if: steps.creds.outputs.configured == 'true'
+
+      # Dry-run first to capture what will be pruned.
+      # Invoked via `node dist/cli.js` rather than `pnpm searchsocket`: this repo
+      # *is* the package, so its own bin is never linked into node_modules/.bin.
       - name: Preview stale scopes
         id: preview
-        run: |
-          OLDER_THAN="${{ inputs.older-than || '30d' }}"
-          echo "## SearchSocket Prune Preview" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Cutoff:** \`--older-than ${OLDER_THAN}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          pnpm searchsocket prune --older-than "$OLDER_THAN" 2>&1 | tee /tmp/prune-preview.txt
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat /tmp/prune-preview.txt >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+        if: steps.creds.outputs.configured == 'true'
         env:
+          OLDER_THAN: ${{ inputs.older-than || '30d' }}
           UPSTASH_VECTOR_REST_URL: ${{ secrets.UPSTASH_VECTOR_REST_URL }}
           UPSTASH_VECTOR_REST_TOKEN: ${{ secrets.UPSTASH_VECTOR_REST_TOKEN }}
+        run: |
+          set -o pipefail
+          {
+            echo "## SearchSocket Prune Preview"
+            echo ""
+            echo "**Cutoff:** \`--older-than ${OLDER_THAN}\`"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          node dist/cli.js prune --older-than "$OLDER_THAN" --protect main,develop 2>&1 | tee /tmp/prune-preview.txt
+          {
+            echo '```'
+            cat /tmp/prune-preview.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      # Apply deletions (skipped on manual dry-run)
+      # Deletion requires an explicit manual dispatch with apply: true.
+      #
+      # The scheduled run is plan-only. `inputs.dry-run` is undefined on a
+      # schedule, so the previous `!inputs.dry-run` condition was always true
+      # and every nightly run deleted. Worse, `--older-than` measures the last
+      # time a scope's *content changed*, not the last time it was used, so a
+      # stable production scope looks stale after 30 quiet days.
       - name: Apply prune
-        if: ${{ !inputs.dry-run }}
-        run: |
-          OLDER_THAN="${{ inputs.older-than || '30d' }}"
-          pnpm searchsocket prune --older-than "$OLDER_THAN" --apply
+        if: ${{ steps.creds.outputs.configured == 'true' && github.event_name == 'workflow_dispatch' && inputs.apply }}
         env:
+          OLDER_THAN: ${{ inputs.older-than || '30d' }}
           UPSTASH_VECTOR_REST_URL: ${{ secrets.UPSTASH_VECTOR_REST_URL }}
           UPSTASH_VECTOR_REST_TOKEN: ${{ secrets.UPSTASH_VECTOR_REST_TOKEN }}
+        run: |
+          set -o pipefail
+          node dist/cli.js prune --older-than "$OLDER_THAN" --protect main,develop --apply

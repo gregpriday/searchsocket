@@ -71,6 +71,12 @@ vi.mock("../src/config/load", () => {
 });
 
 import { runMcpServer, createServer, resolveApiKey, verifyApiKey } from "../src/mcp/server";
+import { SearchSocketError } from "../src/errors";
+
+/** The typed 404 SearchEngine.getPage throws for a page that is not indexed. */
+function notFoundError(): SearchSocketError {
+  return new SearchSocketError("INVALID_REQUEST", "Indexed page not found for /x", 404);
+}
 
 describe("runMcpServer", () => {
   const originalLog = console.log;
@@ -346,7 +352,7 @@ describe("get_page tool", () => {
       search: vi.fn().mockResolvedValue({
         results: [{ url: "/docs/authentication" }, { url: "/docs/api" }]
       }),
-      getPage: vi.fn().mockRejectedValue(new Error("Not found"))
+      getPage: vi.fn().mockRejectedValue(notFoundError())
     };
 
     const handler = getHandler(mockEngine);
@@ -371,7 +377,7 @@ describe("get_page tool", () => {
   it("returns fallback message when page not found and no suggestions", async () => {
     const mockEngine = {
       search: vi.fn().mockResolvedValue({ results: [] }),
-      getPage: vi.fn().mockRejectedValue(new Error("Not found"))
+      getPage: vi.fn().mockRejectedValue(notFoundError())
     };
 
     const handler = getHandler(mockEngine);
@@ -384,7 +390,7 @@ describe("get_page tool", () => {
   it("passes scope to fallback search when page not found", async () => {
     const mockEngine = {
       search: vi.fn().mockResolvedValue({ results: [{ url: "/docs/auth" }] }),
-      getPage: vi.fn().mockRejectedValue(new Error("Not found"))
+      getPage: vi.fn().mockRejectedValue(notFoundError())
     };
 
     const handler = getHandler(mockEngine);

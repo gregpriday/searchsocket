@@ -2,6 +2,7 @@ import type { Chunk, IndexedPage, ResolvedSearchSocketConfig, Scope } from "../t
 import { sha1, sha256 } from "../utils/hash";
 import { humanizeUrlPath } from "../utils/path";
 import { extractFirstParagraph, normalizeText, toSnippet } from "../utils/text";
+import { chunkIdentityBase, chunkLogicalKey } from "../vector/ids";
 
 interface Section {
   sectionTitle?: string;
@@ -297,6 +298,11 @@ export function buildSummaryChunkText(page: IndexedPage): string {
   return parts.join("\n\n");
 }
 
+/** Marker mixed into a chunk's hash so provenance changes invalidate it. */
+function provenanceTag(page: { custom?: boolean }): string {
+  return page.custom ? "|custom" : "|site";
+}
+
 export function buildEmbeddingTitle(chunk: Chunk): string | undefined {
   if (!chunk.sectionTitle || chunk.headingLevel === undefined) return undefined;
 
@@ -332,7 +338,15 @@ export function chunkPage(
 
   if (config.chunking.pageSummaryChunk) {
     const summaryText = buildSummaryChunkText(page);
-    const summaryChunkKey = sha1(`${scope.scopeName}|${page.url}|__summary__`);
+    // Scope is no longer part of the logical key: isolation now lives in the
+    // physical record ID (see src/vector/ids.ts), so the same page in two
+    // scopes produces the same logical key and different records.
+    const summaryChunkKey = chunkLogicalKey({
+      url: page.url,
+      headingPath: ["__summary__"],
+      text: "__summary__",
+      collisionOrdinal: 0
+    });
 
     const summaryChunk: Chunk = {
       chunkKey: summaryChunkKey,
@@ -353,23 +367,53 @@ export function chunkPage(
       keywords: page.keywords,
       publishedAt: page.publishedAt,
       incomingAnchorText: page.incomingAnchorText,
+      custom: page.custom,
       meta: page.meta
     };
 
     const embeddingText = buildEmbeddingText(summaryChunk, config.chunking.prependTitle);
     const metaSuffix = page.meta ? JSON.stringify(page.meta, Object.keys(page.meta).sort()) : "";
-    summaryChunk.contentHash = sha256(normalizeText(embeddingText) + metaSuffix);
+    // Provenance is stored on the record and decides whether a site-only run
+    // may delete it, so a page changing between custom-supplied and site-owned
+    // must re-upsert its chunks even when the text is identical. Otherwise the
+    // stored flag stays stale: site→custom chunks stay deletable, and
+    // custom→site chunks stay protected after the page itself is gone.
+    summaryChunk.contentHash = sha256(
+      normalizeText(embeddingText) + metaSuffix + provenanceTag(page)
+    );
     chunks.push(summaryChunk);
   }
 
   const ordinalOffset = config.chunking.pageSummaryChunk ? 1 : 0;
 
+  // Counts identical (heading path, text) pairs within one page so a repeated
+  // section still gets distinct keys.
+  const collisionCounts = new Map<string, number>();
+
   for (let index = 0; index < rawChunks.length; index++) {
     const entry = rawChunks[index]!;
-    const sectionTitleNormalized = normalizeText(entry.sectionTitle ?? "").toLowerCase();
-    const chunkKey = sha1(
-      `${scope.scopeName}|${page.url}|${index}|${sectionTitleNormalized}`
-    );
+    // The logical key deliberately excludes the ordinal. Keying on position
+    // meant inserting a paragraph near the top of a page changed the key of
+    // every chunk below it, so a one-line edit re-embedded the whole page and
+    // deleted and recreated all of its records.
+    // Derived from the exact identity the key hashes, so two chunks that
+    // normalise to the same key are always counted as colliding — a
+    // case-sensitive grouping key would give both ordinal 0.
+    const identity = chunkIdentityBase({
+      url: page.url,
+      headingPath: entry.headingPath,
+      text: entry.chunkText,
+      collisionOrdinal: 0
+    });
+    const collisionOrdinal = collisionCounts.get(identity) ?? 0;
+    collisionCounts.set(identity, collisionOrdinal + 1);
+
+    const chunkKey = chunkLogicalKey({
+      url: page.url,
+      headingPath: entry.headingPath,
+      text: entry.chunkText,
+      collisionOrdinal
+    });
 
     const chunk: Chunk = {
       chunkKey,
@@ -391,16 +435,15 @@ export function chunkPage(
       keywords: page.keywords,
       publishedAt: page.publishedAt,
       incomingAnchorText: page.incomingAnchorText,
+      custom: page.custom,
       meta: page.meta
     };
 
     const embeddingText = buildEmbeddingText(chunk, config.chunking.prependTitle);
-    const embeddingTitle = config.chunking.weightHeadings ? buildEmbeddingTitle(chunk) : undefined;
     const chunkMetaSuffix = page.meta ? JSON.stringify(page.meta, Object.keys(page.meta).sort()) : "";
-    const hashInput = embeddingTitle
-      ? `${normalizeText(embeddingText)}|title:${embeddingTitle}`
-      : normalizeText(embeddingText);
-    chunk.contentHash = sha256(hashInput + chunkMetaSuffix);
+    chunk.contentHash = sha256(
+      normalizeText(embeddingText) + chunkMetaSuffix + provenanceTag(page)
+    );
     chunks.push(chunk);
   }
 

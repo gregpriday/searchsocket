@@ -19,7 +19,7 @@ jobs:
           version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
@@ -48,7 +48,7 @@ jobs:
           version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
@@ -100,11 +100,15 @@ jobs:
           version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm searchsocket prune --older-than 30d --apply
+      # Plan only. `--older-than` measures when a scope's content last changed,
+      # not when it was last used, so a stable production scope looks stale
+      # after 30 quiet days. Review the plan before applying, and always
+      # protect the branches you cannot afford to lose.
+      - run: pnpm searchsocket prune --older-than 30d --protect main,develop
         env:
           UPSTASH_VECTOR_REST_URL: ${{ secrets.UPSTASH_VECTOR_REST_URL }}
           UPSTASH_VECTOR_REST_TOKEN: ${{ secrets.UPSTASH_VECTOR_REST_TOKEN }}

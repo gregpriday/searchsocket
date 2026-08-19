@@ -68,7 +68,6 @@ export interface SearchSocketConfig {
     dontSplitInside?: Array<"code" | "table" | "blockquote">;
     prependTitle?: boolean;
     pageSummaryChunk?: boolean;
-    weightHeadings?: boolean;
   };
   upstash?: {
     url?: string;
@@ -79,16 +78,22 @@ export interface SearchSocketConfig {
       pages?: string;
       chunks?: string;
     };
+    /** Records per write/delete/fetch request. Default 90, max 500. */
+    batchSize?: number;
+    /** Retries for transient failures (rate limit, timeout, 5xx). Default 2. */
+    maxRetries?: number;
   };
   embedding?: {
     model?: string;
     dimensions?: number;
     taskType?: string;
-    batchSize?: number;
   };
-  search?: {
-    dualSearch?: boolean;
-    pageSearchWeight?: number;
+  indexing?: {
+    /**
+     * Refuse deletions removing more than this fraction of existing pages
+     * unless explicitly accepted. Default 0.5.
+     */
+    maxDeletionRatio?: number;
   };
   ranking?: {
     enableIncomingLinkBoost?: boolean;
@@ -97,15 +102,11 @@ export interface SearchSocketConfig {
     freshnessDecayRate?: number;
     enableAnchorTextBoost?: boolean;
     pageWeights?: Record<string, number>;
-    aggregationCap?: number;
-    aggregationDecay?: number;
-    minChunkScoreRatio?: number;
     minScoreRatio?: number;
     scoreGapThreshold?: number;
     weights?: {
       incomingLinks?: number;
       depth?: number;
-      aggregation?: number;
       titleMatch?: number;
       freshness?: number;
       anchorText?: number;
@@ -116,6 +117,16 @@ export interface SearchSocketConfig {
     cors?: {
       allowOrigins?: string[];
     };
+    /**
+     * Scopes a browser request may select with `?scope=`. Empty (the default)
+     * means the caller always gets the server's configured scope.
+     */
+    allowedScopes?: string[];
+    /**
+     * Include source file paths and matched sections' indexed text in browser responses.
+     * Off by default.
+     */
+    exposeInternalFields?: boolean;
     rateLimit?: {
       windowMs?: number;
       max?: number;
@@ -134,6 +145,8 @@ export interface SearchSocketConfig {
     handle?: {
       path?: string;
       apiKey?: string;
+      /** Env var holding the key, so it need not be committed. */
+      apiKeyEnv?: string;
       enableJsonResponse?: boolean;
     };
   };
@@ -210,7 +223,6 @@ export interface ResolvedSearchSocketConfig {
     dontSplitInside: Array<"code" | "table" | "blockquote">;
     prependTitle: boolean;
     pageSummaryChunk: boolean;
-    weightHeadings: boolean;
   };
   upstash: {
     url?: string;
@@ -221,16 +233,16 @@ export interface ResolvedSearchSocketConfig {
       pages: string;
       chunks: string;
     };
+    batchSize: number;
+    maxRetries: number;
   };
   embedding: {
     model: string;
     dimensions: number;
     taskType: string;
-    batchSize: number;
   };
-  search: {
-    dualSearch: boolean;
-    pageSearchWeight: number;
+  indexing: {
+    maxDeletionRatio: number;
   };
   ranking: {
     enableIncomingLinkBoost: boolean;
@@ -239,15 +251,11 @@ export interface ResolvedSearchSocketConfig {
     freshnessDecayRate: number;
     enableAnchorTextBoost: boolean;
     pageWeights: Record<string, number>;
-    aggregationCap: number;
-    aggregationDecay: number;
-    minChunkScoreRatio: number;
     minScoreRatio: number;
     scoreGapThreshold: number;
     weights: {
       incomingLinks: number;
       depth: number;
-      aggregation: number;
       titleMatch: number;
       freshness: number;
       anchorText: number;
@@ -258,6 +266,10 @@ export interface ResolvedSearchSocketConfig {
     cors: {
       allowOrigins: string[];
     };
+    /** Scopes a browser request may select. Empty means none. */
+    allowedScopes: string[];
+    /** Expose routeFile and chunkText to browser callers. */
+    exposeInternalFields: boolean;
     rateLimit?: {
       windowMs: number;
       max: number;
@@ -276,6 +288,7 @@ export interface ResolvedSearchSocketConfig {
     handle: {
       path: string;
       apiKey?: string;
+      apiKeyEnv?: string;
       enableJsonResponse: boolean;
     };
   };
@@ -326,6 +339,8 @@ export interface ExtractedPage {
   keywords?: string[];
   weight?: number;
   publishedAt?: number;
+  /** True when this page came from a caller-supplied CustomRecord. */
+  custom?: boolean;
   meta?: Record<string, string | number | boolean | string[]>;
 }
 
@@ -346,6 +361,10 @@ export interface IndexedPage {
   keywords?: string[];
   publishedAt?: number;
   incomingAnchorText?: string;
+  /** Per-page weight from `searchsocket-weight` / frontmatter, if set. */
+  weight?: number;
+  /** True when this page came from a caller-supplied CustomRecord. */
+  custom?: boolean;
   meta?: Record<string, string | number | boolean | string[]>;
 }
 
@@ -370,6 +389,8 @@ export interface Chunk {
   publishedAt?: number;
   incomingAnchorText?: string;
   meta?: Record<string, string | number | boolean | string[]>;
+  /** True when this chunk belongs to a caller-supplied CustomRecord. */
+  custom?: boolean;
 }
 
 export interface VectorHit {
@@ -420,6 +441,10 @@ export interface PageRecord {
   keywords?: string[];
   contentHash?: string;
   publishedAt?: number;
+  incomingAnchorText?: string;
+  weight?: number;
+  /** True when this page came from a caller-supplied CustomRecord. */
+  custom?: boolean;
   meta?: Record<string, string | number | boolean | string[]>;
 }
 
@@ -434,6 +459,18 @@ export interface PageHit {
   incomingLinks: number;
   routeFile: string;
   publishedAt?: number;
+  /**
+   * Anchor text of links pointing at this page. Without it the documented
+   * `ranking.enableAnchorTextBoost` had nothing to match against in the
+   * page-first path and was silently inert.
+   */
+  incomingAnchorText?: string;
+  /**
+   * Per-page weight from `searchsocket-weight` / frontmatter. Extraction read
+   * it but only ever used it to drop zero-weight pages, so a page asking to be
+   * ranked higher was ignored.
+   */
+  weight?: number;
 }
 
 export interface ScopeInfo {
@@ -447,20 +484,13 @@ export interface RankingOverrides {
   ranking?: {
     enableIncomingLinkBoost?: boolean;
     enableDepthBoost?: boolean;
-    aggregationCap?: number;
-    aggregationDecay?: number;
-    minChunkScoreRatio?: number;
     minScoreRatio?: number;
     scoreGapThreshold?: number;
     weights?: {
       incomingLinks?: number;
       depth?: number;
-      aggregation?: number;
       titleMatch?: number;
     };
-  };
-  search?: {
-    pageSearchWeight?: number;
   };
 }
 
@@ -478,6 +508,8 @@ export interface SearchRequest {
 }
 
 export interface ScoreBreakdown {
+  /** Effective per-page weight multiplier applied to the score. */
+  pageWeight?: number;
   baseScore: number;
   incomingLinkBoost: number;
   depthBoost: number;
@@ -499,9 +531,21 @@ export interface SearchResult {
   title: string;
   sectionTitle?: string;
   snippet: string;
+  /**
+   * The matched section's indexed text. This is the text that was embedded,
+   * capped at the storage metadata limit — not necessarily the section's full
+   * source. Present only when the deployment sets `api.exposeInternalFields`,
+   * or on a privileged surface such as MCP.
+   */
   chunkText?: string;
   score: number;
-  routeFile: string;
+  /**
+   * Path to the source file in the author's repository. Present only when the
+   * deployment sets `api.exposeInternalFields`, or on a privileged surface such
+   * as MCP — a public search response omits it, so this is optional and code
+   * reading it must handle its absence.
+   */
+  routeFile?: string;
   chunks?: SearchResultChunk[];
   breakdown?: ScoreBreakdown;
 }
@@ -518,6 +562,20 @@ export interface SearchResponse {
   };
 }
 
+/**
+ * Why an indexing run could not claim a complete view of the source.
+ * Any warning present makes the run deletion-ineligible.
+ */
+export interface RunWarning {
+  kind:
+    | "source-limited"
+    | "source-failure"
+    | "chunks-limited"
+    | "extraction-failure"
+    | "hook-failure";
+  detail: string;
+}
+
 export interface IndexStats {
   pagesProcessed: number;
   pagesChanged: number;
@@ -529,6 +587,18 @@ export interface IndexStats {
   routeExact: number;
   routeBestEffort: number;
   stageTimingsMs: Record<string, number>;
+  /**
+   * Whether this run observed the complete source of truth and was therefore
+   * allowed to delete records missing from it. False means stale records were
+   * intentionally left in place.
+   */
+  deletionEligible: boolean;
+  /** Every reason the run's view of the source may be partial. */
+  warnings: RunWarning[];
+  /**
+   * Destructive operations performed or refused, for machine-readable output.
+   */
+  dangerousOperations: string[];
 }
 
 export interface IndexingHooks {
@@ -557,6 +627,17 @@ export interface IndexOptions {
   maxChunks?: number;
   verbose?: boolean;
   customRecords?: CustomRecord[];
+  /**
+   * Permit deletion when a complete run legitimately produced zero pages.
+   * Without this an unexpectedly empty source deletes nothing, because the far
+   * more common cause is a broken source config rather than an emptied site.
+   */
+  allowEmpty?: boolean;
+  /**
+   * Permit a deletion that would remove more than
+   * `indexing.maxDeletionRatio` of the existing pages.
+   */
+  acceptLargeDeletion?: boolean;
 }
 
 export interface SearchRuntimeOptions {

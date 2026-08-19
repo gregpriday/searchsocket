@@ -70,6 +70,21 @@ describe("extractFromHtml - extended", () => {
     expect(extracted).toBeNull();
   });
 
+
+  it("treats an absolute link to the configured base URL as internal", () => {
+    const withBase = { ...config, project: { ...config.project, baseUrl: "https://example.com" } };
+    const html = `
+      <html><head><title>Links</title></head><body><main>
+        <p>Content</p>
+        <a href="https://example.com/docs/c">Same site</a>
+        <a href="https://other.example/docs/c">Different site</a>
+      </main></body></html>
+    `;
+
+    const urls = extractFromHtml("/test", html, withBase)?.outgoingLinks.map((l) => l.url) ?? [];
+    expect(urls).toEqual(["/docs/c"]);
+  });
+
   it("normalizes outgoing links", () => {
     const html = `
       <html>
@@ -93,7 +108,11 @@ describe("extractFromHtml - extended", () => {
     const urls = extracted?.outgoingLinks.map(l => l.url) ?? [];
     expect(urls).toContain("/docs/a");
     expect(urls).toContain("/docs/b");
-    expect(urls).toContain("/docs/c");
+    // An absolute link to a different origin is NOT an internal link. Keeping
+    // only its pathname made `https://example.com/docs/c` count as a link to
+    // the local `/docs/c`, inflating that page's incoming-link ranking with
+    // links that point somewhere else entirely.
+    expect(urls).not.toContain("/docs/c");
     expect(urls).toContain("/docs/d");
     expect(urls).toContain("/guides/e");
     expect(urls).not.toContain("/docs/d?ref=nav#install");

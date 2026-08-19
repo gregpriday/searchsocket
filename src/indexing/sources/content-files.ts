@@ -3,6 +3,7 @@ import path from "node:path";
 import fg from "fast-glob";
 import type { PageSourceRecord, ResolvedSearchSocketConfig } from "../../types";
 import { normalizeUrlPath } from "../../utils/path";
+import { applyMaxPages, sourceResult, type SourceFailure, type SourceLoadResult } from "./result";
 
 function filePathToUrl(filePath: string, baseDir: string): string {
   const relative = path.relative(baseDir, filePath).replace(/\\/g, "/");
@@ -248,7 +249,7 @@ export async function loadContentFilesPages(
   cwd: string,
   config: ResolvedSearchSocketConfig,
   maxPages?: number
-): Promise<PageSourceRecord[]> {
+): Promise<SourceLoadResult> {
   const contentConfig = config.source.contentFiles;
   if (!contentConfig) {
     throw new Error("content-files config is missing");
@@ -261,12 +262,23 @@ export async function loadContentFilesPages(
     onlyFiles: true
   });
 
-  const limit = typeof maxPages === "number" ? Math.max(0, Math.floor(maxPages)) : undefined;
-  const selected = typeof limit === "number" ? files.slice(0, limit) : files;
+  // Deterministic order before limiting — see static-output for why.
+  files.sort();
+  const { selected, limitedBy } = applyMaxPages(files, maxPages);
   const pages: PageSourceRecord[] = [];
+  const failures: SourceFailure[] = [];
 
   for (const filePath of selected) {
-    const raw = await fs.readFile(filePath, "utf8");
+    let raw: string;
+    try {
+      raw = await fs.readFile(filePath, "utf8");
+    } catch (error) {
+      failures.push({
+        target: path.relative(cwd, filePath).replace(/\\/g, "/"),
+        reason: error instanceof Error ? error.message : String(error)
+      });
+      continue;
+    }
     let markdown: string;
     let tags: string[] | undefined;
 
@@ -296,5 +308,10 @@ export async function loadContentFilesPages(
     });
   }
 
-  return pages;
+  return sourceResult({
+    records: pages,
+    discoveredCount: files.length,
+    failures,
+    limitedBy
+  });
 }

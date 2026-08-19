@@ -77,7 +77,6 @@ export const searchSocketConfigSchema = z.object({
       dontSplitInside: z.array(z.enum(["code", "table", "blockquote"])).optional(),
       prependTitle: z.boolean().optional(),
       pageSummaryChunk: z.boolean().optional(),
-      weightHeadings: z.boolean().optional()
     })
     .optional(),
   upstash: z
@@ -91,21 +90,29 @@ export const searchSocketConfigSchema = z.object({
           pages: z.string().min(1).optional(),
           chunks: z.string().min(1).optional()
         })
-        .optional()
+        .optional(),
+      /** Records per write/delete/fetch request. Default 90, max 500. */
+      batchSize: z.number().int().positive().max(500).optional(),
+      /** Retries for transient failures (rate limit, timeout, 5xx). Default 2. */
+      maxRetries: z.number().int().min(0).max(10).optional()
     })
     .optional(),
   embedding: z
     .object({
       model: z.string().optional(),
       dimensions: z.number().int().positive().optional(),
-      taskType: z.string().optional(),
-      batchSize: z.number().int().positive().optional()
+      taskType: z.string().optional()
     })
     .optional(),
-  search: z
+  indexing: z
     .object({
-      dualSearch: z.boolean().optional(),
-      pageSearchWeight: z.number().min(0).max(1).optional()
+      /**
+       * Refuse to delete when a run would remove more than this fraction of
+       * the existing pages, unless --accept-large-deletion is passed.
+       * A sudden mass deletion is far more often a broken source config than
+       * a genuinely emptied site.
+       */
+      maxDeletionRatio: z.number().min(0).max(1).optional()
     })
     .optional(),
   ranking: z
@@ -116,16 +123,12 @@ export const searchSocketConfigSchema = z.object({
       freshnessDecayRate: z.number().positive().optional(),
       enableAnchorTextBoost: z.boolean().optional(),
       pageWeights: z.record(z.string(), z.number().min(0)).optional(),
-      aggregationCap: z.number().int().positive().optional(),
-      aggregationDecay: z.number().min(0).max(1).optional(),
-      minChunkScoreRatio: z.number().min(0).max(1).optional(),
       minScoreRatio: z.number().min(0).max(1).optional(),
       scoreGapThreshold: z.number().min(0).max(1).optional(),
       weights: z
         .object({
           incomingLinks: z.number().optional(),
           depth: z.number().optional(),
-          aggregation: z.number().optional(),
           titleMatch: z.number().optional(),
           freshness: z.number().optional(),
           anchorText: z.number().optional()
@@ -141,6 +144,18 @@ export const searchSocketConfigSchema = z.object({
           allowOrigins: z.array(z.string()).optional()
         })
         .optional(),
+      /**
+       * Scopes a browser request may select with `?scope=`. Empty (the default)
+       * means the caller cannot choose at all and always gets the server's
+       * configured scope.
+       */
+      allowedScopes: z.array(z.string()).optional(),
+      /**
+       * Include internal fields — source file paths and matched sections' indexed text — in
+       * browser search responses. Off by default: these are useful to an editing
+       * agent and are not something a public search box should disclose.
+       */
+      exposeInternalFields: z.boolean().optional(),
       rateLimit: z
         .object({
           windowMs: z.number().int().positive().optional(),
@@ -166,6 +181,8 @@ export const searchSocketConfigSchema = z.object({
         .object({
           path: z.string().optional(),
           apiKey: z.string().min(1).optional(),
+          /** Env var holding the key, so it need not be committed. */
+          apiKeyEnv: z.string().min(1).optional(),
           enableJsonResponse: z.boolean().optional()
         })
         .optional()

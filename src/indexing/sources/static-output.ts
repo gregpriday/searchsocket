@@ -3,25 +3,41 @@ import path from "node:path";
 import fg from "fast-glob";
 import type { PageSourceRecord, ResolvedSearchSocketConfig } from "../../types";
 import { staticHtmlFileToUrl } from "../../utils/path";
+import { applyMaxPages, sourceResult, type SourceFailure, type SourceLoadResult } from "./result";
 
 export async function loadStaticOutputPages(
   cwd: string,
   config: ResolvedSearchSocketConfig,
   maxPages?: number
-): Promise<PageSourceRecord[]> {
+): Promise<SourceLoadResult> {
   const outputDir = path.resolve(cwd, config.source.staticOutputDir);
   const htmlFiles = await fg(["**/*.html"], {
     cwd: outputDir,
     absolute: true
   });
 
-  const limit = typeof maxPages === "number" ? Math.max(0, Math.floor(maxPages)) : undefined;
-  const selected = typeof limit === "number" ? htmlFiles.slice(0, limit) : htmlFiles;
+  // Sort before limiting: fast-glob makes no ordering guarantee, and an
+  // unstable slice means repeated --max-pages runs index different subsets.
+  htmlFiles.sort();
+
+  const { selected, limitedBy } = applyMaxPages(htmlFiles, maxPages);
 
   const pages: PageSourceRecord[] = [];
+  const failures: SourceFailure[] = [];
 
   for (const filePath of selected) {
-    const html = await fs.readFile(filePath, "utf8");
+    let html: string;
+    try {
+      html = await fs.readFile(filePath, "utf8");
+    } catch (error) {
+      // An unreadable file is a failure, not an absence. Recording it keeps
+      // the run non-authoritative so its records are not treated as deleted.
+      failures.push({
+        target: path.relative(cwd, filePath).replace(/\\/g, "/"),
+        reason: error instanceof Error ? error.message : String(error)
+      });
+      continue;
+    }
     pages.push({
       url: staticHtmlFileToUrl(filePath, outputDir),
       html,
@@ -30,5 +46,10 @@ export async function loadStaticOutputPages(
     });
   }
 
-  return pages;
+  return sourceResult({
+    records: pages,
+    discoveredCount: htmlFiles.length,
+    failures,
+    limitedBy
+  });
 }

@@ -80,7 +80,7 @@ SearchSocket automatically detects serverless environments (Vercel, Netlify, Clo
 
 1. **Check your `.mcp.json`** is in the project root and has valid JSON.
 2. **Restart Claude Code** after adding or changing `.mcp.json`.
-3. **Verify with `claude mcp list`** — you should see `searchsocket` with six tools.
+3. **Verify with `claude mcp list`** — you should see `searchsocket` with three tools.
 4. **For HTTP transport**, make sure your server is running (dev server or deployed site).
 5. **For stdio transport**, make sure `npx searchsocket mcp` works in your terminal.
 

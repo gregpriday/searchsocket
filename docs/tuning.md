@@ -47,7 +47,6 @@ The playground has two parts: a **search interface** and a **ranking tuner**.
 |-----------|---------|-------------|
 | `minScoreRatio` | 0.70 | Drop results below this ratio of the best score |
 | `scoreGapThreshold` | 0.40 | Trim results more than this gap below the best |
-| `minChunkScoreRatio` | 0.50 | Minimum chunk score relative to best chunk |
 
 #### Boost toggles
 
@@ -62,21 +61,10 @@ The playground has two parts: a **search interface** and a **ranking tuner**.
 |-----------|---------|-------------|
 | `incomingLinks` | 0.05 | Weight for incoming link count boost |
 | `depth` | 0.03 | Weight for URL depth boost |
-| `aggregation` | 0.10 | Weight for multi-chunk aggregation bonus |
 | `titleMatch` | 0.15 | Weight for query-in-title boost |
 
-#### Aggregation
-
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `aggregationCap` | 5 | Max chunks contributing to a page's score |
-| `aggregationDecay` | 0.50 | Decay factor for each additional matching chunk |
-
-#### Search
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `pageSearchWeight` | 0.30 | Blend weight for page-level results vs chunks (0–1) |
 
 ### Score breakdowns
 
@@ -102,9 +90,6 @@ ranking: {
     titleMatch: 0.20,
   },
 },
-search: {
-  pageSearchWeight: 0.35,
-},
 ```
 
 Paste this into your `searchsocket.config.ts`:
@@ -119,9 +104,6 @@ export default {
       incomingLinks: 0.06,
       titleMatch: 0.20
     }
-  },
-  search: {
-    pageSearchWeight: 0.35
   }
 };
 ```

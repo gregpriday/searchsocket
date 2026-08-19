@@ -18,7 +18,7 @@ function createMockStore(overrides: Partial<Record<keyof UpstashSearchStore, unk
     listScopes: vi.fn().mockResolvedValue([]),
     getContentHashes: vi.fn().mockResolvedValue(new Map()),
     fetchContentHashesForKeys: vi.fn().mockResolvedValue(new Map()),
-    scanChunkIds: vi.fn().mockResolvedValue(new Set()),
+    scanChunkIds: vi.fn().mockResolvedValue(new Map()),
     upsertPages: vi.fn().mockResolvedValue(undefined),
     getPage: vi.fn().mockResolvedValue(null),
     deletePages: vi.fn().mockResolvedValue(undefined),

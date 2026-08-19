@@ -6,12 +6,13 @@ import { SearchSocketError } from "../errors";
 import { createUpstashStore } from "../vector";
 import { UpstashSearchStore } from "../vector/upstash";
 import { buildEmbeddingText, chunkPage } from "./chunker";
-import { extractFromHtml, extractFromMarkdown } from "./extractor";
+import { extractFromHtmlResult, extractFromMarkdownResult } from "./extractor";
 import { buildRoutePatterns, mapUrlToRoute } from "./route-mapper";
 import { loadBuildPages } from "./sources/build";
 import { loadContentFilesPages } from "./sources/content-files";
 import { loadCrawledPages } from "./sources/crawl";
 import { loadStaticOutputPages } from "./sources/static-output";
+import type { SourceLoadResult } from "./sources/result";
 import { detectBuildOutput } from "./sources/build/detect-output";
 import { loadRobotsTxtFromDir, fetchRobotsTxt, isBlockedByRobots } from "./robots";
 import { findPageWeight } from "../search/ranking";
@@ -30,11 +31,13 @@ import type {
   IndexingHooks,
   IndexOptions,
   IndexStats,
+  RunWarning,
   PageRecord,
   ResolvedSearchSocketConfig,
   RouteMatch,
   Scope
 } from "../types";
+import { toStoredMeta } from "../utils/structured-meta";
 
 /**
  * Build a plain-text summary of a page for the page search index.
@@ -84,6 +87,15 @@ export function buildPageContentHash(page: IndexedPage): string {
     String(page.outgoingLinks),
     String(page.publishedAt ?? ""),
     page.incomingAnchorText ?? "",
+    // Provenance is persisted, so a page that changes from custom-supplied to
+    // site-owned (or back) must be re-upserted even if its text is identical —
+    // otherwise the stored flag stays stale and protects the wrong records.
+    page.custom ? "custom" : "site",
+    // Weight affects ranking and is persisted in page metadata, so it must
+    // change the hash. Without it, editing searchsocket-weight="1" to "2"
+    // left the hash identical, the upsert was skipped, and search kept
+    // ranking with the old weight until the next forced rebuild.
+    String(page.weight ?? ""),
     (page.outgoingLinkUrls ?? []).slice().sort().join(","),
     page.meta ? JSON.stringify(page.meta, Object.keys(page.meta).sort()) : ""
   ];
@@ -152,7 +164,7 @@ export class IndexPipeline {
       stageTimingsMs[name] = Math.round(hrTimeMs(start));
     };
 
-    const scope = resolveScope(this.config, options.scopeOverride);
+    const scope = resolveScope(this.config, options.scopeOverride, this.cwd);
     ensureStateDirs(this.cwd, this.config.state.dir, scope);
 
     const sourceMode = options.sourceOverride ?? this.config.source.mode;
@@ -167,25 +179,62 @@ export class IndexPipeline {
     }
 
     const manifestStart = stageStart();
-    const existingPageHashes = options.force ? new Map<string, string>() : await this.store.getPageHashes(scope);
+    // Always fetch existing hashes, even under --force. Force means "re-upsert
+    // everything regardless of hash", not "forget what is already indexed" —
+    // without this the stale set is empty and orphaned pages survive forever.
+    const existingPageHashes = await this.store.getPageHashes(scope);
     stageEnd("manifest", manifestStart);
     this.logger.debug(`Manifest: ${existingPageHashes.size} existing page hashes loaded`);
 
     const sourceStart = stageStart();
     this.logger.info(`Loading pages (source: ${sourceMode})...`);
-    let sourcePages;
+    let sourceLoad: SourceLoadResult;
 
     if (sourceMode === "static-output") {
-      sourcePages = await loadStaticOutputPages(this.cwd, this.config, options.maxPages);
+      sourceLoad = await loadStaticOutputPages(this.cwd, this.config, options.maxPages);
     } else if (sourceMode === "crawl") {
-      sourcePages = await loadCrawledPages(this.config, options.maxPages);
+      sourceLoad = await loadCrawledPages(this.config, options.maxPages);
     } else if (sourceMode === "build") {
-      sourcePages = await loadBuildPages(this.cwd, this.config, options.maxPages);
+      sourceLoad = await loadBuildPages(this.cwd, this.config, options.maxPages);
     } else {
-      sourcePages = await loadContentFilesPages(this.cwd, this.config, options.maxPages);
+      sourceLoad = await loadContentFilesPages(this.cwd, this.config, options.maxPages);
     }
+    const sourcePages = sourceLoad.records;
     stageEnd("source", sourceStart);
     this.logger.info(`Loaded ${sourcePages.length} page${sourcePages.length === 1 ? "" : "s"} (${stageTimingsMs["source"]}ms)`);
+
+    // --- Run completeness ---
+    // Stale-record deletion diffs the current run against the remote index.
+    // That is only sound when this run observed the complete source of truth;
+    // otherwise every page the run failed to see looks "removed" and gets
+    // deleted. Track every reason the view might be partial.
+    const runWarnings: RunWarning[] = [];
+    if (!sourceLoad.complete && !sourceLoad.limitedBy && sourceLoad.failures.length === 0) {
+      // A loader reported an incomplete view without naming a specific cause.
+      // Trust the flag: it is the loader's primary contract.
+      runWarnings.push({
+        kind: "source-failure",
+        detail: `${sourceMode} source reported an incomplete view of the site`
+      });
+    }
+    if (sourceLoad.limitedBy) {
+      runWarnings.push({
+        kind: "source-limited",
+        detail: `source truncated by ${sourceLoad.limitedBy} (${sourcePages.length} of ${sourceLoad.discoveredCount} discovered)`
+      });
+    }
+    for (const failure of sourceLoad.failures) {
+      runWarnings.push({
+        kind: "source-failure",
+        detail: `${failure.target}: ${failure.reason}`
+      });
+    }
+    if (typeof options.maxChunks === "number") {
+      runWarnings.push({
+        kind: "chunks-limited",
+        detail: `--max-chunks ${options.maxChunks} truncates the chunk set`
+      });
+    }
 
     // --- Pre-extraction filtering: robots.txt + top-level exclude ---
     const filterStart = stageStart();
@@ -259,17 +308,32 @@ export class IndexPipeline {
     const extractedPages: ExtractedPage[] = [];
 
     for (const sourcePage of filteredSourcePages) {
-      const extracted = sourcePage.html
-        ? extractFromHtml(sourcePage.url, sourcePage.html, this.config)
-        : extractFromMarkdown(sourcePage.url, sourcePage.markdown ?? "", sourcePage.title);
+      const result = sourcePage.html
+        ? extractFromHtmlResult(sourcePage.url, sourcePage.html, this.config)
+        : extractFromMarkdownResult(sourcePage.url, sourcePage.markdown ?? "", sourcePage.title);
 
-      if (!extracted) {
-        this.logger.warn(
-          `Page ${sourcePage.url} produced no extractable content and was skipped. ` +
-            "Check extract.mainSelector, extract.dropTags, and extract.dropSelectors settings."
-        );
+      if (result.status === "excluded") {
+        // An explicit noindex or zero weight is an authoritative removal
+        // signal: the author asked for this page to be absent.
+        this.logger.debug(`Excluding ${sourcePage.url} (${result.reason})`);
         continue;
       }
+
+      if (result.status === "failed") {
+        // Extraction failure is NOT a removal signal. Warn loudly and make the
+        // run deletion-ineligible so a selector regression cannot wipe records.
+        this.logger.warn(
+          `Page ${sourcePage.url} produced no extractable content and was skipped (${result.error.detail}). ` +
+            "Check extract.mainSelector, extract.dropTags, and extract.dropSelectors settings."
+        );
+        runWarnings.push({
+          kind: "extraction-failure",
+          detail: `${sourcePage.url}: ${result.error.detail}`
+        });
+        continue;
+      }
+
+      const extracted = result.page;
 
       // Merge source-level tags (e.g. "component") into extracted tags
       if (sourcePage.tags && sourcePage.tags.length > 0) {
@@ -287,11 +351,23 @@ export class IndexPipeline {
       } else {
         accepted = extracted;
       }
+
+      // Provenance belongs to the pipeline. A hook marking a site page as
+      // custom would make it, and its chunks, permanently immune to deletion
+      // by any ordinary indexing run.
+      accepted.custom = false;
+
       extractedPages.push(accepted);
       this.logger.event("page_extracted", {
         url: accepted.url
       });
     }
+
+    // Pages contributed by the configured site source, before custom records
+    // are mixed in. The empty-source guard must judge this number alone —
+    // custom records are caller-supplied and would otherwise disguise a total
+    // source failure as a healthy run.
+    const sitePageCount = extractedPages.length;
 
     // --- Inject custom records as ExtractedPage objects ---
     // Custom records bypass extractFromMarkdown() to avoid frontmatter parsing —
@@ -303,7 +379,14 @@ export class IndexPipeline {
         const normalizedUrl = normalizeUrlPath(record.url);
         const normalized = normalizeMarkdown(record.content);
         if (!normalized.trim()) {
+          // A caller-supplied record that suddenly has no content is a
+          // provider bug, not a request to remove the page. Without this the
+          // record's existing page and chunks were silently deleted.
           this.logger.warn(`Custom record ${normalizedUrl} has empty content and was skipped.`);
+          runWarnings.push({
+            kind: "extraction-failure",
+            detail: `custom record ${normalizedUrl}: empty content`
+          });
           continue;
         }
 
@@ -319,7 +402,14 @@ export class IndexPipeline {
           outgoingLinks: [],
           noindex: false,
           tags,
-          weight: record.weight
+          weight: record.weight,
+          custom: true,
+          // `CustomRecord.metadata` is documented and demonstrated, but was
+          // dropped here — so a caller could set structured metadata on a
+          // custom record and then never filter on it.
+          meta: record.metadata && Object.keys(record.metadata).length > 0
+            ? toStoredMeta(record.metadata)
+            : undefined
         };
 
         // Apply transformPage hook to custom records too
@@ -334,6 +424,12 @@ export class IndexPipeline {
         } else {
           accepted = extracted;
         }
+
+        // Provenance is the pipeline's to assert, not the hook's. A hook that
+        // returns a freshly constructed page would otherwise drop the marker,
+        // and the record would lose the protection that keeps a site-only run
+        // from deleting it.
+        accepted.custom = true;
 
         extractedPages.push(accepted);
         this.logger.event("page_extracted", { url: accepted.url, custom: true });
@@ -357,7 +453,11 @@ export class IndexPipeline {
     // Filter out zero-weight pages at index time.
     const indexablePages: ExtractedPage[] = [];
     for (const page of uniquePages) {
-      const effectiveWeight = page.weight ?? findPageWeight(page.url, this.config.ranking.pageWeights);
+      // Same precedence as ranking: a zero from either source suppresses the
+      // page, otherwise the page's own declared weight wins.
+      const configWeight = findPageWeight(page.url, this.config.ranking.pageWeights);
+      const effectiveWeight =
+        configWeight === 0 || page.weight === 0 ? 0 : page.weight ?? configWeight;
       if (effectiveWeight === 0) {
         this.logger.debug(`Excluding ${page.url} (zero weight)`);
         continue;
@@ -488,6 +588,8 @@ export class IndexPipeline {
         keywords: page.keywords,
         publishedAt: page.publishedAt,
         incomingAnchorText,
+        weight: page.weight,
+        custom: page.custom,
         meta: page.meta
       };
 
@@ -517,82 +619,34 @@ export class IndexPipeline {
         keywords: p.keywords,
         contentHash: buildPageContentHash(p),
         publishedAt: p.publishedAt,
+        incomingAnchorText: p.incomingAnchorText,
+        weight: p.weight,
+        custom: p.custom,
         meta: p.meta
       };
     });
 
     // Determine changed and stale pages
     const currentPageUrls = new Set(pageRecords.map((r) => r.url));
-    const changedPages = pageRecords.filter((r) =>
-      !existingPageHashes.has(r.url) || existingPageHashes.get(r.url) !== r.contentHash
-    );
-    const deletedPageUrls = [...existingPageHashes.keys()].filter((url) => !currentPageUrls.has(url));
-
-    if (!options.dryRun) {
-      if (options.force) {
-        await this.store.deletePages(scope);
-        this.logger.info(`Upserting ${pageRecords.length} page summaries...`);
-        const pageDocs = pageRecords.map((r) => ({
-          id: r.url,
-          data: r.summary ?? r.title,
-          metadata: {
-            title: r.title,
-            url: r.url,
-            description: r.description ?? "",
-            keywords: r.keywords ?? [],
-            summary: r.summary ?? "",
-            tags: r.tags,
-            routeFile: r.routeFile,
-            routeResolution: r.routeResolution,
-            incomingLinks: r.incomingLinks,
-            outgoingLinks: r.outgoingLinks,
-            outgoingLinkUrls: r.outgoingLinkUrls ?? [],
-            depth: r.depth,
-            indexedAt: r.indexedAt,
-            contentHash: r.contentHash ?? "",
-            publishedAt: r.publishedAt ?? null,
-            ...(r.meta && Object.keys(r.meta).length > 0 ? { meta: r.meta } : {})
-          }
-        }));
-        await this.store.upsertPages(pageDocs, scope);
-      } else {
-        if (changedPages.length > 0) {
-          this.logger.info(`Upserting ${changedPages.length} changed page summaries...`);
-          const pageDocs = changedPages.map((r) => ({
-            id: r.url,
-            data: r.summary ?? r.title,
-            metadata: {
-              title: r.title,
-              url: r.url,
-              description: r.description ?? "",
-              keywords: r.keywords ?? [],
-              summary: r.summary ?? "",
-              tags: r.tags,
-              routeFile: r.routeFile,
-              routeResolution: r.routeResolution,
-              incomingLinks: r.incomingLinks,
-              outgoingLinks: r.outgoingLinks,
-              outgoingLinkUrls: r.outgoingLinkUrls ?? [],
-              depth: r.depth,
-              indexedAt: r.indexedAt,
-              contentHash: r.contentHash ?? "",
-              publishedAt: r.publishedAt ?? null,
-              ...(r.meta && Object.keys(r.meta).length > 0 ? { meta: r.meta } : {})
-            }
-          }));
-          await this.store.upsertPages(pageDocs, scope);
-        }
-        if (deletedPageUrls.length > 0) {
-          await this.store.deletePagesByIds(deletedPageUrls, scope);
-        }
-      }
-    }
-
-    const pagesChanged = options.force ? pageRecords.length : changedPages.length;
-    const pagesDeleted = deletedPageUrls.length;
+    const changedPages = options.force
+      ? pageRecords
+      : pageRecords.filter((r) =>
+          !existingPageHashes.has(r.url) || existingPageHashes.get(r.url)!.contentHash !== r.contentHash
+        );
+    const staleCandidateUrls = [...existingPageHashes.entries()]
+      .filter(([url, entry]) => {
+        if (currentPageUrls.has(url)) return false;
+        // A run that was not told about custom records has no opinion on them.
+        // Without this, indexing the site without passing `customRecords`
+        // deleted every custom record as "no longer present" — and a provider
+        // that merely failed to run once would take its content with it.
+        // Passing `customRecords: []` explicitly asserts there are none.
+        if (entry.custom && options.customRecords === undefined) return false;
+        return true;
+      })
+      .map(([url]) => url);
 
     stageEnd("pages", pagesStart);
-    this.logger.info(`Page changes: ${pagesChanged} changed/new, ${pagesDeleted} deleted, ${pageRecords.length - changedPages.length} unchanged`);
     this.logger.info(`Indexed ${pages.length} page${pages.length === 1 ? "" : "s"} (${routeExact} exact, ${routeBestEffort} best-effort) (${stageTimingsMs["pages"]}ms)`);
 
     const chunkStart = stageStart();
@@ -624,6 +678,43 @@ export class IndexPipeline {
       });
     }
 
+    // `beforeIndex` runs here, on the full chunk array, BEFORE anything is
+    // diffed. Running it after the diff meant a hook that renamed or filtered
+    // chunks produced a plan that no longer matched what would be written:
+    // a renamed chunk was upserted and then immediately deleted as "stale",
+    // and dropped chunks left the remote copy orphaned forever. Its output is
+    // now simply the set of chunks this run intends to exist.
+    if (this.hooks.beforeIndex) {
+      chunks = await this.hooks.beforeIndex(chunks);
+    }
+
+    // Provenance belongs to the pipeline, not to a hook. `transformChunk` and
+    // `beforeIndex` may return freshly constructed chunks, which would drop the
+    // marker and leave a custom record's sections deletable by the next
+    // site-only run. Reassert it from the page each chunk came from.
+    const customUrls = new Set(pages.filter((page) => page.custom).map((page) => page.url));
+    const knownUrls = new Set(pages.map((page) => page.url));
+    const placeable: Chunk[] = [];
+    for (const chunk of chunks) {
+      // A hook may rewrite a chunk's URL. One pointing at a page this run never
+      // indexed has no determinable provenance and can never be returned by
+      // getPage, so it is dropped rather than guessed at — guessing either
+      // strands it or leaves it deletable by the next site-only run.
+      if (!knownUrls.has(chunk.url)) {
+        this.logger.warn(
+          `Chunk ${chunk.chunkKey} references ${chunk.url}, which is not an indexed page in this run; skipping it.`
+        );
+        runWarnings.push({
+          kind: "hook-failure",
+          detail: `chunk ${chunk.chunkKey} references unindexed page ${chunk.url}`
+        });
+        continue;
+      }
+      chunk.custom = customUrls.has(chunk.url);
+      placeable.push(chunk);
+    }
+    chunks = placeable;
+
     stageEnd("chunk", chunkStart);
     this.logger.info(`Chunked into ${chunks.length} chunk${chunks.length === 1 ? "" : "s"} (${stageTimingsMs["chunk"]}ms)`);
 
@@ -643,7 +734,7 @@ export class IndexPipeline {
     stageEnd("chunk_hashes", chunkHashStart);
     this.logger.debug(`Fetched ${existingHashes.size} existing chunk hashes for ${currentChunkKeys.length} current keys`);
 
-    let changedChunks = chunks.filter((chunk) => {
+    const changedChunks = chunks.filter((chunk) => {
       if (options.force) {
         return true;
       }
@@ -663,16 +754,163 @@ export class IndexPipeline {
     // Scan for stale chunk IDs that no longer exist in the current set.
     // Uses range() scan which may include extra IDs, but deletion of
     // non-existent IDs is safe and idempotent.
-    const existingChunkIds = options.force
-      ? new Set<string>()
-      : await this.store.scanChunkIds(scope);
-    const deletes = [...existingChunkIds].filter((chunkKey) => !currentChunkMap.has(chunkKey));
+    const existingChunkIds = await this.store.scanChunkIds(scope);
+    const staleChunkCandidates = [...existingChunkIds.entries()]
+      .filter(([chunkKey, isCustom]) => {
+        if (currentChunkMap.has(chunkKey)) return false;
+        // Same rule as pages: a run not told about custom records has no
+        // opinion on them. Protecting only the page record left the page
+        // present but its chunks deleted, so `get_page` returned empty
+        // markdown and the record vanished from section search.
+        if (isCustom && options.customRecords === undefined) return false;
+        return true;
+      })
+      .map(([chunkKey]) => chunkKey);
 
-    if (this.hooks.beforeIndex) {
-      changedChunks = await this.hooks.beforeIndex(changedChunks);
+    // --- Deletion safety gate ---
+    // Everything above only computed a plan. Deleting the difference between
+    // that plan and the remote index is safe only if this run observed the
+    // complete source of truth. Every warning collected anywhere in the run —
+    // source truncation, a failed fetch, a failed extraction, a chunk limit —
+    // lands here, and the gate is evaluated exactly once, before any write.
+    const dangerousOperations: string[] = [];
+    let deletionEligible = runWarnings.length === 0;
+
+    if (!deletionEligible) {
+      this.logger.warn(
+        `Run is not authoritative (${runWarnings.length} warning${runWarnings.length === 1 ? "" : "s"}); no records will be deleted.`
+      );
+      for (const warning of runWarnings) {
+        this.logger.warn(`  ${warning.kind}: ${warning.detail}`);
+      }
     }
 
+    // An authoritative run whose *site source* produced zero pages is almost
+    // always a broken source config rather than a genuinely emptied site.
+    //
+    // This deliberately tests the site source rather than the combined record
+    // count: custom records are supplied by the caller and would otherwise
+    // mask a total source failure, letting every real page be deleted while
+    // the count stayed comfortably non-zero.
+    const siteSourceEmpty = sitePageCount === 0;
+    if (deletionEligible && siteSourceEmpty && !options.allowEmpty) {
+      deletionEligible = false;
+      const detail =
+        `site source produced 0 pages (${existingPageHashes.size} page(s) and ` +
+        `${existingChunkIds.size} chunk(s) exist remotely); pass --allow-empty to delete them`;
+      this.logger.warn(`Refusing deletion: ${detail}`);
+      runWarnings.push({ kind: "source-failure", detail });
+      dangerousOperations.push(`refused-empty-deletion: ${detail}`);
+    }
+
+    // Guard against a mass deletion caused by a change the completeness checks
+    // cannot see — e.g. every URL silently gaining a prefix, which looks like a
+    // complete run that legitimately replaced the whole site.
+    //
+    // Measured against pages and chunks independently: a scope may hold chunks
+    // without page records (an index written by an older version), and judging
+    // by pages alone would then wave through a total chunk wipe.
+    // `--allow-empty` is already an explicit statement that a total removal is
+    // intended, so it satisfies the ratio guard for that case on its own.
+    // Requiring `--accept-large-deletion` as well would contradict its help text.
+    const ratioGuardSatisfied =
+      options.acceptLargeDeletion || (options.allowEmpty === true && siteSourceEmpty);
+    if (deletionEligible && !ratioGuardSatisfied) {
+      const maxRatio = this.config.indexing.maxDeletionRatio;
+      const checks: Array<{ label: string; stale: number; existing: number }> = [
+        { label: "pages", stale: staleCandidateUrls.length, existing: existingPageHashes.size },
+        { label: "chunks", stale: staleChunkCandidates.length, existing: existingChunkIds.size }
+      ];
+      for (const check of checks) {
+        if (check.stale === 0 || check.existing === 0) continue;
+        const ratio = check.stale / check.existing;
+        if (ratio > maxRatio) {
+          deletionEligible = false;
+          const detail =
+            `would delete ${check.stale} of ${check.existing} ${check.label} ` +
+            `(${Math.round(ratio * 100)}% > ${Math.round(maxRatio * 100)}% limit); ` +
+            "pass --accept-large-deletion to proceed";
+          this.logger.warn(`Refusing deletion: ${detail}`);
+          runWarnings.push({ kind: "source-failure", detail });
+          dangerousOperations.push(`refused-large-deletion: ${detail}`);
+          break;
+        }
+      }
+    }
+
+
+    const deletedPageUrls = deletionEligible ? staleCandidateUrls : [];
+    const deletes = deletionEligible ? staleChunkCandidates : [];
+
+    if (!deletionEligible && (staleCandidateUrls.length > 0 || staleChunkCandidates.length > 0)) {
+      this.logger.warn(
+        `Skipping deletion of ${staleCandidateUrls.length} stale page(s) and ` +
+          `${staleChunkCandidates.length} stale chunk(s) — run is not authoritative.`
+      );
+    }
+
+    if (deletedPageUrls.length > 0) {
+      dangerousOperations.push(
+        `delete-pages: ${deletedPageUrls.length} page(s) in project ${this.config.project.id} scope ${scope.scopeName}`
+      );
+      this.logger.info(
+        `Deletion plan: ${deletedPageUrls.length} stale page${deletedPageUrls.length === 1 ? "" : "s"} ` +
+          `in project ${this.config.project.id}, scope ${scope.scopeName}`
+      );
+      for (const url of deletedPageUrls) this.logger.debug(`  delete ${url}`);
+    }
+    if (deletes.length > 0) {
+      dangerousOperations.push(
+        `delete-chunks: ${deletes.length} chunk(s) in project ${this.config.project.id} scope ${scope.scopeName}`
+      );
+    }
+
+    const pagesChanged = changedPages.length;
+    const pagesDeleted = deletedPageUrls.length;
+    this.logger.info(`Page changes: ${pagesChanged} changed/new, ${pagesDeleted} deleted, ${pageRecords.length - changedPages.length} unchanged`);
     this.logger.info(`Changes detected: ${changedChunks.length} changed, ${deletes.length} deleted, ${chunks.length - changedChunks.length} unchanged`);
+
+    if (!options.dryRun) {
+      // Upsert before delete, in both force and incremental mode: a crash
+      // between the two must leave the old generation searchable, never an
+      // empty index. Page IDs are stable, so re-upserting overwrites in place
+      // and the delete only removes records this run did not write.
+      if (changedPages.length > 0 || deletedPageUrls.length > 0) {
+        this.logger.info(`Upserting ${changedPages.length} page summar${changedPages.length === 1 ? "y" : "ies"}...`);
+        const pageDocs = changedPages.map((r) => ({
+          id: r.url,
+          data: r.summary ?? r.title,
+          metadata: {
+            title: r.title,
+            url: r.url,
+            description: r.description ?? "",
+            keywords: r.keywords ?? [],
+            summary: r.summary ?? "",
+            tags: r.tags,
+            routeFile: r.routeFile,
+            routeResolution: r.routeResolution,
+            incomingLinks: r.incomingLinks,
+            outgoingLinks: r.outgoingLinks,
+            outgoingLinkUrls: r.outgoingLinkUrls ?? [],
+            depth: r.depth,
+            indexedAt: r.indexedAt,
+            contentHash: r.contentHash ?? "",
+            publishedAt: r.publishedAt ?? null,
+            incomingAnchorText: r.incomingAnchorText ?? "",
+            weight: r.weight ?? null,
+            custom: r.custom ?? false,
+            ...(r.meta && Object.keys(r.meta).length > 0 ? { meta: r.meta } : {})
+          }
+        }));
+        if (pageDocs.length > 0) {
+          await this.store.upsertPages(pageDocs, scope);
+        }
+        // Page deletion is deferred until after the chunks are written. Deleting
+        // here meant a chunk-write failure left the index with fresh pages, the
+        // old pages already removed, and stale chunks — a state no run produced
+        // deliberately. Every upsert now precedes every delete.
+      }
+    }
 
     // Upsert changed chunks to Upstash Vector (embedding handled server-side)
     const upsertStart = stageStart();
@@ -717,6 +955,7 @@ export class IndexPipeline {
           keywords: chunk.keywords ?? [],
           publishedAt: chunk.publishedAt ?? null,
           incomingAnchorText: chunk.incomingAnchorText ?? "",
+          custom: chunk.custom ?? false,
           ...(chunk.meta && Object.keys(chunk.meta).length > 0 ? { meta: chunk.meta } : {})
         }
       };
@@ -725,6 +964,11 @@ export class IndexPipeline {
       await this.store.upsertChunks(docs, scope);
       documentsUpserted = docs.length;
       this.logger.event("upserted", { count: docs.length });
+    }
+
+    // --- Deletions, after every upsert has landed ---
+    if (!options.dryRun && deletedPageUrls.length > 0) {
+      await this.store.deletePagesByIds(deletedPageUrls, scope);
     }
 
     if (!options.dryRun && deletes.length > 0) {
@@ -758,11 +1002,23 @@ export class IndexPipeline {
       deletes: deletes.length,
       routeExact,
       routeBestEffort,
-      stageTimingsMs
+      stageTimingsMs,
+      deletionEligible,
+      warnings: runWarnings,
+      dangerousOperations
     };
 
     if (this.hooks.afterIndex) {
-      await this.hooks.afterIndex(stats);
+      try {
+        await this.hooks.afterIndex(stats);
+      } catch (error) {
+        // The index has already been committed. Surface the hook failure
+        // without implying the write was rolled back.
+        this.logger.error(
+          `afterIndex hook failed after the index was successfully written: ${error instanceof Error ? error.message : String(error)}`
+        );
+        throw error;
+      }
     }
 
     return stats;

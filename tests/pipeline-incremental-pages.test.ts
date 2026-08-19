@@ -16,10 +16,10 @@ const tempDirs: string[] = [];
 function createStatefulMockStore(): {
   store: UpstashSearchStore;
   getChunkHashes: () => Map<string, string>;
-  getPageHashes: () => Map<string, string>;
+  getPageHashes: () => Map<string, { contentHash: string; custom: boolean }>;
 } {
   const chunkHashes = new Map<string, string>();
-  const pageHashes = new Map<string, string>();
+  const pageHashes = new Map<string, { contentHash: string; custom: boolean }>();
 
   const store = {
     upsertChunks: vi.fn().mockImplementation(async (chunks: Array<{ id: string; metadata: { contentHash: string } }>) => {
@@ -44,12 +44,12 @@ function createStatefulMockStore(): {
       }
       return filtered;
     }),
-    scanChunkIds: vi.fn().mockImplementation(async () => new Set(chunkHashes.keys())),
+    scanChunkIds: vi.fn().mockImplementation(async () => new Map([...chunkHashes.keys()].map((k) => [k, false]))),
     upsertPages: vi.fn().mockImplementation(async (pages: Array<{ id: string; data: string; metadata: Record<string, unknown> }>) => {
       for (const page of pages) {
         const contentHash = page.metadata.contentHash as string;
         if (contentHash) {
-          pageHashes.set(page.id, contentHash);
+          pageHashes.set(page.id, { contentHash, custom: page.metadata.custom === true });
         }
       }
     }),
@@ -209,7 +209,7 @@ describe("IndexPipeline incremental pages", () => {
     expect(deletedIds).toContain("/docs/beta");
   });
 
-  it("uses deletePages (reset) under force mode", async () => {
+  it("re-upserts every page under force mode without wiping the index first", async () => {
     const { cwd, config } = await createFixture({
       "docs/alpha": { title: "Alpha", body: "Alpha content here." }
     });
@@ -226,9 +226,34 @@ describe("IndexPipeline incremental pages", () => {
     const pipeline2 = await IndexPipeline.create({ cwd, config, store });
     const stats2 = await pipeline2.run({ force: true });
 
-    expect(store.deletePages).toHaveBeenCalledTimes(1);
+    // Force used to call deletePages() first, leaving the index empty for the
+    // duration of the re-upsert — a crash in between served an empty index.
+    // Force now means "re-upsert everything regardless of hash".
+    expect(store.deletePages).not.toHaveBeenCalled();
     expect(store.upsertPages).toHaveBeenCalled();
     expect(stats2.pagesChanged).toBe(1); // force treats all as changed
+  });
+
+  it("still removes pages that disappeared, under force mode", async () => {
+    const { cwd, config } = await createFixture({
+      "docs/alpha": { title: "Alpha", body: "Alpha content here." },
+      "docs/beta": { title: "Beta", body: "Beta content here." }
+    });
+    const { store } = createStatefulMockStore();
+
+    const pipeline1 = await IndexPipeline.create({ cwd, config, store });
+    await pipeline1.run({ changedOnly: true });
+
+    // Remove one page from the source
+    await fs.rm(path.join(cwd, "build", "docs", "beta", "index.html"), { force: true });
+
+    vi.mocked(store.deletePagesByIds).mockClear();
+    const pipeline2 = await IndexPipeline.create({ cwd, config, store });
+    const stats2 = await pipeline2.run({ force: true });
+
+    expect(stats2.deletionEligible).toBe(true);
+    expect(stats2.pagesDeleted).toBe(1);
+    expect(store.deletePagesByIds).toHaveBeenCalledWith(["/docs/beta"], expect.anything());
   });
 
   it("does not write pages on dry run", async () => {

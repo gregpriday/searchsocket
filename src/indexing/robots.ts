@@ -16,6 +16,9 @@ export function parseRobotsTxt(content: string, userAgent = "Searchsocket"): Rob
   // Group rules by user-agent
   const agentGroups = new Map<string, RobotsTxtRules>();
   let currentAgents: string[] = [];
+  // Whether the group currently being accumulated has seen any allow/disallow
+  // line yet — used to decide when a new user-agent line starts a new group.
+  let currentGroupHasRules = false;
 
   for (const rawLine of lines) {
     const line = rawLine.replace(/#.*$/, "").trim();
@@ -28,24 +31,42 @@ export function parseRobotsTxt(content: string, userAgent = "Searchsocket"): Rob
     const value = line.slice(colonIdx + 1).trim();
 
     if (directive === "user-agent") {
+      // Per RFC 9309, consecutive user-agent lines share one group, but a
+      // user-agent line that *follows* rule lines starts a new group. Without
+      // this reset the extremely common pattern
+      //
+      //   User-agent: *
+      //   Disallow: /admin
+      //   User-agent: GPTBot
+      //   Disallow: /
+      //
+      // leaked the site-wide block into the `*` group and excluded the entire
+      // site from indexing.
+      if (currentGroupHasRules) {
+        currentAgents = [];
+        currentGroupHasRules = false;
+      }
+
       const agentName = value.toLowerCase();
       currentAgents.push(agentName);
       if (!agentGroups.has(agentName)) {
         agentGroups.set(agentName, { disallow: [], allow: [] });
       }
-    } else if (directive === "disallow" && value && currentAgents.length > 0) {
-      for (const agent of currentAgents) {
-        agentGroups.get(agent)!.disallow.push(value);
+    } else if (directive === "disallow" || directive === "allow") {
+      // An empty value ("Disallow:" meaning allow-all) carries no path, but it
+      // still counts as a rule line for the purpose of splitting groups.
+      currentGroupHasRules = true;
+
+      if (value && currentAgents.length > 0) {
+        for (const agent of currentAgents) {
+          agentGroups.get(agent)![directive].push(value);
+        }
       }
-    } else if (directive === "allow" && value && currentAgents.length > 0) {
-      for (const agent of currentAgents) {
-        agentGroups.get(agent)!.allow.push(value);
-      }
-    } else if (directive !== "disallow" && directive !== "allow") {
-      // Non-rule directive (sitemap, crawl-delay, etc.) — reset current agents
-      // so future rules don't accidentally accumulate
-      currentAgents = [];
     }
+    // Any other directive (sitemap, crawl-delay, host, ...) is ignored and
+    // leaves the current group intact — crawl-delay in particular is commonly
+    // written *inside* a group, and dropping the group there discarded every
+    // rule that followed it.
   }
 
   // Check for specific user-agent first, then fallback to *

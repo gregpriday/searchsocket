@@ -1,8 +1,12 @@
 # SearchSocket
 
+[![npm version](https://img.shields.io/npm/v/searchsocket.svg)](https://www.npmjs.com/package/searchsocket)
+[![ci](https://github.com/gregpriday/searchsocket/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/gregpriday/searchsocket/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/searchsocket.svg)](./LICENSE)
+
 Semantic site search and MCP retrieval for SvelteKit content projects. Index your site, search it from the browser or AI tools, and scroll users to the exact content they're looking for.
 
-**Requirements**: Node.js >= 20 | **Backend**: [Upstash Vector](https://upstash.com/docs/vector/overall/getstarted) | **License**: MIT
+**Requirements**: Node.js >= 22.12 | **Backend**: [Upstash Vector](https://upstash.com/docs/vector/overall/getstarted) | **License**: MIT
 
 ## How it works
 
@@ -19,11 +23,11 @@ SearchSocket extracts content from your SvelteKit site, converts it to markdown,
 ## Features
 
 - **Semantic + keyword search** — Upstash Vector handles hybrid search with built-in reranking and input enrichment
-- **Dual search** — parallel page-level and chunk-level queries with configurable score blending
+- **Page-first search** — pages are ranked first, then the best-matching sections within the top pages are attached as sub-results
 - **Scroll-to-text** — auto-scroll to the matching section when a user clicks a search result, with CSS Highlight API and Text Fragment support
 - **SvelteKit integration** — server hook for the search API, Vite plugin for build-triggered indexing
 - **Svelte 5 components** — reactive `createSearch` store and `<SearchSocket>` metadata component
-- **MCP server** — six tools for Claude Code, Claude Desktop, and other MCP clients (stdio + HTTP)
+- **MCP server** — three tools for Claude Code, Claude Desktop, and other MCP clients (stdio + HTTP)
 - **llms.txt generation** — auto-generate LLM-friendly site indexes during indexing
 - **Four source modes** — index from static output, build manifest, a running server, or raw markdown files
 - **CLI** — init, index, search, dev, status, doctor, clean, prune, test, mcp, add
@@ -187,7 +191,6 @@ With `groupBy: "page"` (the default):
       "sectionTitle": "Installation",
       "snippet": "Install SearchSocket with pnpm add searchsocket...",
       "score": 0.89,
-      "routeFile": "src/routes/docs/intro/+page.svelte",
       "chunks": [
         {
           "sectionTitle": "Installation",
@@ -372,7 +375,21 @@ A reactive search store built on Svelte 5 runes with debouncing and LRU caching.
 {/each}
 ```
 
-Call `search.destroy()` to clean up when no longer needed (automatic in component context).
+Call `search.destroy()` when the search is no longer needed. This is **not**
+automatic: `createSearch()` uses `$effect.root`, which returns a teardown
+function rather than registering one with the surrounding component. In a
+component, call it from `onDestroy`:
+
+```svelte
+<script>
+  import { onDestroy } from "svelte";
+  import { createSearch } from "searchsocket/svelte";
+
+  const search = createSearch();
+  onDestroy(search.destroy);
+</script>
+```
+
 
 ### `<SearchSocket>` component
 
@@ -447,26 +464,24 @@ The highlight fades after 2 seconds. Customize with CSS:
 
 ## Search & Ranking
 
-### Dual search
+### Page-first search
 
-By default, SearchSocket runs two parallel queries — one against page-level summaries and one against individual chunks — then blends the scores:
+SearchSocket searches page-first: one query ranks page summaries, then the
+best-matching sections within the top pages are retrieved and attached as
+sub-results. This keeps results coherent at page level while still pointing at
+the exact section that matched.
 
-```ts
-export default {
-  search: {
-    dualSearch: true,          // default
-    pageSearchWeight: 0.3      // weight of page results vs chunks (0-1)
-  }
-};
-```
+Section lookups are bounded — only the top pages are expanded, and those
+requests run through a concurrency limit — so a large `topK` cannot fan out into
+one backend request per result.
 
-### Page aggregation
+### Page weights
 
-With `groupBy: "page"` (default), chunk results are grouped by page URL:
-
-1. The top chunk score becomes the base page score
-2. Additional matching chunks add a decaying bonus: `chunk_score * decay^i`
-3. Per-URL page weights are applied multiplicatively
+A page's weight multiplies its final score. It comes from the page itself —
+`<meta name="searchsocket-weight" content="1.5">` or `searchsocket.weight` in
+frontmatter — falling back to a `ranking.pageWeights` pattern. A weight of `0`
+from either source excludes the page entirely, so an operator can suppress
+pages regardless of what their markup asks for.
 
 ### Ranking configuration
 
@@ -484,16 +499,12 @@ export default {
       "/download": 1.05
     },
 
-    aggregationCap: 5,               // max chunks contributing to page score
-    aggregationDecay: 0.5,           // decay for additional chunks
     minScoreRatio: 0.70,             // drop results below 70% of best score
     scoreGapThreshold: 0.4,          // trim results >40% below best
-    minChunkScoreRatio: 0.5,         // threshold for sub-chunks
 
     weights: {
       incomingLinks: 0.05,
       depth: 0.03,
-      aggregation: 0.1,
       titleMatch: 0.15,
       freshness: 0.1,
       anchorText: 0.10
@@ -586,11 +597,8 @@ SearchSocket includes an MCP server that gives Claude Code, Claude Desktop, and 
 
 | Tool | Description |
 |------|-------------|
-| `search` | Semantic search with filtering, grouping, and reranking |
-| `get_page` | Retrieve full page markdown with frontmatter |
-| `list_pages` | Cursor-paginated page listing |
-| `get_site_structure` | Hierarchical page tree |
-| `find_source_file` | Locate the SvelteKit source file for content |
+| `search` | Semantic search with filtering and section sub-results |
+| `get_page` | Retrieve a page's indexed markdown and frontmatter |
 | `get_related_pages` | Find related pages by links, semantics, and structure |
 
 ### Connecting to your deployed site
@@ -610,22 +618,27 @@ Add `.mcp.json` to your project root:
 }
 ```
 
-That's it. Restart Claude Code and the six search tools are available. You can search your docs, retrieve page content, and find source files directly from the AI assistant.
-
-To protect the endpoint, add API key authentication:
+The MCP endpoint requires an API key. Its tools return repository paths, a
+page's indexed markdown, and any scope the caller names, so it refuses to serve
+without one:
 
 ```ts
 // src/hooks.server.ts
 export const handle = searchsocketHandle({
   rawConfig: {
     mcp: {
+      enable: true,
       handle: {
-        apiKey: process.env.SEARCHSOCKET_MCP_API_KEY
+        // Read from the environment rather than committing the key.
+        apiKeyEnv: "SEARCHSOCKET_MCP_API_KEY"
       }
     }
   }
 });
 ```
+
+`mcp.enable` defaults to `NODE_ENV !== "production"`, so set it explicitly for a
+production deployment.
 
 Then pass the key in `.mcp.json`:
 
@@ -741,10 +754,33 @@ pnpm searchsocket index --force            # full re-index
 pnpm searchsocket index --source build     # override source mode
 pnpm searchsocket index --scope staging    # override scope
 pnpm searchsocket index --dry-run          # preview without writing
-pnpm searchsocket index --max-pages 10     # limit for testing
+pnpm searchsocket index --max-pages 10     # limit for testing (never deletes)
 pnpm searchsocket index --verbose          # detailed output
 pnpm searchsocket index --json             # machine-readable output
 ```
+
+
+#### Deletion safety
+
+An indexing run removes stale records only when it observed the complete source
+of truth. A run truncated by `--max-pages`/`--max-chunks`, one that failed to
+fetch or extract a page, or one whose source unexpectedly returned nothing is
+reported as `deletionEligible: false` and deletes nothing — the stale records
+are left in place rather than risking the loss of a valid index.
+
+Two further guards need an explicit opt-in:
+
+```bash
+# The source legitimately produced zero pages and you want the index emptied
+pnpm searchsocket index --allow-empty
+
+# The run would remove more than indexing.maxDeletionRatio (default 50%)
+pnpm searchsocket index --accept-large-deletion
+```
+
+`searchsocket index` exits 5 when no vector backend is configured. Pass
+`--allow-unconfigured` to skip indexing without failing (the Vite plugin already
+behaves this way).
 
 ### `searchsocket search`
 
@@ -808,23 +844,45 @@ Reports pass/fail per assertion and Mean Reciprocal Rank (MRR) across all querie
 
 ### `searchsocket clean`
 
-Delete local state and optionally remote indexes.
+Delete local state and optionally remote indexes. Remote deletion is a dry run
+until you pass `--apply`.
 
 ```bash
-pnpm searchsocket clean                    # local state only
-pnpm searchsocket clean --remote           # also delete remote scope
-pnpm searchsocket clean --scope staging    # specific scope
+pnpm searchsocket clean                                  # local state only
+pnpm searchsocket clean --remote --scope staging         # show the plan
+pnpm searchsocket clean --remote --scope staging --apply # delete that scope
+pnpm searchsocket clean --keep-local --remote --scope staging --apply
 ```
+
+Dropping every scope in the project needs an explicit confirmation token:
+
+```bash
+pnpm searchsocket clean --remote --all-scopes --apply --confirm-project my-site
+```
+
+`--scope` applies to the remote deletion only. Without `--remote` the command
+just removes the local state directory.
 
 ### `searchsocket prune`
 
-List and delete stale scopes. Compares against git branches to find orphaned scopes.
+List and delete stale scopes. Compares against remote git branches to find
+orphaned scopes.
 
 ```bash
-pnpm searchsocket prune                       # dry-run (default)
-pnpm searchsocket prune --apply               # actually delete
-pnpm searchsocket prune --older-than 30d      # only scopes older than 30 days
+pnpm searchsocket prune                                  # dry-run (default)
+pnpm searchsocket prune --apply                          # delete orphaned scopes
+pnpm searchsocket prune --older-than 30d --apply         # orphaned AND inactive 30d
+pnpm searchsocket prune --older-than 30d --match any --apply  # orphaned OR inactive
+pnpm searchsocket prune --protect staging,demo --apply   # never touch these
 ```
+
+Prune fails closed. It refuses to run when the remote branch list cannot be
+trusted — a shallow clone, a repository with no remotes, or an empty
+`--scopes-file` — because every scope would otherwise look orphaned. In CI,
+check out with full history (`actions/checkout` with `fetch-depth: 0`) or pass
+`--scopes-file`. Scopes with no recorded index timestamp are skipped by
+`--older-than` rather than assumed old, and the current scope plus `main` are
+always protected.
 
 ### `searchsocket mcp`
 
@@ -873,8 +931,6 @@ export default {
       "/download": 1.05,
       "/docs/**": 1.05
     },
-    aggregationCap: 3,
-    aggregationDecay: 0.3
   }
 };
 ```
@@ -900,8 +956,6 @@ export const handle = searchsocketHandle({
     ranking: {
       minScoreRatio: 0.70,
       pageWeights: { "/": 0.95, "/download": 1.05, "/docs/**": 1.05 },
-      aggregationCap: 3,
-      aggregationDecay: 0.3
     }
   }
 });
@@ -1101,18 +1155,11 @@ export default {
     tokenEnv: "UPSTASH_VECTOR_REST_TOKEN"
   },
 
-  search: {
-    dualSearch: true,
-    pageSearchWeight: 0.3
-  },
-
   ranking: {
     enableIncomingLinkBoost: true,
     enableDepthBoost: true,
     pageWeights: { "/docs": 1.15 },
     minScoreRatio: 0.70,
-    aggregationCap: 5,
-    aggregationDecay: 0.5
   },
 
   api: {
@@ -1155,6 +1202,46 @@ See [docs/ci.md](docs/ci.md) for ready-to-use GitHub Actions workflows covering:
 - [CI/CD Workflows](docs/ci.md) — GitHub Actions and Vercel integration
 - [MCP over HTTP Guide](docs/mcp-claude-code.md) — detailed HTTP MCP setup for Claude Code
 - [Troubleshooting](docs/troubleshooting.md) — common issues, diagnostics, and FAQ
+
+## Contributing
+
+This repo follows **Git Flow**:
+
+| Branch | Purpose |
+| --- | --- |
+| `main` | Production. Only ever receives merges from `release/*` and `hotfix/*`, and carries the `v*` release tags. |
+| `develop` | Integration branch and the default PR target. |
+| `feature/*` | Branched from `develop`, merged back into `develop`. |
+| `release/*` | Branched from `develop`, merged into both `main` and `develop`. |
+| `hotfix/*` | Branched from `main`, merged into both `main` and `develop`. |
+
+```bash
+# start a feature
+git switch develop && git pull
+git switch -c feature/my-thing
+
+# open the PR against develop
+gh pr create --base develop
+```
+
+Local development:
+
+```bash
+pnpm install
+pnpm run typecheck   # tsc --noEmit
+pnpm run test        # vitest run
+pnpm run build       # tsup → dist/
+```
+
+CI runs typecheck, build, the test suite, and the packed-tarball check on Node 22 and 24 for every push to
+`main`/`develop`/`release/*`/`hotfix/*` and every PR into `main` or `develop`.
+
+`pnpm run test:quality` runs Mean Reciprocal Rank assertions against a live index. It needs
+Upstash credentials and is not part of CI — run it locally when changing `src/search/ranking.ts`.
+
+Releases are cut from a `release/*` branch: bump the version, merge to `main`, then push the
+`v*` tag. The [`publish`](.github/workflows/publish.yml) workflow builds, tests, and publishes to
+NPM via Trusted Publishing (OIDC).
 
 ## License
 

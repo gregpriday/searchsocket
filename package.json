@@ -1,6 +1,6 @@
 {
   "name": "searchsocket",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Semantic site search and MCP retrieval for SvelteKit static sites",
   "license": "MIT",
   "author": "Greg Priday <greg@siteorigin.com>",
@@ -27,6 +27,9 @@
     "dist",
     "!dist/**/*.map",
     "src/svelte",
+    "src/types.ts",
+    "src/utils/structured-meta.ts",
+    "LICENSE",
     "README.md"
   ],
   "bin": {
@@ -74,10 +77,12 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:quality": "SEARCHSOCKET_QUALITY_TESTS=1 vitest run tests/quality.test.ts"
+    "test:quality": "SEARCHSOCKET_QUALITY_TESTS=1 vitest run tests/quality.test.ts",
+    "check:package": "node scripts/check-package.mjs",
+    "check": "pnpm run typecheck && pnpm run build && pnpm run test && pnpm run check:package"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12.0"
   },
   "packageManager": "pnpm@10.29.2",
   "dependencies": {

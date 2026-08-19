@@ -7,20 +7,26 @@ export interface RankedHit {
   breakdown?: ScoreBreakdown;
 }
 
-export interface PageResult {
-  url: string;
-  title: string;
-  routeFile: string;
-  pageScore: number;
-  bestChunk: RankedHit;
-  matchingChunks: RankedHit[];
-}
-
 function nonNegativeOrZero(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
   }
   return Math.max(0, value);
+}
+
+/**
+ * Whether incoming anchor text counts as a match for the query.
+ *
+ * Shared by both rankers: the page-first path previously required the anchor to
+ * contain the whole query while the chunk path accepted either containing the
+ * other, so anchor "authentication" and query "authentication guide" boosted
+ * one mode and not the other.
+ */
+function anchorTextMatches(anchorText: string | undefined, normalizedQuery: string): boolean {
+  if (!anchorText || !normalizedQuery) return false;
+  const normalizedAnchor = normalizeForTitleMatch(anchorText);
+  if (normalizedAnchor.length === 0) return false;
+  return normalizedAnchor.includes(normalizedQuery) || normalizedQuery.includes(normalizedAnchor);
 }
 
 function normalizeForTitleMatch(text: string): string {
@@ -73,9 +79,7 @@ export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig, 
 
       let anchorTextMatchBoostValue = 0;
       if (config.ranking.enableAnchorTextBoost && normalizedQuery && config.ranking.weights.anchorText > 0) {
-        const normalizedAnchorText = normalizeForTitleMatch(hit.metadata.incomingAnchorText ?? "");
-        if (normalizedAnchorText.length > 0 && normalizedQuery.length > 0 &&
-            (normalizedAnchorText.includes(normalizedQuery) || normalizedQuery.includes(normalizedAnchorText))) {
+        if (anchorTextMatches(hit.metadata.incomingAnchorText, normalizedQuery)) {
           anchorTextMatchBoostValue = config.ranking.weights.anchorText;
           score += anchorTextMatchBoostValue;
         }
@@ -105,41 +109,6 @@ export function rankHits(hits: VectorHit[], config: ResolvedSearchSocketConfig, 
     });
 }
 
-export function trimByScoreGap(
-  results: PageResult[],
-  config: ResolvedSearchSocketConfig
-): PageResult[] {
-  if (results.length === 0) return results;
-
-  const threshold = config.ranking.scoreGapThreshold;
-  const minScoreRatio = config.ranking.minScoreRatio;
-
-  // Relative ratio thresholding: drop results scoring below X% of the top result
-  if (minScoreRatio > 0 && results.length > 0) {
-    const topScore = results[0]!.pageScore;
-    if (Number.isFinite(topScore) && topScore > 0) {
-      const minThreshold = topScore * minScoreRatio;
-      results = results.filter((r) => r.pageScore >= minThreshold);
-    }
-  }
-
-  // Score-gap trimming
-  if (threshold > 0 && results.length > 1) {
-    for (let i = 1; i < results.length; i++) {
-      const prev = results[i - 1]!.pageScore;
-      const current = results[i]!.pageScore;
-      if (prev > 0) {
-        const gap = (prev - current) / prev;
-        if (gap >= threshold) {
-          return results.slice(0, i);
-        }
-      }
-    }
-  }
-
-  return results;
-}
-
 export function findPageWeight(url: string, pageWeights: Record<string, number>): number {
   // Try each pattern — most specific match wins (longest pattern)
   let bestPattern = "";
@@ -153,145 +122,6 @@ export function findPageWeight(url: string, pageWeights: Record<string, number>)
   }
 
   return bestWeight;
-}
-
-export function aggregateByPage(
-  ranked: RankedHit[],
-  config: ResolvedSearchSocketConfig
-): PageResult[] {
-  // 1. Group ranked hits by URL
-  const groups = new Map<string, RankedHit[]>();
-  for (const hit of ranked) {
-    const url = hit.hit.metadata.url;
-    const group = groups.get(url);
-    if (group) group.push(hit);
-    else groups.set(url, [hit]);
-  }
-
-  // 2. For each group, compute page score using score-weighted decay
-  const { aggregationCap, aggregationDecay } = config.ranking;
-  const pages: PageResult[] = [];
-  for (const [url, chunks] of groups) {
-    // Sort chunks by score desc within the group (NaN-safe)
-    chunks.sort((a, b) => {
-      const delta = b.finalScore - a.finalScore;
-      return Number.isNaN(delta) ? 0 : delta;
-    });
-    const best = chunks[0]!;
-    const maxScore = Number.isFinite(best.finalScore) ? best.finalScore : Number.NEGATIVE_INFINITY;
-
-    // Score-weighted aggregation with exponential decay on top-N chunks.
-    // Only additional chunks (i >= 1) contribute; single-chunk pages get zero bonus.
-    const topChunks = chunks.slice(0, aggregationCap);
-    let aggregationBonus = 0;
-    for (let i = 1; i < topChunks.length; i++) {
-      const chunkScore = Number.isFinite(topChunks[i]!.finalScore) ? topChunks[i]!.finalScore : 0;
-      aggregationBonus += chunkScore * Math.pow(aggregationDecay, i);
-    }
-    let pageScore = maxScore + aggregationBonus * config.ranking.weights.aggregation;
-
-    // Apply page weight if configured.
-    // Note: page weights are multiplicative on the already-boosted score,
-    // so they compound with aggregation. Use gentle values (1.05–1.2x).
-    const pageWeight = findPageWeight(url, config.ranking.pageWeights);
-    if (pageWeight === 0) continue;
-    if (pageWeight !== 1) {
-      pageScore *= pageWeight;
-    }
-
-    pages.push({
-      url,
-      title: best.hit.metadata.title,
-      routeFile: best.hit.metadata.routeFile,
-      pageScore: Number.isFinite(pageScore) ? pageScore : Number.NEGATIVE_INFINITY,
-      bestChunk: best,
-      matchingChunks: chunks
-    });
-  }
-
-  // 3. Sort by pageScore desc (NaN-safe)
-  return pages.sort((a, b) => {
-    const delta = b.pageScore - a.pageScore;
-    return Number.isNaN(delta) ? 0 : delta;
-  });
-}
-
-/**
- * Merge page-level search results with chunk-level search results.
- *
- * @deprecated Use rankPageHits + per-page chunk retrieval instead (page-first pipeline).
- */
-export function mergePageAndChunkResults(
-  pageHits: PageHit[],
-  rankedChunks: RankedHit[],
-  config: ResolvedSearchSocketConfig
-): RankedHit[] {
-  if (pageHits.length === 0) return rankedChunks;
-
-  const w = config.search.pageSearchWeight;
-  const pageScoreMap = new Map<string, PageHit>();
-  for (const ph of pageHits) {
-    pageScoreMap.set(ph.url, ph);
-  }
-
-  // Track which page URLs have chunks
-  const pagesWithChunks = new Set<string>();
-
-  // Blend chunk scores with page scores
-  const merged: RankedHit[] = rankedChunks.map((ranked) => {
-    const url = ranked.hit.metadata.url;
-    const pageHit = pageScoreMap.get(url);
-    if (pageHit) {
-      pagesWithChunks.add(url);
-      const blended = (1 - w) * ranked.finalScore + w * pageHit.score;
-      return {
-        hit: ranked.hit,
-        finalScore: Number.isFinite(blended) ? blended : ranked.finalScore,
-        breakdown: ranked.breakdown
-      };
-    }
-    return ranked;
-  });
-
-  // Create synthetic entries for pages found only by page search (no chunks)
-  for (const [url, pageHit] of pageScoreMap) {
-    if (pagesWithChunks.has(url)) continue;
-
-    const syntheticScore = pageHit.score * w;
-    const syntheticHit: VectorHit = {
-      id: `page:${url}`,
-      score: pageHit.score,
-      metadata: {
-        projectId: "",
-        scopeName: "",
-        url: pageHit.url,
-        path: pageHit.url,
-        title: pageHit.title,
-        sectionTitle: "",
-        headingPath: [],
-        snippet: pageHit.description || pageHit.title,
-        chunkText: pageHit.description || pageHit.title,
-        ordinal: 0,
-        contentHash: "",
-        depth: pageHit.depth,
-        incomingLinks: pageHit.incomingLinks,
-        routeFile: pageHit.routeFile,
-        tags: pageHit.tags,
-        publishedAt: pageHit.publishedAt
-      }
-    };
-
-    merged.push({
-      hit: syntheticHit,
-      finalScore: Number.isFinite(syntheticScore) ? syntheticScore : 0
-    });
-  }
-
-  // Re-sort by blended score descending
-  return merged.sort((a, b) => {
-    const delta = b.finalScore - a.finalScore;
-    return Number.isNaN(delta) ? 0 : delta;
-  });
 }
 
 /**
@@ -309,12 +139,15 @@ export interface RankedPage {
   baseScore: number;
   finalScore: number;
   publishedAt?: number;
+  /** Effective weight applied, resolved from the page itself or config. */
+  pageWeight: number;
   breakdown?: PageScoreBreakdown;
 }
 
 export interface PageScoreBreakdown {
   baseScore: number;
   pageWeight: number;
+  anchorTextMatchBoost?: number;
   incomingLinkBoost: number;
   depthBoost: number;
   titleMatchBoost: number;
@@ -370,8 +203,28 @@ export function rankPageHits(
         }
       }
 
-      // Apply page weight multiplier
-      const pageWeight = findPageWeight(hit.url, config.ranking.pageWeights);
+      let anchorTextMatchBoostValue = 0;
+      if (config.ranking.enableAnchorTextBoost && normalizedQuery && config.ranking.weights.anchorText > 0) {
+        if (anchorTextMatches(hit.incomingAnchorText, normalizedQuery)) {
+          anchorTextMatchBoostValue = config.ranking.weights.anchorText;
+          score += anchorTextMatchBoostValue;
+        }
+      }
+
+      // A per-page weight declared on the page itself takes precedence over a
+      // config pattern: it is the more specific statement about that page.
+      // Only the config side was ever applied here, so `searchsocket-weight`
+      // and frontmatter weights did nothing beyond dropping zero-weight pages.
+      const configWeight = findPageWeight(hit.url, config.ranking.pageWeights);
+      const declaredWeight =
+        typeof hit.weight === "number" && Number.isFinite(hit.weight) && hit.weight >= 0
+          ? hit.weight
+          : undefined;
+      // A zero from either source suppresses the page. Config zero is an
+      // operator-level veto and must not be overridable by page markup;
+      // otherwise the page's own weight is the more specific statement.
+      const pageWeight =
+        configWeight === 0 || declaredWeight === 0 ? 0 : declaredWeight ?? configWeight;
       if (pageWeight !== 1) {
         score *= pageWeight;
       }
@@ -386,7 +239,8 @@ export function rankPageHits(
         tags: hit.tags,
         baseScore,
         finalScore: Number.isFinite(score) ? score : Number.NEGATIVE_INFINITY,
-        publishedAt: hit.publishedAt
+        publishedAt: hit.publishedAt,
+        pageWeight
       };
 
       if (debug) {
@@ -397,12 +251,13 @@ export function rankPageHits(
           depthBoost: depthBoostValue,
           titleMatchBoost: titleMatchBoostValue,
           freshnessBoost: freshnessBoostValue,
+          anchorTextMatchBoost: anchorTextMatchBoostValue,
         };
       }
 
       return result;
     })
-    .filter((p) => findPageWeight(p.url, config.ranking.pageWeights) !== 0)
+    .filter((p) => p.pageWeight !== 0)
     .sort((a, b) => {
       const delta = b.finalScore - a.finalScore;
       return Number.isNaN(delta) ? 0 : delta;
@@ -410,7 +265,7 @@ export function rankPageHits(
 }
 
 /**
- * Trim ranked pages by score gap (same logic as trimByScoreGap but for RankedPage[]).
+ * Trim ranked pages by score gap: drop pages scoring far below the best hit.
  */
 export function trimPagesByScoreGap(
   results: RankedPage[],

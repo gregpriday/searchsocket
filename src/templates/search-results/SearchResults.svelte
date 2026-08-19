@@ -12,7 +12,8 @@
     sectionTitle?: string;
     snippet: string;
     score: number;
-    routeFile: string;
+    /** Present only when the deployment enables api.exposeInternalFields. */
+    routeFile?: string;
     chunks?: { sectionTitle?: string; snippet: string; headingPath: string[]; score: number }[];
   }
 

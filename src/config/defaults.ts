@@ -50,7 +50,6 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       dontSplitInside: ["code", "table", "blockquote"],
       prependTitle: true,
       pageSummaryChunk: true,
-      weightHeadings: true
     },
     upstash: {
       urlEnv: "UPSTASH_VECTOR_REST_URL",
@@ -58,17 +57,17 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       namespaces: {
         pages: "pages",
         chunks: "chunks"
-      }
+      },
+      batchSize: 90,
+      maxRetries: 2
     },
     embedding: {
       model: "bge-large-en-v1.5",
       dimensions: 1024,
-      taskType: "RETRIEVAL_DOCUMENT",
-      batchSize: 100
+      taskType: "RETRIEVAL_DOCUMENT"
     },
-    search: {
-      dualSearch: true,
-      pageSearchWeight: 0.3
+    indexing: {
+      maxDeletionRatio: 0.5
     },
     ranking: {
       enableIncomingLinkBoost: true,
@@ -77,15 +76,11 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       freshnessDecayRate: 0.001,
       enableAnchorTextBoost: false,
       pageWeights: {},
-      aggregationCap: 5,
-      aggregationDecay: 0.5,
-      minChunkScoreRatio: 0.5,
       minScoreRatio: 0.70,
       scoreGapThreshold: 0.4,
       weights: {
         incomingLinks: 0.05,
         depth: 0.03,
-        aggregation: 0.1,
         titleMatch: 0.15,
         freshness: 0.1,
         anchorText: 0.10
@@ -95,7 +90,9 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       path: "/api/search",
       cors: {
         allowOrigins: []
-      }
+      },
+      allowedScopes: [],
+      exposeInternalFields: false
     },
     mcp: {
       enable: process.env.NODE_ENV !== "production",

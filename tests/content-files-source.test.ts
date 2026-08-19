@@ -62,7 +62,7 @@ describe("loadContentFilesPages", () => {
       baseDir: cwd
     };
 
-    const pages = await loadContentFilesPages(cwd, config);
+    const pages = (await loadContentFilesPages(cwd, config)).records;
     const urls = new Set(pages.map((page) => page.url));
 
     expect(urls.has("/")).toBe(true);
@@ -82,7 +82,7 @@ describe("loadContentFilesPages", () => {
       baseDir: path.join(cwd, "src", "routes")
     };
 
-    const pages = await loadContentFilesPages(cwd, config);
+    const pages = (await loadContentFilesPages(cwd, config)).records;
     const urls = new Set(pages.map((page) => page.url));
 
     expect(urls.has("/")).toBe(true);
@@ -98,7 +98,7 @@ describe("loadContentFilesPages", () => {
       baseDir: cwd
     };
 
-    const pages = await loadContentFilesPages(cwd, config);
+    const pages = (await loadContentFilesPages(cwd, config)).records;
     const urls = new Set(pages.map((page) => page.url));
 
     expect(urls.has("/content/guides/intro")).toBe(true);
@@ -114,7 +114,7 @@ describe("loadContentFilesPages", () => {
       baseDir: cwd
     };
 
-    const pages = await loadContentFilesPages(cwd, config, -1);
+    const pages = (await loadContentFilesPages(cwd, config, -1)).records;
     expect(pages).toEqual([]);
   });
 
@@ -127,7 +127,7 @@ describe("loadContentFilesPages", () => {
       baseDir: cwd
     };
 
-    const pages = await loadContentFilesPages(cwd, config, 2.9);
+    const pages = (await loadContentFilesPages(cwd, config, 2.9)).records;
     expect(pages).toHaveLength(2);
   });
 });
@@ -332,7 +332,7 @@ A responsive hero banner with optional CTA button.
       baseDir: cwd
     };
 
-    const pages = await loadContentFilesPages(cwd, config);
+    const pages = (await loadContentFilesPages(cwd, config)).records;
     expect(pages).toHaveLength(1);
 
     const hero = pages[0]!;
@@ -361,7 +361,7 @@ A responsive hero banner with optional CTA button.
       baseDir: cwd
     };
 
-    const pages = await loadContentFilesPages(cwd, config);
+    const pages = (await loadContentFilesPages(cwd, config)).records;
     expect(pages).toHaveLength(1);
     expect(pages[0]!.tags).toBeUndefined();
   });
@@ -384,7 +384,7 @@ A responsive hero banner with optional CTA button.
       baseDir: cwd
     };
 
-    const pages = await loadContentFilesPages(cwd, config);
+    const pages = (await loadContentFilesPages(cwd, config)).records;
     expect(pages).toHaveLength(1);
     expect(pages[0]!.tags).toEqual(["component"]);
     // No component markdown generated, just normalized template content

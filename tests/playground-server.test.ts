@@ -150,7 +150,9 @@ describe("runPlaygroundServer", () => {
     expect(jsonFn).toHaveBeenCalledTimes(1);
     const configData = jsonFn.mock.calls[0]![0] as Record<string, unknown>;
     expect(configData).toHaveProperty("ranking");
-    expect(configData).toHaveProperty("search");
+    // The playground exposes only controls that affect the running search.
+    // `search.pageSearchWeight` was a slider wired to a dead code path.
+    expect(configData).not.toHaveProperty("search");
   });
 
   it("POST /_searchsocket/search forwards rankingOverrides", async () => {

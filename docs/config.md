@@ -76,7 +76,10 @@ SearchSocket reads `UPSTASH_VECTOR_REST_URL` and `UPSTASH_VECTOR_REST_TOKEN` fro
 - `chunking.dontSplitInside` (default `["code", "table", "blockquote"]`) — block types to keep intact
 - `chunking.prependTitle` (default `true`) — prepend page title to chunk text before indexing
 - `chunking.pageSummaryChunk` (default `true`) — generate a synthetic identity chunk per page
-- `chunking.weightHeadings` (default `true`) — boost heading text in chunks
+- `chunking.weightHeadings` — **removed in 0.8.** It only changed the chunk
+  content hash; the weighted heading text never reached the embedding model, so
+  it caused re-embedding churn without affecting relevance. Use
+  `chunking.prependTitle`.
 
 ## Upstash
 
@@ -86,6 +89,11 @@ SearchSocket reads `UPSTASH_VECTOR_REST_URL` and `UPSTASH_VECTOR_REST_TOKEN` fro
 - `upstash.token` — direct Upstash REST token (alternative to env var)
 - `upstash.namespaces.pages` (default `pages`) — namespace for page vectors
 - `upstash.namespaces.chunks` (default `chunks`) — namespace for chunk vectors
+- `upstash.batchSize` (default `90`, max `500`) — records per upsert/delete/fetch request
+- `upstash.maxRetries` (default `2`, max `10`) — retries for transient backend failures
+  (rate limits, timeouts, 5xx). Authorization and filter-syntax errors are never
+  retried. The Upstash SDK separately retries network failures on its own, so
+  raising this multiplies with those attempts.
 
 ## Embedding
 
@@ -94,8 +102,12 @@ Upstash handles embedding server-side via the `data` field. These settings must 
 - `embedding.model` (default `bge-large-en-v1.5`) — embedding model name
 - `embedding.dimensions` (default `1024`) — vector dimensions
 - `embedding.taskType` (default `RETRIEVAL_DOCUMENT`) — embedding task type
-- `embedding.batchSize` (default `100`) — vectors per upsert batch
-- `embedding.images.enable` — unused, kept for backwards compatibility. Images are made searchable via text descriptions (`data-search-description`, `alt`, `figcaption`), not image embeddings.
+- `embedding.batchSize` — **removed in 0.8.** It never affected anything at
+  runtime. Use `upstash.batchSize`. Setting it now produces a migration error
+  rather than being silently ignored.
+- `embedding.images.enable` — **removed in 0.8.** SearchSocket is text-only.
+  Images are made searchable via their text descriptions
+  (`data-search-description`, `alt`, `figcaption`), never image embeddings.
 
 ### Non-English / multilingual sites
 
@@ -114,8 +126,31 @@ The model and dimensions must match what you selected when creating the Upstash 
 
 ## Search
 
-- `search.dualSearch` (default `true`) — run parallel page-level and chunk-level search
-- `search.pageSearchWeight` (default `0.3`) — weight of page-level results vs chunks (0-1)
+Search is page-first: one query ranks pages, then the best-matching sections
+within the top pages are retrieved as sub-results. There is no `search` config
+section — `search.dualSearch` and `search.pageSearchWeight` described a parallel
+blended retrieval path that the default search stopped using, and setting either
+now produces a migration error. Tune ranking through `ranking.weights`.
+
+### API access policy
+
+- `api.allowedScopes` (default `[]`) — scopes a browser request may select with
+  `?scope=` or a `scope` field in a POST body. Empty means the caller cannot
+  choose and always gets the server's configured scope; anything else is a 403.
+- `api.exposeInternalFields` (default `false`) — include `routeFile` (a path in
+  your repository) and `chunkText` (the matched section's indexed text) in
+  browser search responses, and `routeFile` in page responses. Off by default.
+
+### MCP access
+
+- `mcp.enable` (default `NODE_ENV !== "production"`) — mount the MCP endpoint on
+  the SvelteKit handle.
+- `mcp.handle.apiKey` / `mcp.handle.apiKeyEnv` — **required** for the endpoint to
+  serve anything. MCP returns repository paths, a page's indexed markdown, and any
+  scope the caller names, so without a key the route answers 503.
+- `mcp.access` (default `private`) — governs the **standalone** MCP server only:
+  whether it binds to loopback or all interfaces. It has no effect on the
+  SvelteKit handle route, which always requires a key.
 
 ## Ranking
 
@@ -124,18 +159,37 @@ The model and dimensions must match what you selected when creating the Upstash 
 - `ranking.enableFreshnessBoost` (default `false`) — boost recently published pages
 - `ranking.freshnessDecayRate` (default `0.001`) — decay rate for freshness boost
 - `ranking.enableAnchorTextBoost` (default `false`) — boost pages whose anchor text matches the query
-- `ranking.pageWeights` (default `{}`) — per-URL score multipliers (e.g., `{ "/docs": 1.15 }`)
-- `ranking.aggregationCap` (default `5`) — max chunks contributing to a page score
-- `ranking.aggregationDecay` (default `0.5`) — decay factor for additional matching chunks
-- `ranking.minChunkScoreRatio` (default `0.5`) — minimum chunk score relative to best chunk
-- `ranking.minScore` (default `0.3`) — minimum absolute score to include in results
+- `ranking.pageWeights` (default `{}`) — per-URL score multipliers (e.g.,
+  `{ "/docs": 1.15 }`). A page's own `searchsocket-weight` / frontmatter weight
+  takes precedence, except that a `0` from either source excludes the page.
+- `ranking.minScoreRatio` (default `0.70`) — drop results scoring below this
+  fraction of the best result
 - `ranking.scoreGapThreshold` (default `0.4`) — trim results below best score minus this threshold
 
-### Ranking weights
+#### API access policy
+
+- `api.allowedScopes` (default `[]`) — scopes a browser request may select with
+  `?scope=` or a `scope` field in a POST body. Empty means the caller cannot
+  choose and always gets the server's configured scope; anything else is a 403.
+- `api.exposeInternalFields` (default `false`) — include `routeFile` (a path in
+  your repository) and `chunkText` (the matched section's indexed text) in
+  browser search responses, and `routeFile` in page responses. Off by default.
+
+### MCP access
+
+- `mcp.enable` (default `NODE_ENV !== "production"`) — mount the MCP endpoint on
+  the SvelteKit handle.
+- `mcp.handle.apiKey` / `mcp.handle.apiKeyEnv` — **required** for the endpoint to
+  serve anything. MCP returns repository paths, a page's indexed markdown, and any
+  scope the caller names, so without a key the route answers 503.
+- `mcp.access` (default `private`) — governs the **standalone** MCP server only:
+  whether it binds to loopback or all interfaces. It has no effect on the
+  SvelteKit handle route, which always requires a key.
+
+## Ranking weights
 
 - `ranking.weights.incomingLinks` (default `0.05`)
 - `ranking.weights.depth` (default `0.03`)
-- `ranking.weights.aggregation` (default `0.1`)
 - `ranking.weights.titleMatch` (default `0.15`)
 - `ranking.weights.freshness` (default `0.1`)
 - `ranking.weights.anchorText` (default `0.10`)
@@ -269,7 +323,29 @@ await pipeline.run({
 });
 ```
 
-Custom records receive the same `transformPage` hook treatment as regular pages, and are tagged with their URL path segments automatically.
+Custom records receive the same `transformPage` hook treatment as regular pages,
+and are tagged with their URL path segments automatically. `metadata` becomes
+filterable page metadata, the same as `searchsocket:` meta tags on a real page.
+
+### Deletion semantics
+
+Each run's `customRecords` is treated as the complete set from its caller, so a
+record present last run and absent this run is removed — the same rule the site
+source follows.
+
+Omitting the option entirely is different from passing an empty array:
+
+```ts
+await pipeline.run({});                     // says nothing; existing custom records are kept
+await pipeline.run({ customRecords: [] });  // asserts there are none; existing ones are removed
+```
+
+This matters because custom records live in the same index as site pages. A
+plain `searchsocket index` — from the CLI or the Vite plugin — passes no
+`customRecords`, and previously deleted every one of them as "no longer
+present". A provider that merely failed to run once took its content with it.
+To remove custom records, call `run()` programmatically with an explicit list
+(or an empty one).
 
 ## Environment Variables
 

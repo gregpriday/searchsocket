@@ -3,6 +3,7 @@ import { UpstashSearchStore } from "../src/vector/upstash";
 import { QueryMode } from "@upstash/vector";
 import type { Index } from "@upstash/vector";
 import type { Scope } from "../src/types";
+import { INDEX_SCHEMA_VERSION, chunkId, pageId } from "../src/vector/ids";
 
 interface FakeVector {
   id: string;
@@ -128,7 +129,11 @@ describe("UpstashSearchStore namespace routing", () => {
 
     await store.deleteByIds(["c1", "c2"], scope);
 
-    expect(chunksNs.delete).toHaveBeenCalledWith(["c1", "c2"]);
+    // Logical keys in, scope-qualified physical IDs out.
+    expect(chunksNs.delete).toHaveBeenCalledWith([
+      chunkId(scope, "c1"),
+      chunkId(scope, "c2")
+    ]);
     expect(pagesNs.delete).not.toHaveBeenCalled();
   });
 
@@ -136,9 +141,12 @@ describe("UpstashSearchStore namespace routing", () => {
     const { index, chunksNs, pagesNs } = createFakeIndex();
     const store = new UpstashSearchStore({ index, pagesNamespace: "pages", chunksNamespace: "chunks" });
 
-    await store.deletePagesByIds(["p1", "p2"], scope);
+    await store.deletePagesByIds(["/p1", "/p2"], scope);
 
-    expect(pagesNs.delete).toHaveBeenCalledWith(["p1", "p2"]);
+    expect(pagesNs.delete).toHaveBeenCalledWith([
+      pageId(scope, "/p1"),
+      pageId(scope, "/p2")
+    ]);
     expect(chunksNs.delete).not.toHaveBeenCalled();
   });
 
@@ -187,11 +195,11 @@ describe("UpstashSearchStore namespace routing", () => {
   it("deleteScope scans both namespaces", async () => {
     const { index, chunksNs, pagesNs } = createFakeIndex();
     chunksNs.range.mockResolvedValueOnce({
-      vectors: [{ id: "c1", metadata: { projectId: "test-project", scopeName: "main" } }] as FakeVector[],
+      vectors: [{ id: "c1", metadata: { projectId: "test-project", scopeName: "main", schemaVersion: INDEX_SCHEMA_VERSION } }] as FakeVector[],
       nextCursor: "0"
     });
     pagesNs.range.mockResolvedValueOnce({
-      vectors: [{ id: "p1", metadata: { projectId: "test-project", scopeName: "main" } }] as FakeVector[],
+      vectors: [{ id: "p1", metadata: { projectId: "test-project", scopeName: "main", schemaVersion: INDEX_SCHEMA_VERSION } }] as FakeVector[],
       nextCursor: "0"
     });
 
@@ -208,14 +216,14 @@ describe("UpstashSearchStore namespace routing", () => {
     const { index, chunksNs, pagesNs } = createFakeIndex();
     chunksNs.range.mockResolvedValueOnce({
       vectors: [
-        { id: "c1", metadata: { projectId: "test-project", scopeName: "main" } },
-        { id: "c2", metadata: { projectId: "test-project", scopeName: "main" } }
+        { id: "c1", metadata: { projectId: "test-project", scopeName: "main", schemaVersion: INDEX_SCHEMA_VERSION } },
+        { id: "c2", metadata: { projectId: "test-project", scopeName: "main", schemaVersion: INDEX_SCHEMA_VERSION } }
       ] as FakeVector[],
       nextCursor: "0"
     });
     pagesNs.range.mockResolvedValueOnce({
       vectors: [
-        { id: "p1", metadata: { projectId: "test-project", scopeName: "main" } }
+        { id: "p1", metadata: { projectId: "test-project", scopeName: "main", schemaVersion: INDEX_SCHEMA_VERSION } }
       ] as FakeVector[],
       nextCursor: "0"
     });

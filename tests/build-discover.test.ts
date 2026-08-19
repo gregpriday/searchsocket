@@ -249,7 +249,7 @@ describe("extractLinksFromHtml", () => {
 // ---------------------------------------------------------------------------
 
 describe("build discover mode (integration)", () => {
-  async function runDiscover(
+  async function runDiscoverFull(
     pages: Record<string, string>,
     buildConfig?: Partial<NonNullable<ReturnType<typeof createDefaultConfig>["source"]["build"]>>,
     maxPages?: number,
@@ -282,6 +282,13 @@ describe("build discover mode (integration)", () => {
     };
 
     return loadBuildPages("/tmp", config, maxPages);
+  }
+
+  /** Records only — most assertions here are about which pages were found. */
+  async function runDiscover(
+    ...args: Parameters<typeof runDiscoverFull>
+  ): Promise<Awaited<ReturnType<typeof runDiscoverFull>>["records"]> {
+    return (await runDiscoverFull(...args)).records;
   }
 
   it("discovers pages by following links from seed URL", async () => {
@@ -693,7 +700,7 @@ describe("build discover mode (integration)", () => {
       maxDepth: 10
     };
 
-    const result = await loadBuildPages("/tmp", config);
+    const result = (await loadBuildPages("/tmp", config)).records;
     const urls = result.map((p) => p.url).sort();
     expect(urls).toEqual(["/", "/good"]);
   });

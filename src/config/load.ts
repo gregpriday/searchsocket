@@ -52,9 +52,104 @@ function detectSourceMode(cwd: string, config: ResolvedSearchSocketConfig, parse
   );
 }
 
+/**
+ * Config keys removed in 0.8, mapped to what to do instead.
+ *
+ * Zod strips unknown keys silently, so without this a config that still sets a
+ * removed option looks accepted while the option does nothing — which is how
+ * `search.dualSearch` and `search.pageSearchWeight` came to be tuned by users
+ * despite having no effect on the default search path for several releases.
+ */
+const REMOVED_CONFIG_KEYS: Array<{ path: string; reason: string }> = [
+  {
+    path: "search.dualSearch",
+    reason:
+      "Dual page+chunk retrieval was removed in 0.8. Search is page-first: pages are " +
+      "ranked, then the best sections within each are retrieved. Delete this option."
+  },
+  {
+    path: "search.pageSearchWeight",
+    reason:
+      "This blended page and chunk scores in the removed dual-retrieval path and has " +
+      "had no effect on the default search since page-first ranking landed. Delete it; " +
+      "tune ranking.weights instead."
+  },
+  {
+    path: "ranking.aggregationCap",
+    reason:
+      "Chunk aggregation was part of the removed dual-retrieval path and never " +
+      "affected page-first search. Delete this option."
+  },
+  {
+    path: "ranking.aggregationDecay",
+    reason:
+      "Chunk aggregation was part of the removed dual-retrieval path and never " +
+      "affected page-first search. Delete this option."
+  },
+  {
+    path: "ranking.minChunkScoreRatio",
+    reason:
+      "This filtered sub-results in the removed page-grouping code path. Section " +
+      "sub-results are now bounded by the maxSubResults request option."
+  },
+  {
+    path: "ranking.weights.aggregation",
+    reason:
+      "The aggregation bonus it weighted was part of the removed dual-retrieval " +
+      "path. Delete this option."
+  },
+  {
+    path: "chunking.weightHeadings",
+    reason:
+      "This only perturbed the chunk content hash — the weighted heading text was " +
+      "never sent to the embedding model — so enabling it caused re-embedding churn " +
+      "without changing relevance. Use chunking.prependTitle, which does reach the model."
+  },
+  {
+    path: "embedding.images.enable",
+    reason:
+      "SearchSocket is text-only. Images are searchable through their text " +
+      "descriptions (data-search-description, alt, figcaption); there is no image " +
+      "embedding to enable."
+  },
+  {
+    path: "embedding.batchSize",
+    reason:
+      "Batch size is controlled by upstash.batchSize. This option never affected " +
+      "anything at runtime."
+  }
+];
+
+function readPath(source: unknown, path: string): unknown {
+  let current: unknown = source;
+  for (const segment of path.split(".")) {
+    if (typeof current !== "object" || current === null) return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+function assertNoRemovedKeys(rawConfig: SearchSocketConfig): void {
+  const found = REMOVED_CONFIG_KEYS.filter(
+    (entry) => readPath(rawConfig, entry.path) !== undefined
+  );
+  if (found.length === 0) return;
+
+  const details = found.map((entry) => `  ${entry.path}\n    ${entry.reason}`).join("\n");
+  throw new SearchSocketError(
+    "CONFIG_MISSING",
+    `searchsocket.config.ts sets options that were removed in 0.8:\n${details}\n\n` +
+      "See https://github.com/gregpriday/searchsocket/blob/main/docs/migration-0.8.md"
+  );
+}
+
 export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): ResolvedSearchSocketConfig {
   const projectId = rawConfig.project?.id ?? inferProjectId(cwd);
   const defaults = createDefaultConfig(projectId);
+
+  // Before schema validation: a removed key must produce a migration message,
+  // not be quietly stripped.
+  assertNoRemovedKeys(rawConfig);
 
   const parseResult = searchSocketConfigSchema.safeParse(rawConfig);
   if (!parseResult.success) {
@@ -128,15 +223,17 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
       namespaces: {
         ...defaults.upstash.namespaces,
         ...parsed.upstash?.namespaces
-      }
+      },
+      batchSize: parsed.upstash?.batchSize ?? defaults.upstash.batchSize,
+      maxRetries: parsed.upstash?.maxRetries ?? defaults.upstash.maxRetries
     },
     embedding: {
       ...defaults.embedding,
       ...parsed.embedding
     },
-    search: {
-      ...defaults.search,
-      ...parsed.search
+    indexing: {
+      ...defaults.indexing,
+      ...parsed.indexing
     },
     ranking: {
       ...defaults.ranking,
@@ -203,6 +300,10 @@ export function mergeConfig(cwd: string, rawConfig: SearchSocketConfig): Resolve
     };
   }
 
+  // `mcp.access` governs the standalone MCP server only — it decides whether
+  // that process binds to loopback or to all interfaces. The SvelteKit handle
+  // route has its own rule and always requires `mcp.handle.apiKey` /
+  // `apiKeyEnv`, so it needs no check here.
   if (merged.mcp.access === "public") {
     const resolvedKey = merged.mcp.http.apiKey
       ?? (merged.mcp.http.apiKeyEnv ? process.env[merged.mcp.http.apiKeyEnv] : undefined);

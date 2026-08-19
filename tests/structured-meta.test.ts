@@ -3,7 +3,8 @@ import {
   validateMetaKey,
   serializeMetaValue,
   parseMetaValue,
-  escapeFilterValue,
+  assertSafeFilterValue,
+  UnsafeFilterValueError,
   buildMetaFilterString,
   toStoredMeta
 } from "../src/utils/structured-meta";
@@ -86,14 +87,29 @@ describe("toStoredMeta", () => {
   });
 });
 
-describe("escapeFilterValue", () => {
-  it("escapes single quotes", () => {
-    expect(escapeFilterValue("O'Reilly")).toBe("O''Reilly");
-    expect(escapeFilterValue("it's")).toBe("it''s");
+describe("assertSafeFilterValue", () => {
+  // Upstash documents single-quoted string literals but defines no escape
+  // sequence for a quote or backslash. This used to double quotes SQL-style,
+  // which is a guess — and a wrong guess leaves the value parsed as filter
+  // syntax, widening the query past the tenant predicates.
+  it("rejects a value containing a quote", () => {
+    expect(() => assertSafeFilterValue("O'Reilly")).toThrow(UnsafeFilterValueError);
+    expect(() => assertSafeFilterValue("it's")).toThrow(UnsafeFilterValueError);
+  });
+
+  it("rejects a value containing a backslash", () => {
+    expect(() => assertSafeFilterValue("a\\b")).toThrow(UnsafeFilterValueError);
+  });
+
+  it("rejects an injection-shaped value", () => {
+    expect(() => assertSafeFilterValue("x' OR projectId = 'other")).toThrow(
+      UnsafeFilterValueError
+    );
   });
 
   it("passes through clean strings", () => {
-    expect(escapeFilterValue("hello")).toBe("hello");
+    expect(assertSafeFilterValue("hello")).toBe("hello");
+    expect(assertSafeFilterValue("a-b_c.d/e 1")).toBe("a-b_c.d/e 1");
   });
 });
 
@@ -121,9 +137,9 @@ describe("buildMetaFilterString", () => {
     expect(result).toContain(" AND ");
   });
 
-  it("escapes single quotes in string values", () => {
-    expect(buildMetaFilterString({ category: "O'Reilly" })).toBe(
-      "meta.category CONTAINS 'O''Reilly'"
+  it("rejects a string value containing a quote", () => {
+    expect(() => buildMetaFilterString({ category: "O'Reilly" })).toThrow(
+      UnsafeFilterValueError
     );
   });
 

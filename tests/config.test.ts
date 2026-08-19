@@ -42,7 +42,6 @@ describe("createDefaultConfig", () => {
     const config = createDefaultConfig("example");
     expect(config.embedding.model).toBe("bge-large-en-v1.5");
     expect(config.embedding.dimensions).toBe(1024);
-    expect(config.embedding.batchSize).toBe(100);
   });
 
   it("has llmsTxt defaults with generateFull enabled", () => {
@@ -52,17 +51,16 @@ describe("createDefaultConfig", () => {
     expect(config.llmsTxt.enable).toBe(false);
   });
 
-  it("has search defaults", () => {
+  it("has upstash batching defaults", () => {
     const config = createDefaultConfig("example");
-    expect(config.search.dualSearch).toBe(true);
-    expect(config.search.pageSearchWeight).toBe(0.3);
+    expect(config.upstash.batchSize).toBe(90);
+    expect(config.upstash.maxRetries).toBe(2);
   });
 
   it("has ranking weights without rerank", () => {
     const config = createDefaultConfig("example");
     expect(config.ranking.weights.incomingLinks).toBe(0.05);
     expect(config.ranking.weights.depth).toBe(0.03);
-    expect(config.ranking.weights.aggregation).toBe(0.1);
     expect(config.ranking.weights).not.toHaveProperty("rerank");
   });
 });
@@ -79,7 +77,7 @@ describe("mergeConfig", () => {
     expect(merged.upstash.urlEnv).toBe("UPSTASH_VECTOR_REST_URL");
     expect(merged.chunking.maxChars).toBe(3000);
     expect(merged.chunking.overlapChars).toBe(200);
-    expect(merged.search.dualSearch).toBe(true);
+    expect(merged.upstash.maxRetries).toBe(2);
   });
 
   it("infers project id from package.json name", async () => {
@@ -218,11 +216,10 @@ describe("mergeConfig", () => {
     await fs.mkdir(path.join(dir, "build"), { recursive: true });
 
     const merged = mergeConfig(dir, {
-      embedding: { dimensions: 768, batchSize: 50 }
+      embedding: { dimensions: 768 }
     });
 
     expect(merged.embedding.dimensions).toBe(768);
-    expect(merged.embedding.batchSize).toBe(50);
     expect(merged.embedding.model).toBe("bge-large-en-v1.5"); // default preserved
   });
 
@@ -252,16 +249,39 @@ describe("mergeConfig", () => {
     expect(merged.upstash.namespaces.pages).toBe("pages");
   });
 
-  it("merges search overrides", async () => {
+  it("merges upstash batching overrides", async () => {
     const dir = await makeTempDir();
     await fs.mkdir(path.join(dir, "build"), { recursive: true });
 
     const merged = mergeConfig(dir, {
-      search: { dualSearch: false }
+      upstash: { batchSize: 25 }
     });
 
-    expect(merged.search.dualSearch).toBe(false);
-    expect(merged.search.pageSearchWeight).toBe(0.3);
+    expect(merged.upstash.batchSize).toBe(25);
+    expect(merged.upstash.maxRetries).toBe(2); // default preserved
+  });
+
+  describe("removed 0.8 options", () => {
+    // Zod strips unknown keys silently, so a config still setting one of these
+    // would look accepted while the option did nothing — exactly how
+    // search.pageSearchWeight came to be tuned despite having no effect.
+    it.each([
+      ["search.dualSearch", { search: { dualSearch: false } }],
+      ["search.pageSearchWeight", { search: { pageSearchWeight: 0.5 } }],
+      ["embedding.batchSize", { embedding: { batchSize: 50 } }]
+    ])("rejects %s with a migration message", async (key, raw) => {
+      const dir = await makeTempDir();
+      await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+      expect(() => mergeConfig(dir, raw as never)).toThrow(new RegExp(key.replace(".", "\\.")));
+      expect(() => mergeConfig(dir, raw as never)).toThrow(/removed in 0\.8/);
+    });
+
+    it("still accepts a config that sets none of them", async () => {
+      const dir = await makeTempDir();
+      await fs.mkdir(path.join(dir, "build"), { recursive: true });
+      expect(() => mergeConfig(dir, { embedding: { dimensions: 768 } })).not.toThrow();
+    });
   });
 
   it("allows setting upstash url and token directly", async () => {
@@ -410,6 +430,6 @@ describe("loadConfig", () => {
     const config = await loadConfig({ cwd: dir, allowMissing: true });
     expect(config.upstash.urlEnv).toBe("UPSTASH_VECTOR_REST_URL");
     expect(config.upstash.tokenEnv).toBe("UPSTASH_VECTOR_REST_TOKEN");
-    expect(config.search.dualSearch).toBe(true);
+    expect(config.upstash.batchSize).toBe(90);
   });
 });

@@ -62,6 +62,11 @@ function makeEvent(options: {
   if (options.contentLength !== undefined) {
     headers.set("content-length", String(options.contentLength));
   }
+  // Real clients send this on a JSON POST, and the endpoint now requires it.
+  // Tests that need the missing-header case set it explicitly to "".
+  if (options.method === "POST" && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
 
   const bodyStr = options.body ? JSON.stringify(options.body) : "";
   void bodyStr;
@@ -136,7 +141,9 @@ describe("searchsocketHandle", () => {
         path: "/api/search",
         cors: {
           allowOrigins: ["https://app.example"]
-        }
+        },
+        allowedScopes: [],
+        exposeInternalFields: false
       }
     });
 
@@ -241,6 +248,8 @@ describe("searchsocketHandle", () => {
         cors: {
           allowOrigins: []
         },
+        allowedScopes: [],
+        exposeInternalFields: false,
         rateLimit: {
           windowMs: 60_000,
           max: 1
@@ -285,7 +294,9 @@ describe("searchsocketHandle", () => {
         path: "/api/search",
         cors: {
           allowOrigins: ["https://allowed.example"]
-        }
+        },
+        allowedScopes: [],
+        exposeInternalFields: false
       }
     });
 
@@ -324,10 +335,12 @@ describe("searchsocketHandle", () => {
     });
 
     expect(response.status).toBe(500);
+    // Generic, not the thrown message: an unexpected error can carry a
+    // credential or an internal path.
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "INTERNAL_ERROR",
-        message: "boom"
+        message: "Internal error"
       }
     });
   });
@@ -546,6 +559,8 @@ describe("searchsocketHandle", () => {
       api: {
         path: "/api/search",
         cors: { allowOrigins: [] },
+      allowedScopes: [],
+      exposeInternalFields: false,
         rateLimit: { windowMs: 60_000, max: 1 }
       }
     });
@@ -572,7 +587,9 @@ describe("GET /api/search", () => {
     const config = makeConfig({
       api: {
         path: "/api/search",
-        cors: { allowOrigins: ["https://app.example"] }
+        cors: { allowOrigins: ["https://app.example"] },
+      allowedScopes: [],
+      exposeInternalFields: false
       }
     });
 
@@ -671,6 +688,8 @@ describe("GET /api/search", () => {
       api: {
         path: "/api/search",
         cors: { allowOrigins: [] },
+      allowedScopes: [],
+      exposeInternalFields: false,
         rateLimit: { windowMs: 60_000, max: 1 }
       }
     });
@@ -831,8 +850,29 @@ describe("GET /api/search/pages/:path", () => {
     expect(getPage).toHaveBeenCalledWith("/docs/getting started", undefined);
   });
 
-  it("passes scope query param to getPage", async () => {
+  it("refuses a scope the deployment has not allowlisted", async () => {
+    // A caller-supplied ?scope= was passed straight through, so any visitor
+    // could read a preview or staging scope by naming it.
     const config = makeConfig();
+    const getPage = vi.fn();
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({ getPage } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const event = makeEvent({
+      pathname: "/api/search/pages/docs/install",
+      method: "GET",
+      searchParams: { scope: "v2" }
+    });
+
+    const response = await handle({ event, resolve });
+    expect(response.status).toBe(403);
+    expect(getPage).not.toHaveBeenCalled();
+  });
+
+  it("passes an allowlisted scope through to getPage", async () => {
+    const config = makeConfig({ api: { allowedScopes: ["v2"] } } as Partial<ResolvedSearchSocketConfig>);
     const getPage = vi.fn().mockResolvedValue({
       url: "/docs/install",
       frontmatter: {},
@@ -903,7 +943,9 @@ describe("REST API sub-route routing", () => {
     const config = makeConfig({
       api: {
         path: "/api/search",
-        cors: { allowOrigins: ["https://app.example"] }
+        cors: { allowOrigins: ["https://app.example"] },
+      allowedScopes: [],
+      exposeInternalFields: false
       }
     });
 
@@ -1115,7 +1157,9 @@ describe("searchsocketHandle markdown variant serving", () => {
     const event = makeEvent({ pathname: "/docs/api.md", method: "GET", searchParams: { scope: "v2" } });
 
     await handle({ event, resolve });
-    expect(mockGetPage).toHaveBeenCalledWith("/docs/api", "v2");
+    // Not allowlisted, so the request falls through rather than serving
+    // another scope's content.
+    expect(mockGetPage).not.toHaveBeenCalled();
   });
 
   it("falls through when serveMarkdownVariants is false", async () => {
@@ -1294,6 +1338,7 @@ describe("searchsocketHandle markdown variant serving", () => {
 describe("MCP endpoint", () => {
   it("routes MCP requests to the MCP handler", async () => {
     const config = makeConfig();
+    config.mcp.handle.apiKey = "test-secret";
     vi.spyOn(SearchEngine, "create").mockResolvedValue({
       search: vi.fn()
     } as unknown as SearchEngine);
@@ -1304,7 +1349,8 @@ describe("MCP endpoint", () => {
     const event = makeEvent({
       pathname: "/api/mcp",
       method: "POST",
-      body: { jsonrpc: "2.0", method: "initialize", id: 1 }
+      body: { jsonrpc: "2.0", method: "initialize", id: 1 },
+      headers: { authorization: "Bearer test-secret" }
     });
 
     const response = await handle({ event, resolve });
@@ -1387,12 +1433,16 @@ describe("MCP endpoint", () => {
     expect(response.status).toBe(200);
   });
 
-  it("does not require auth when no API key is configured", async () => {
+  it("refuses to serve MCP at all when no API key is configured", async () => {
+    // MCP returns repository paths, full page markdown, and any scope the
+    // caller names. The auth check used to be wrapped in `if (apiKey)`, so a
+    // deployment that never configured one served all of that to anyone.
     const config = makeConfig();
     // No apiKey set
 
+    const search = vi.fn();
     vi.spyOn(SearchEngine, "create").mockResolvedValue({
-      search: vi.fn()
+      search
     } as unknown as SearchEngine);
 
     const handle = searchsocketHandle({ config });
@@ -1405,6 +1455,31 @@ describe("MCP endpoint", () => {
     });
 
     const response = await handle({ event, resolve });
+    expect(response.status).toBe(503);
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it("reads the API key from apiKeyEnv so it need not be committed", async () => {
+    const config = makeConfig();
+    config.mcp.handle.apiKeyEnv = "TEST_MCP_KEY";
+    process.env.TEST_MCP_KEY = "from-env";
+
+    vi.spyOn(SearchEngine, "create").mockResolvedValue({
+      search: vi.fn()
+    } as unknown as SearchEngine);
+
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+    const event = makeEvent({
+      pathname: "/api/mcp",
+      method: "POST",
+      body: { jsonrpc: "2.0", method: "initialize", id: 1 },
+      headers: { authorization: "Bearer from-env" }
+    });
+
+    const response = await handle({ event, resolve });
+    delete process.env.TEST_MCP_KEY;
     expect(response.status).toBe(200);
   });
 
@@ -1412,6 +1487,7 @@ describe("MCP endpoint", () => {
     mockTransportHandleRequest = vi.fn().mockRejectedValue(new Error("transport boom"));
 
     const config = makeConfig();
+    config.mcp.handle.apiKey = "test-secret";
     vi.spyOn(SearchEngine, "create").mockResolvedValue({
       search: vi.fn()
     } as unknown as SearchEngine);
@@ -1422,17 +1498,20 @@ describe("MCP endpoint", () => {
     const event = makeEvent({
       pathname: "/api/mcp",
       method: "POST",
-      body: { jsonrpc: "2.0", method: "initialize", id: 1 }
+      body: { jsonrpc: "2.0", method: "initialize", id: 1 },
+      headers: { authorization: "Bearer test-secret" }
     });
 
     const response = await handle({ event, resolve });
     expect(response.status).toBe(500);
     const body = await response.json();
-    expect(body.error.message).toBe("transport boom");
+    expect(body.error.message).toBe("Internal server error");
+    expect(body.error.message).not.toContain("transport boom");
   });
 
   it("memoizes engine across MCP requests", async () => {
     const config = makeConfig();
+    config.mcp.handle.apiKey = "test-secret";
     const createSpy = vi.spyOn(SearchEngine, "create").mockResolvedValue({
       search: vi.fn()
     } as unknown as SearchEngine);
@@ -1443,7 +1522,8 @@ describe("MCP endpoint", () => {
     const event = makeEvent({
       pathname: "/api/mcp",
       method: "POST",
-      body: { jsonrpc: "2.0", method: "initialize", id: 1 }
+      body: { jsonrpc: "2.0", method: "initialize", id: 1 },
+      headers: { authorization: "Bearer test-secret" }
     });
 
     await handle({ event, resolve });
@@ -1454,6 +1534,7 @@ describe("MCP endpoint", () => {
 
   it("routes to custom MCP path from config", async () => {
     const config = makeConfig();
+    config.mcp.handle.apiKey = "test-secret";
     config.mcp.handle.path = "/custom/mcp";
 
     vi.spyOn(SearchEngine, "create").mockResolvedValue({
@@ -1466,7 +1547,8 @@ describe("MCP endpoint", () => {
     const event = makeEvent({
       pathname: "/custom/mcp",
       method: "POST",
-      body: { jsonrpc: "2.0", method: "initialize", id: 1 }
+      body: { jsonrpc: "2.0", method: "initialize", id: 1 },
+      headers: { authorization: "Bearer test-secret" }
     });
 
     const response = await handle({ event, resolve });
@@ -1478,9 +1560,12 @@ describe("MCP endpoint", () => {
     const config = makeConfig({
       api: {
         path: "/api/search",
-        cors: { allowOrigins: [] }
+        cors: { allowOrigins: [] },
+      allowedScopes: [],
+      exposeInternalFields: false
       }
     });
+    config.mcp.handle.apiKey = "test-secret";
 
     vi.spyOn(SearchEngine, "create").mockResolvedValue({
       search: vi.fn().mockResolvedValue({
@@ -1506,7 +1591,8 @@ describe("MCP endpoint", () => {
     const mcpEvent = makeEvent({
       pathname: "/api/mcp",
       method: "POST",
-      body: { jsonrpc: "2.0", method: "initialize", id: 1 }
+      body: { jsonrpc: "2.0", method: "initialize", id: 1 },
+      headers: { authorization: "Bearer test-secret" }
     });
 
     const mcpResponse = await handle({ event: mcpEvent, resolve });

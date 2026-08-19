@@ -469,9 +469,11 @@ interface SearchResult {
   title: string;
   sectionTitle?: string;        // heading of best-matching section
   snippet: string;              // text excerpt
-  chunkText?: string;           // full chunk text (chunk mode)
+  chunkText?: string;           // matched section's indexed text; omitted unless
+                                //   api.exposeInternalFields is enabled
   score: number;                // relevance score (0-1)
-  routeFile: string;            // SvelteKit source file path
+  routeFile?: string;           // SvelteKit source file path; omitted unless
+                                //   api.exposeInternalFields is enabled
   chunks?: SearchResultChunk[]; // sub-results (page mode only)
 }
 
@@ -551,4 +553,8 @@ Retrieve indexed markdown for a specific page:
 GET /api/pages/docs/getting-started
 ```
 
-Returns the full page content as markdown with frontmatter.
+Returns the page's indexed markdown with frontmatter.
+
+The markdown is reassembled from the indexed chunks, so it is complete enough to
+read but is not byte-exact source: it can contain overlap between adjacent
+sections, and a very long page may be truncated at the storage metadata cap.

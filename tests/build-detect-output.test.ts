@@ -115,7 +115,7 @@ describe("loadPrerenderedPages", () => {
     await writeFile(out, "_app/immutable/nodes/0.js", "js");
     await writeFile(out, "blog/post/__data.json", "{}");
 
-    const pages = await loadPrerenderedPages(dir, out);
+    const pages = (await loadPrerenderedPages(dir, out)).records;
     const urls = pages.map((p) => p.url).sort();
 
     expect(urls).toEqual(["/", "/about", "/blog/post"]);
@@ -131,7 +131,7 @@ describe("loadPrerenderedPages", () => {
     await writeFile(out, "_headers", "");
     await writeFile(out, "_redirects", "");
 
-    const pages = await loadPrerenderedPages(dir, out);
+    const pages = (await loadPrerenderedPages(dir, out)).records;
     expect(pages.map((p) => p.url)).toEqual(["/"]);
   });
 
@@ -143,7 +143,7 @@ describe("loadPrerenderedPages", () => {
       await writeFile(out, `page${i}.html`, `<html>${i}</html>`);
     }
 
-    const pages = await loadPrerenderedPages(dir, out, 2);
+    const pages = (await loadPrerenderedPages(dir, out, 2)).records;
     expect(pages).toHaveLength(2);
   });
 });
