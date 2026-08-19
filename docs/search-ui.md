@@ -615,7 +615,7 @@ Set them per instance:
 
 ### Part classes and data attributes
 
-These class names are stable within 1.x — style them from outside the component:
+These class names are part of the public API — style them from outside the component. They will not change without a changelog entry, and are intended to stay stable through 1.x:
 
 ```text
 .ss-search              .ss-search__backdrop        .ss-search__dialog
