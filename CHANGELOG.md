@@ -5,6 +5,105 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Redesigned search UI templates.** `searchsocket add` now generates a polished,
+  self-contained command palette instead of a minimal Tailwind sketch. Each
+  template directory ships the component plus `SearchResultRow.svelte`,
+  `search-ui.ts` and `search-theme.css`, and nothing imports back into
+  `node_modules` — the generated code is entirely yours.
+- **No CSS framework required.** Styling is plain CSS driven by semantic
+  `--ss-search-*` variables, so the default works in any SvelteKit project.
+  Tailwind still works if you want it; the templates simply no longer depend
+  on it.
+- **Explicit theme modes.** A `theme` prop accepts `inherit` (default, follows
+  the host app's `.dark` / `[data-theme="dark"]` convention), `system`, `light`
+  and `dark`, and sets `color-scheme` to match. Plus a `density` prop, `class`
+  and `style` forwarding, and stable `.ss-search__*` part classes documented as
+  the styling escape hatch.
+- **Richer results.** Rows now show the best matching section and a URL
+  breadcrumb alongside the title and snippet, so a result explains *why* it
+  matched. `SearchResults` can list matching sections as their own
+  scroll-to-text links, and supports `list` and `cards` variants.
+- **Search options as props.** `topK`, `scope`, `pathPrefix`, `tags`, `filters`,
+  `groupBy`, `maxSubResults`, `debounce`, `cache` and `minQueryLength` are props
+  on `SearchDialog` and `SearchInput` rather than hard-coded internals. Changing
+  a scope or filter re-runs the current query without recreating the store.
+- **`searchsocket add search-trigger`** — the visible button that opens the
+  dialog. A keyboard shortcut alone is not discoverable.
+- **`createSearch()` gains `status`, `resolvedQuery`, `hasSearched`, `clear()`
+  and `retry()`**, plus `minQueryLength` and `keepPreviousResults` options. All
+  additive: existing `query`/`results`/`loading`/`error`/`destroy()` behaviour
+  and defaults are unchanged, the request body is unchanged, and the cache is
+  still keyed on the query exactly as typed. The published `SearchState`
+  interface is untouched — the new members live on a `SearchStore` interface
+  that extends it, so code annotating or implementing `SearchState` still
+  compiles.
+- `onSelectError` on `SearchDialog` and `SearchInput`, so a rejected `onSelect`
+  or `navigate` surfaces instead of becoming an unhandled rejection.
+
+### Fixed
+
+- Template components no longer use fixed DOM ids (`ss-listbox`, `ss-option-0`),
+  which collided when a page had two search inputs, or a dialog and an inline
+  input together. Ids are derived per instance and can be pinned with `id`.
+- The dialog now traps `Tab` inside itself, restores focus to the element that
+  opened it, and restores the previous `body` overflow value instead of clearing
+  it — a page setting its own `overflow` no longer loses it on close.
+- The active result is scrolled into view during arrow navigation instead of
+  moving out of the visible list.
+- `Enter` is ignored while an IME composition is active, so committing CJK and
+  other composed text no longer navigates away mid-word.
+- Inline results are selected on `pointerdown` with the default prevented, so
+  the popup can no longer close before a click is processed.
+- The first `Escape` in the inline input closes the popup while keeping the
+  query and focus, rather than immediately blurring.
+- `aria-expanded` on the inline input now reflects popup visibility, including
+  the loading, empty and error popups, instead of whether results happen to exist.
+- Inputs have real accessible names via a visually hidden `<label>` rather than
+  relying on the placeholder.
+- Results retained while the next query loads are highlighted against the query
+  that produced them (`resolvedQuery`), not the query being typed.
+- `Enter` pressed on the dialog's Clear or Retry button activates that button.
+  Result-navigation keys were previously handled for the whole dialog, so Enter
+  anywhere inside it opened the active result instead.
+- Focus is pulled back into the dialog if something outside it takes focus; a
+  Tab pressed after focus escaped never reached the dialog's own handler.
+- The body scroll lock is reference counted, so two open dialogs no longer
+  unlock the page early or leave `overflow: hidden` behind, and an existing
+  `!important` priority is preserved.
+- Inline results are selected on `click` rather than on any `pointerdown`, so a
+  right-click no longer navigates and a touch drag can still scroll.
+- While the inline popup is closed, `aria-controls` and `aria-activedescendant`
+  are omitted instead of referencing elements that are not in the DOM, and the
+  popup no longer opens below `minQueryLength` with nothing to show.
+- Live regions announce settled outcomes only. Announcing each debounced change
+  queued one utterance per keystroke, and the error state was read twice —
+  once by the status region and once by its `role="alert"` panel.
+- `searchsocket add` refuses to write through a symlink or over a directory, so
+  `--overwrite` cannot follow a link out of the target directory.
+- Breadcrumbs use only the path of an absolute result URL, rather than turning
+  the scheme and host into segments.
+- A response that resolves after its request was aborted no longer overwrites
+  newer state.
+
+### Changed
+
+- `searchsocket add` prints the entry component explicitly (with the `$lib`
+  alias where applicable) plus theme and customization hints, instead of
+  guessing from the first file written. It says so when existing files were
+  kept, and does not describe a template it did not write.
+- The template copier handles `.ts`, `.css` and `.svg` assets and nested
+  directories, not just top-level `.svelte` files. Existing files are still
+  skipped unless `--overwrite` is passed, per file — so adding a second
+  component preserves any edits made to the shared files.
+
+**Already-copied components are not modified.** These changes affect what
+`searchsocket add` generates from now on; existing files in your project are
+untouched, and re-running `add` skips them unless you pass `--overwrite`.
+
 ## [0.8.0] - 2026-08-19
 
 A stabilization release on the road to 1.0. Every change below fixes something

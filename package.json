@@ -71,7 +71,8 @@
     }
   },
   "scripts": {
-    "build": "tsup",
+    "build": "node scripts/sync-templates.mjs && tsup",
+    "sync:templates": "node scripts/sync-templates.mjs",
     "prepare": "npm run build",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",

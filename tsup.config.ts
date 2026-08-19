@@ -52,7 +52,12 @@ export default defineConfig([
       options.loader = { ...options.loader, ".html": "text" };
     },
     onSuccess() {
-      cpSync("src/templates", "dist/templates", { recursive: true });
+      // `_shared` is the authoring source for the per-component support files;
+      // the copies inside each template directory are what actually ships.
+      cpSync("src/templates", "dist/templates", {
+        recursive: true,
+        filter: (source) => !/[\\/]templates[\\/]_shared([\\/]|$)/.test(source)
+      });
     }
   }
 ]);
