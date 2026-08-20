@@ -145,12 +145,21 @@ now produces a migration error. Tune ranking through `ranking.weights`.
 
 - `mcp.enable` (default `NODE_ENV !== "production"`) — mount the MCP endpoint on
   the SvelteKit handle.
-- `mcp.handle.apiKey` / `mcp.handle.apiKeyEnv` — **required** for the endpoint to
-  serve anything. MCP returns repository paths, a page's indexed markdown, and any
-  scope the caller names, so without a key the route answers 503.
+- `mcp.handle.apiKey` / `mcp.handle.apiKeyEnv` — required for the endpoint to
+  serve anything while `mcp.handle.access` is `private`. MCP returns repository
+  paths, a page's indexed markdown, and any scope the caller names, so without a
+  key the route answers 503.
+- `mcp.handle.access` (default `private`) — governs the **SvelteKit handle
+  route**. `public` serves callers that present no `Authorization` header
+  instead of refusing them, with `routeFile`, `chunkText` and `breakdown`
+  stripped from every tool result and the caller's `scope` ignored — the same
+  fields `api.exposeInternalFields` withholds from the browser API. A valid
+  bearer token still returns them, so an editing agent configured with the key
+  keeps source paths and a public agent does not. A wrong or malformed token is
+  still a 401 rather than a silent downgrade.
 - `mcp.access` (default `private`) — governs the **standalone** MCP server only:
   whether it binds to loopback or all interfaces. It has no effect on the
-  SvelteKit handle route, which always requires a key.
+  SvelteKit handle route, which is governed by `mcp.handle.access`.
 
 ## Ranking
 
@@ -179,12 +188,21 @@ now produces a migration error. Tune ranking through `ranking.weights`.
 
 - `mcp.enable` (default `NODE_ENV !== "production"`) — mount the MCP endpoint on
   the SvelteKit handle.
-- `mcp.handle.apiKey` / `mcp.handle.apiKeyEnv` — **required** for the endpoint to
-  serve anything. MCP returns repository paths, a page's indexed markdown, and any
-  scope the caller names, so without a key the route answers 503.
+- `mcp.handle.apiKey` / `mcp.handle.apiKeyEnv` — required for the endpoint to
+  serve anything while `mcp.handle.access` is `private`. MCP returns repository
+  paths, a page's indexed markdown, and any scope the caller names, so without a
+  key the route answers 503.
+- `mcp.handle.access` (default `private`) — governs the **SvelteKit handle
+  route**. `public` serves callers that present no `Authorization` header
+  instead of refusing them, with `routeFile`, `chunkText` and `breakdown`
+  stripped from every tool result and the caller's `scope` ignored — the same
+  fields `api.exposeInternalFields` withholds from the browser API. A valid
+  bearer token still returns them, so an editing agent configured with the key
+  keeps source paths and a public agent does not. A wrong or malformed token is
+  still a 401 rather than a silent downgrade.
 - `mcp.access` (default `private`) — governs the **standalone** MCP server only:
   whether it binds to loopback or all interfaces. It has no effect on the
-  SvelteKit handle route, which always requires a key.
+  SvelteKit handle route, which is governed by `mcp.handle.access`.
 
 ## Ranking weights
 
@@ -211,6 +229,8 @@ now produces a migration error. Tune ranking through `ranking.weights`.
 - `mcp.http.apiKey` (optional) — API key for HTTP transport
 - `mcp.http.apiKeyEnv` (optional) — env var for HTTP API key
 - `mcp.handle.path` (default `/api/mcp`) — SvelteKit handle endpoint path
+- `mcp.handle.access` (`public` | `private`, default `private`) — whether the
+  handle route serves anonymous callers a redacted result set
 - `mcp.handle.apiKey` (optional) — API key for handle endpoint
 - `mcp.handle.enableJsonResponse` (default `true`) — enable JSON response format
 

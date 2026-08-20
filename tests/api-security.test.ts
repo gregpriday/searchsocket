@@ -64,6 +64,14 @@ const SAMPLE_RESPONSE: SearchResponse = {
       score: 0.9,
       routeFile: "src/routes/docs/auth/+page.svelte",
       chunkText: "The complete text of this section, verbatim.",
+      breakdown: {
+        baseScore: 0.8,
+        incomingLinkBoost: 0.05,
+        depthBoost: 0,
+        titleMatchBoost: 0.05,
+        freshnessBoost: 0,
+        anchorTextMatchBoost: 0
+      },
       chunks: [
         {
           sectionTitle: "Tokens",
@@ -175,10 +183,51 @@ describe("public versus privileged fields", () => {
 
     expect(result!.routeFile).toBeUndefined();
     expect(result!.chunkText).toBeUndefined();
+    expect(result!.breakdown).toBeUndefined();
     expect(result!.chunks![0]!.chunkText).toBeUndefined();
     // The snippet is what a search box needs, and it survives.
     expect(result!.snippet).toBe("A snippet.");
     expect(result!.url).toBe("/docs/auth");
+  });
+
+  // The POST handler redacts through a separate call site from GET. Nothing
+  // asserted on its response body, so an inverted flag there would have leaked
+  // every one of these fields with the suite still green.
+  async function postAndParse(config: ResolvedSearchSocketConfig) {
+    stubEngine();
+    const handle = searchsocketHandle({ config });
+    const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+    const response = await handle({
+      event: makeEvent({
+        pathname: "/api/search",
+        method: "POST",
+        body: { q: "test" },
+        headers: { "content-type": "application/json" }
+      }),
+      resolve
+    });
+    return (await response.json()) as SearchResponse;
+  }
+
+  it("omits the same fields from a POST search", async () => {
+    const body = await postAndParse(makeConfig());
+    const [result] = body.results;
+
+    expect(result!.routeFile).toBeUndefined();
+    expect(result!.chunkText).toBeUndefined();
+    expect(result!.breakdown).toBeUndefined();
+    expect(result!.chunks![0]!.chunkText).toBeUndefined();
+    expect(result!.snippet).toBe("A snippet.");
+  });
+
+  it("includes them on a POST search when the deployment opts in", async () => {
+    const body = await postAndParse(
+      makeConfig({ api: { exposeInternalFields: true } } as Partial<ResolvedSearchSocketConfig>)
+    );
+    const [result] = body.results;
+
+    expect(result!.routeFile).toBe("src/routes/docs/auth/+page.svelte");
+    expect(result!.chunkText).toContain("verbatim");
   });
 
   it("includes them when the deployment opts in", async () => {

@@ -180,6 +180,12 @@ export const searchSocketConfigSchema = z.object({
       handle: z
         .object({
           path: z.string().optional(),
+          /**
+           * Independent of the top-level `mcp.access`, which only governs the
+           * standalone server's bind address. "public" serves anonymous
+           * callers a redacted result set instead of refusing them.
+           */
+          access: z.enum(["public", "private"]).optional(),
           apiKey: z.string().min(1).optional(),
           /** Env var holding the key, so it need not be committed. */
           apiKeyEnv: z.string().min(1).optional(),

@@ -104,6 +104,7 @@ export function createDefaultConfig(projectId: string): ResolvedSearchSocketConf
       },
       handle: {
         path: "/api/mcp",
+        access: "private",
         enableJsonResponse: true
       }
     },
