@@ -60,6 +60,38 @@ export function createServer(engine: SearchEngine, opts: CreateServerOptions = {
   const requestedScope = (input: { scope?: string }): string | undefined =>
     redact ? undefined : input.scope;
 
+  /**
+   * Keep an engine failure from narrating itself to an anonymous caller.
+   *
+   * The SDK turns a thrown error into an `isError` result carrying
+   * `error.message` verbatim, and those messages name internals — a missing
+   * scope env var reports the variable's name, a backend failure can carry a
+   * URL. That was fine while every caller held a key. A privileged caller still
+   * gets the real error, which its clients rely on for diagnosis.
+   */
+  const guard = async <T>(
+    operation: string,
+    run: () => Promise<T>
+  ): Promise<T | { isError: true; content: Array<{ type: "text"; text: string }> }> => {
+    if (!redact) return run();
+    try {
+      return await run();
+    } catch (error) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text:
+              `Could not complete '${operation}': ` +
+              `${error instanceof SearchSocketError ? error.code : "INTERNAL_ERROR"}. ` +
+              "This is a backend or configuration failure."
+          }
+        ]
+      };
+    }
+  };
+
   const server = new McpServer({
     name: "searchsocket-mcp",
     // Was hardcoded at "0.2.0" and drifted from the package for five releases,
@@ -86,41 +118,42 @@ export function createServer(engine: SearchEngine, opts: CreateServerOptions = {
         scope: scopeInput
       }
     },
-    async (input) => {
-      const result = await engine.search({
-        q: input.query,
-        topK: input.topK,
-        scope: requestedScope(input),
-        pathPrefix: input.pathPrefix,
-        tags: input.tags,
-        filters: input.filters,
-        groupBy: input.groupBy
-      });
+    async (input) =>
+      guard("search", async () => {
+        const result = await engine.search({
+          q: input.query,
+          topK: input.topK,
+          scope: requestedScope(input),
+          pathPrefix: input.pathPrefix,
+          tags: input.tags,
+          filters: input.filters,
+          groupBy: input.groupBy
+        });
 
-      if (result.results.length === 0) {
+        if (result.results.length === 0) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `No results found for "${input.query}". Try broader keywords or remove filters.`
+              }
+            ]
+          };
+        }
+
         return {
           content: [
             {
-              type: "text",
-              text: `No results found for "${input.query}". Try broader keywords or remove filters.`
+              type: "text" as const,
+              text: JSON.stringify(
+                { ...result, results: toPublicResults(result.results, redact) },
+                null,
+                2
+              )
             }
           ]
         };
-      }
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              { ...result, results: toPublicResults(result.results, redact) },
-              null,
-              2
-            )
-          }
-        ]
-      };
-    }
+      })
   );
 
   // ---------------------------------------------------------------------------
@@ -137,55 +170,56 @@ export function createServer(engine: SearchEngine, opts: CreateServerOptions = {
         scope: scopeInput
       }
     },
-    async (input) => {
-      try {
-        const page = await engine.getPage(input.path, requestedScope(input));
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(toPublicPage(page, redact), null, 2)
-            }
-          ]
-        };
-      } catch (error) {
-        // Only a genuine miss falls back to suggestions. A backend outage or a
-        // rejected scope reported as "page not found" sent the client looking
-        // for a spelling mistake instead of surfacing the real failure.
-        // Suggestions are only meaningful for a genuine miss. Anything else —
-        // a backend outage, a refused scope, an unexpected throw — is reported
-        // as what it is, rather than sending the client hunting for a typo.
-        const isNotFound =
-          error instanceof SearchSocketError && error.code === "INVALID_REQUEST" && error.status === 404;
-        if (!isNotFound) {
+    async (input) =>
+      guard("get_page", async () => {
+        try {
+          const page = await engine.getPage(input.path, requestedScope(input));
           return {
-            isError: true,
             content: [
               {
-                type: "text",
-                text:
-                  `Could not retrieve '${input.path}': ` +
-                  `${error instanceof SearchSocketError ? error.code : "INTERNAL_ERROR"}. ` +
-                  "This is a backend or configuration failure, not a missing page."
+                type: "text" as const,
+                text: JSON.stringify(toPublicPage(page, redact), null, 2)
+              }
+            ]
+          };
+        } catch (error) {
+          // Only a genuine miss falls back to suggestions. A backend outage or a
+          // rejected scope reported as "page not found" sent the client looking
+          // for a spelling mistake instead of surfacing the real failure.
+          // Suggestions are only meaningful for a genuine miss. Anything else —
+          // a backend outage, a refused scope, an unexpected throw — is reported
+          // as what it is, rather than sending the client hunting for a typo.
+          const isNotFound =
+            error instanceof SearchSocketError && error.code === "INVALID_REQUEST" && error.status === 404;
+          if (!isNotFound) {
+            return {
+              isError: true as const,
+              content: [
+                {
+                  type: "text" as const,
+                  text:
+                    `Could not retrieve '${input.path}': ` +
+                    `${error instanceof SearchSocketError ? error.code : "INTERNAL_ERROR"}. ` +
+                    "This is a backend or configuration failure, not a missing page."
+                }
+              ]
+            };
+          }
+
+          const suggestions = await engine.search({ q: input.path, topK: 3, scope: requestedScope(input) });
+          const similar = suggestions.results.map((r) => r.url);
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: similar.length > 0
+                  ? `Page '${input.path}' not found. Similar pages: ${similar.join(", ")}`
+                  : `Page '${input.path}' not found. Use search to find the correct URL.`
               }
             ]
           };
         }
-
-        const suggestions = await engine.search({ q: input.path, topK: 3, scope: requestedScope(input) });
-        const similar = suggestions.results.map((r) => r.url);
-        return {
-          content: [
-            {
-              type: "text",
-              text: similar.length > 0
-                ? `Page '${input.path}' not found. Similar pages: ${similar.join(", ")}`
-                : `Page '${input.path}' not found. Use search to find the correct URL.`
-            }
-          ]
-        };
-      }
-    }
+      })
   );
 
   // ---------------------------------------------------------------------------
@@ -202,20 +236,21 @@ export function createServer(engine: SearchEngine, opts: CreateServerOptions = {
         scope: scopeInput
       }
     },
-    async (input) => {
-      const result = await engine.getRelatedPages(input.path, {
-        topK: input.topK,
-        scope: requestedScope(input)
-      });
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(toPublicRelatedPages(result, redact), null, 2)
-          }
-        ]
-      };
-    }
+    async (input) =>
+      guard("get_related_pages", async () => {
+        const result = await engine.getRelatedPages(input.path, {
+          topK: input.topK,
+          scope: requestedScope(input)
+        });
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(toPublicRelatedPages(result, redact), null, 2)
+            }
+          ]
+        };
+      })
   );
 
   return server;

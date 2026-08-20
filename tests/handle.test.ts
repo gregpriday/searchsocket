@@ -1566,6 +1566,97 @@ describe("MCP endpoint", () => {
       expect(mockedCreateServer).not.toHaveBeenCalled();
     });
 
+    it("treats a config object without the field as private, not public", async () => {
+      // `searchsocketHandle({ config })` hands the object straight through with
+      // no schema parse or default merge, so a config built before this field
+      // existed arrives with `access` undefined. Reading that as anything but
+      // private would silently open every such deployment.
+      const config = makeConfig();
+      delete (config.mcp.handle as { access?: string }).access;
+      vi.spyOn(SearchEngine, "create").mockResolvedValue({
+        search: vi.fn()
+      } as unknown as SearchEngine);
+
+      const handle = searchsocketHandle({ config });
+      const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+      const response = await handle({ event: mcpEvent(), resolve });
+
+      expect(response.status).toBe(503);
+      expect(mockedCreateServer).not.toHaveBeenCalled();
+    });
+
+    it("treats an unrecognised access value as private", async () => {
+      const config = makeConfig();
+      (config.mcp.handle as { access: string }).access = "open";
+      config.mcp.handle.apiKey = "test-secret";
+      vi.spyOn(SearchEngine, "create").mockResolvedValue({
+        search: vi.fn()
+      } as unknown as SearchEngine);
+
+      const handle = searchsocketHandle({ config });
+      const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+      const response = await handle({ event: mcpEvent(), resolve });
+
+      expect(response.status).toBe(401);
+      expect(mockedCreateServer).not.toHaveBeenCalled();
+    });
+
+    it("accepts a lowercase bearer scheme", async () => {
+      // RFC 7235 §2.1: scheme names are case-insensitive.
+      const handle = searchsocketHandle({ config: publicConfig("test-secret") });
+      const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+      const response = await handle({
+        event: mcpEvent({ authorization: "bearer test-secret" }),
+        resolve
+      });
+
+      expect(response.status).toBe(200);
+      expect(redactFlag()).toBe(false);
+    });
+
+    it("rejects a body larger than maxBodyBytes before reaching the engine", async () => {
+      const create = vi.spyOn(SearchEngine, "create").mockResolvedValue({
+        search: vi.fn()
+      } as unknown as SearchEngine);
+
+      const config = makeConfig();
+      config.mcp.handle.access = "public";
+      const handle = searchsocketHandle({ config, maxBodyBytes: 128 });
+      const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+      const event = makeEvent({
+        pathname: "/api/mcp",
+        method: "POST",
+        body: { jsonrpc: "2.0", method: "initialize", id: 1 },
+        contentLength: 5000
+      });
+
+      const response = await handle({ event, resolve });
+
+      expect(response.status).toBe(413);
+      expect(create).not.toHaveBeenCalled();
+      expect(mockedCreateServer).not.toHaveBeenCalled();
+    });
+
+    it("reaches the same policy through the deferred routing branch", async () => {
+      // Three call sites forward `mcpAccess`; the inline-config tests above only
+      // exercise one. Warming the config with a non-MCP request first routes the
+      // MCP request through a different branch.
+      const config = publicConfig();
+      const handle = searchsocketHandle({ config, path: "/api/search" });
+      const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+      await handle({ event: makeEvent({ pathname: "/other", method: "GET" }), resolve });
+      const response = await handle({ event: mcpEvent(), resolve });
+
+      expect(response.status).toBe(200);
+      expect(mockedCreateServer).toHaveBeenCalledTimes(1);
+      expect(redactFlag()).toBe(true);
+    });
+
     it("leaves the private default building an unredacted server", async () => {
       const config = makeConfig();
       config.mcp.handle.apiKey = "test-secret";

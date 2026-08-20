@@ -87,7 +87,10 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
         mcpApiKey =
           config.mcp.handle.apiKey ??
           (config.mcp.handle.apiKeyEnv ? process.env[config.mcp.handle.apiKeyEnv] : undefined);
-        mcpAccess = config.mcp.handle.access;
+        // `options.config` is handed through unmerged, so a config object built
+        // before this field existed arrives with `access` undefined. Only an
+        // exact "public" opts in; anything else stays private.
+        mcpAccess = config.mcp.handle.access === "public" ? "public" : "private";
         mcpEnableJsonResponse = config.mcp.handle.enableJsonResponse;
 
         if (config.llmsTxt.enable) {
@@ -144,7 +147,7 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
       const isMarkdownVariant = event.request.method === "GET" && event.url.pathname.endsWith(".md");
 
       if (mcpPath && event.url.pathname === mcpPath) {
-        return handleMcpRequest(event, mcpAccess, mcpApiKey, mcpEnableJsonResponse, getEngine);
+        return handleMcpRequest(event, mcpAccess, mcpApiKey, mcpEnableJsonResponse, bodyLimit, getEngine);
       }
       if (mcpPath) {
         // Config loaded and path matches neither endpoint
@@ -169,7 +172,7 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
         }
 
         if (mcpPath && event.url.pathname === mcpPath) {
-          return handleMcpRequest(event, mcpAccess, mcpApiKey, mcpEnableJsonResponse, getEngine);
+          return handleMcpRequest(event, mcpAccess, mcpApiKey, mcpEnableJsonResponse, bodyLimit, getEngine);
         }
         if (!(serveMarkdownVariants && isMarkdownVariant)) {
           return resolve(event);
@@ -225,7 +228,7 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
     // MCP endpoint handling
     if (mcpPath && event.url.pathname === mcpPath) {
-      return handleMcpRequest(event, mcpAccess, mcpApiKey, mcpEnableJsonResponse, getEngine);
+      return handleMcpRequest(event, mcpAccess, mcpApiKey, mcpEnableJsonResponse, bodyLimit, getEngine);
     }
     const targetPath = apiPath ?? config.api.path;
 
@@ -542,6 +545,7 @@ async function handleMcpRequest(
   access: "public" | "private",
   apiKey: string | undefined,
   enableJsonResponse: boolean,
+  bodyLimit: number,
   getEngine: () => Promise<SearchEngine>
 ): Promise<Response> {
   const method = event.request.method;
@@ -587,7 +591,26 @@ async function handleMcpRequest(
   // caller is served, but with the same fields stripped that the browser API
   // already withholds, so what it can reach is the site's published content and
   // nothing more.
-  if (!apiKey && access === "private") {
+  const isPublic = access === "public";
+
+  // The transport owns the body stream — reading it here to measure it would
+  // leave nothing for `handleRequest` — so this bounds the declared length
+  // only, the same first check `handlePostSearch` makes. A client that omits
+  // content-length is not stopped by it; platform limits are the real backstop.
+  // Worth having anyway: until now every caller here had presented a key.
+  const declaredLength = Number(event.request.headers.get("content-length") ?? 0);
+  if (declaredLength > bodyLimit) {
+    return new Response(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: { code: -32600, message: "Request body too large" },
+        id: null
+      }),
+      { status: 413, headers: { "content-type": "application/json" } }
+    );
+  }
+
+  if (!apiKey && !isPublic) {
     return new Response(
       JSON.stringify({
         jsonrpc: "2.0",
@@ -626,11 +649,13 @@ async function handleMcpRequest(
   let isAnonymous = false;
 
   if (authHeader === null) {
-    if (access === "private") return unauthorized();
+    if (!isPublic) return unauthorized();
     isAnonymous = true;
   } else {
     if (!apiKey) return unauthorized();
-    if (!authHeader.startsWith("Bearer ")) return unauthorized();
+    // The scheme name is case-insensitive per RFC 7235; the credential after it
+    // is not, and is compared byte-exact below.
+    if (!/^Bearer /i.test(authHeader)) return unauthorized();
 
     const token = authHeader.slice(7);
     // `verifyApiKey` hashes both sides to equal-length digests before

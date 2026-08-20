@@ -523,6 +523,31 @@ describe("redacted servers (mcp.handle.access: \"public\")", () => {
               chunkText: "Tokens expire after an hour.",
               headingPath: ["Auth", "Tokens"],
               score: 0.7
+            },
+            {
+              sectionTitle: "Refresh",
+              snippet: "Refresh tokens rotate.",
+              chunkText: "Refresh tokens rotate on every use.",
+              headingPath: ["Auth", "Refresh"],
+              score: 0.6
+            }
+          ]
+        },
+        {
+          url: "/docs/api",
+          title: "API",
+          snippet: "The HTTP API.",
+          score: 0.5,
+          chunkText: "Second result indexed text.",
+          routeFile: "src/routes/docs/api/+page.svelte",
+          breakdown: { baseScore: 0.4, incomingLinkBoost: 0.05 },
+          chunks: [
+            {
+              sectionTitle: "Endpoints",
+              snippet: "Endpoints listed.",
+              chunkText: "Every endpoint, listed.",
+              headingPath: ["API", "Endpoints"],
+              score: 0.4
             }
           ]
         }
@@ -538,13 +563,18 @@ describe("redacted servers (mcp.handle.access: \"public\")", () => {
     const handler = getHandler(mockEngine, "search", true);
     const parsed = JSON.parse((await handler({ query: "auth" })).content[0]!.text);
 
-    const [result] = parsed.results;
-    expect(result.routeFile).toBeUndefined();
-    expect(result.chunkText).toBeUndefined();
-    expect(result.breakdown).toBeUndefined();
-    expect(result.chunks[0].chunkText).toBeUndefined();
+    expect(parsed.results).toHaveLength(2);
+    for (const result of parsed.results) {
+      expect(result.routeFile).toBeUndefined();
+      expect(result.chunkText).toBeUndefined();
+      expect(result.breakdown).toBeUndefined();
+      for (const chunk of result.chunks) {
+        expect(chunk.chunkText).toBeUndefined();
+      }
+    }
 
     // Everything the site already publishes survives.
+    const [result] = parsed.results;
     expect(result.url).toBe("/docs/auth");
     expect(result.title).toBe("Auth");
     expect(result.snippet).toBe("How to authenticate.");
@@ -556,12 +586,17 @@ describe("redacted servers (mcp.handle.access: \"public\")", () => {
 
   it("does not mutate the engine result while redacting", async () => {
     const response = searchResponse();
+    const pristine = structuredClone(response);
     const mockEngine = { search: vi.fn().mockResolvedValue(response) };
 
-    await getHandler(mockEngine, "search", true)({ query: "auth" });
+    const parsed = JSON.parse(
+      (await getHandler(mockEngine, "search", true)({ query: "auth" })).content[0]!.text
+    );
 
-    expect(response.results[0]!.routeFile).toBe("src/routes/docs/auth/+page.svelte");
-    expect(response.results[0]!.chunks[0]!.chunkText).toBe("Tokens expire after an hour.");
+    // The returned payload really was redacted...
+    expect(parsed.results[0].routeFile).toBeUndefined();
+    // ...and the engine's own object came through untouched.
+    expect(response).toEqual(pristine);
   });
 
   it("strips frontmatter.routeFile from get_page but keeps the markdown", async () => {
@@ -625,6 +660,51 @@ describe("redacted servers (mcp.handle.access: \"public\")", () => {
     expect(mockEngine.getRelatedPages).toHaveBeenCalledWith("/a", { topK: undefined, scope: undefined });
   });
 
+  it("forces the scope on the get_page not-found suggestion search too", async () => {
+    // The fallback issues a *second* engine call, and it was the one most
+    // likely to be missed — it would hand back staging URLs as "similar pages".
+    const mockEngine = {
+      search: vi.fn().mockResolvedValue({ q: "/docs/missing", scope: "main", results: [], meta: {} }),
+      getPage: vi.fn().mockRejectedValue(notFoundError())
+    };
+
+    const handler = getHandler(mockEngine, "get_page", true);
+    await handler({ path: "/docs/missing", scope: "staging" });
+
+    expect(mockEngine.getPage).toHaveBeenCalledWith("/docs/missing", undefined);
+    expect(mockEngine.search).toHaveBeenCalledWith({
+      q: "/docs/missing",
+      topK: 3,
+      scope: undefined
+    });
+  });
+
+  it("reports an engine failure to an anonymous caller without naming internals", async () => {
+    // SDK 1.26 turns a thrown error into an isError result carrying the message
+    // verbatim, and engine messages name env vars and backend URLs.
+    const leaky = new Error("Scope mode is env but PRIVATE_PREVIEW_SCOPE is not set.");
+    const mockEngine = {
+      search: vi.fn().mockRejectedValue(leaky),
+      getRelatedPages: vi.fn().mockRejectedValue(leaky)
+    };
+
+    for (const tool of ["search", "get_related_pages"]) {
+      const handler = getHandler(mockEngine, tool, true);
+      const result = await handler(tool === "search" ? { query: "x" } : { path: "/a" });
+      const text = result.content[0]!.text;
+      expect(text).not.toContain("PRIVATE_PREVIEW_SCOPE");
+      expect(text).toContain("INTERNAL_ERROR");
+    }
+  });
+
+  it("still propagates the real error to a privileged caller", async () => {
+    const mockEngine = { search: vi.fn().mockRejectedValue(new Error("Upstash unreachable")) };
+
+    await expect(getHandler(mockEngine, "search", false)({ query: "x" })).rejects.toThrow(
+      "Upstash unreachable"
+    );
+  });
+
   it("still forwards a scope for a privileged caller", async () => {
     const mockEngine = {
       search: vi.fn().mockResolvedValue({ q: "x", scope: "staging", results: [], meta: {} })
@@ -642,6 +722,8 @@ describe("redacted servers (mcp.handle.access: \"public\")", () => {
     const parsed = JSON.parse((await handler({ query: "auth" })).content[0]!.text);
 
     expect(parsed).toEqual(response);
+    expect(parsed.results[0].routeFile).toBe("src/routes/docs/auth/+page.svelte");
+    expect(parsed.results[1].chunks[0].chunkText).toBe("Every endpoint, listed.");
   });
 
   it("keeps the standalone default unredacted when no options are passed", async () => {

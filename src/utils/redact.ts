@@ -1,4 +1,4 @@
-import type { RelatedPagesResult, SearchResult } from "../types";
+import type { RelatedPage, RelatedPagesResult, SearchResult } from "../types";
 
 /**
  * One rule for what is privileged, applied to every surface that can serve an
@@ -62,11 +62,19 @@ export function toPublicResults(results: SearchResult[], redact: boolean): Searc
  * `get_related_pages` has no browser-API equivalent, so this leak went
  * unnoticed until MCP could serve an anonymous caller: every entry carries a
  * `routeFile`, which is the same repository path the other two surfaces hide.
+ *
+ * The engine always produces `routeFile`, so `RelatedPage` keeps it required
+ * and the stripped shape is a separate type. Widening the domain type because
+ * one serializer drops the field would break every consumer that reads it.
  */
+export interface PublicRelatedPagesResult extends Omit<RelatedPagesResult, "relatedPages"> {
+  relatedPages: Array<Omit<RelatedPage, "routeFile">>;
+}
+
 export function toPublicRelatedPages(
   result: RelatedPagesResult,
   redact: boolean
-): RelatedPagesResult {
+): RelatedPagesResult | PublicRelatedPagesResult {
   if (!redact) return result;
 
   return {

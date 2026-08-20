@@ -681,12 +681,7 @@ export interface RelatedPage {
   title: string;
   score: number;
   relationshipType: RelationshipType;
-  /**
-   * Path to the source file in the author's repository. Omitted from results
-   * served to an anonymous MCP caller, so code reading it must handle its
-   * absence — see `SearchResult.routeFile`.
-   */
-  routeFile?: string;
+  routeFile: string;
 }
 
 export interface RelatedPagesResult {
