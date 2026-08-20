@@ -485,6 +485,199 @@ describe("get_related_pages tool", () => {
   });
 });
 
+describe("redacted servers (mcp.handle.access: \"public\")", () => {
+  function getHandler(mockEngine: Record<string, unknown>, name: string, redact: boolean) {
+    const server = createServer(mockEngine as never, { redact });
+    const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
+    const call = calls.find((c: unknown[]) => c[0] === name);
+    expect(call).toBeDefined();
+    return call![2] as (input: Record<string, unknown>) => Promise<{
+      content: Array<{ type: string; text: string }>;
+    }>;
+  }
+
+  function getToolConfig(mockEngine: Record<string, unknown>, name: string, redact: boolean) {
+    const server = createServer(mockEngine as never, { redact });
+    const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
+    const call = calls.find((c: unknown[]) => c[0] === name);
+    return call![1] as { description: string };
+  }
+
+  function searchResponse() {
+    return {
+      q: "auth",
+      scope: "main",
+      results: [
+        {
+          url: "/docs/auth",
+          title: "Auth",
+          snippet: "How to authenticate.",
+          score: 0.9,
+          chunkText: "The full indexed section text.",
+          routeFile: "src/routes/docs/auth/+page.svelte",
+          breakdown: { baseScore: 0.8, incomingLinkBoost: 0.1 },
+          chunks: [
+            {
+              sectionTitle: "Tokens",
+              snippet: "Tokens expire.",
+              chunkText: "Tokens expire after an hour.",
+              headingPath: ["Auth", "Tokens"],
+              score: 0.7
+            }
+          ]
+        }
+      ],
+      meta: { timingsMs: { search: 1, total: 2 } }
+    };
+  }
+
+  it("strips routeFile, chunkText and breakdown from search results", async () => {
+    const response = searchResponse();
+    const mockEngine = { search: vi.fn().mockResolvedValue(response) };
+
+    const handler = getHandler(mockEngine, "search", true);
+    const parsed = JSON.parse((await handler({ query: "auth" })).content[0]!.text);
+
+    const [result] = parsed.results;
+    expect(result.routeFile).toBeUndefined();
+    expect(result.chunkText).toBeUndefined();
+    expect(result.breakdown).toBeUndefined();
+    expect(result.chunks[0].chunkText).toBeUndefined();
+
+    // Everything the site already publishes survives.
+    expect(result.url).toBe("/docs/auth");
+    expect(result.title).toBe("Auth");
+    expect(result.snippet).toBe("How to authenticate.");
+    expect(result.score).toBe(0.9);
+    expect(result.chunks[0].snippet).toBe("Tokens expire.");
+    expect(parsed.q).toBe("auth");
+    expect(parsed.meta).toEqual({ timingsMs: { search: 1, total: 2 } });
+  });
+
+  it("does not mutate the engine result while redacting", async () => {
+    const response = searchResponse();
+    const mockEngine = { search: vi.fn().mockResolvedValue(response) };
+
+    await getHandler(mockEngine, "search", true)({ query: "auth" });
+
+    expect(response.results[0]!.routeFile).toBe("src/routes/docs/auth/+page.svelte");
+    expect(response.results[0]!.chunks[0]!.chunkText).toBe("Tokens expire after an hour.");
+  });
+
+  it("strips frontmatter.routeFile from get_page but keeps the markdown", async () => {
+    const mockEngine = {
+      search: vi.fn(),
+      getPage: vi.fn().mockResolvedValue({
+        url: "/docs/auth",
+        frontmatter: { title: "Auth", tags: ["a"], routeFile: "src/routes/docs/auth/+page.svelte" },
+        markdown: "# Auth\n\nContent here."
+      })
+    };
+
+    const handler = getHandler(mockEngine, "get_page", true);
+    const parsed = JSON.parse((await handler({ path: "/docs/auth" })).content[0]!.text);
+
+    expect(parsed.frontmatter.routeFile).toBeUndefined();
+    expect(parsed.frontmatter.title).toBe("Auth");
+    expect(parsed.frontmatter.tags).toEqual(["a"]);
+    // The markdown is the same content the site serves publicly, so it stays.
+    expect(parsed.markdown).toBe("# Auth\n\nContent here.");
+  });
+
+  it("strips routeFile from every related page", async () => {
+    const mockEngine = {
+      search: vi.fn(),
+      getRelatedPages: vi.fn().mockResolvedValue({
+        sourceUrl: "/docs/auth",
+        scope: "main",
+        relatedPages: [
+          { url: "/docs/api", title: "API", score: 0.87, relationshipType: "outgoing_link", routeFile: "src/routes/docs/api/+page.svelte" },
+          { url: "/docs/security", title: "Security", score: 0.73, relationshipType: "semantic", routeFile: "src/routes/docs/security/+page.svelte" }
+        ]
+      })
+    };
+
+    const handler = getHandler(mockEngine, "get_related_pages", true);
+    const parsed = JSON.parse((await handler({ path: "/docs/auth" })).content[0]!.text);
+
+    expect(parsed.relatedPages).toHaveLength(2);
+    for (const page of parsed.relatedPages) {
+      expect(page.routeFile).toBeUndefined();
+    }
+    expect(parsed.relatedPages[0].url).toBe("/docs/api");
+    expect(parsed.relatedPages[0].relationshipType).toBe("outgoing_link");
+  });
+
+  it("ignores a caller-supplied scope so anonymous callers cannot read a staging namespace", async () => {
+    const mockEngine = {
+      search: vi.fn().mockResolvedValue({ q: "x", scope: "main", results: [], meta: {} }),
+      getPage: vi.fn().mockResolvedValue({ url: "/a", frontmatter: {}, markdown: "" }),
+      getRelatedPages: vi.fn().mockResolvedValue({ sourceUrl: "/a", scope: "main", relatedPages: [] })
+    };
+
+    await getHandler(mockEngine, "search", true)({ query: "x", scope: "staging" });
+    expect(mockEngine.search).toHaveBeenCalledWith(expect.objectContaining({ scope: undefined }));
+
+    await getHandler(mockEngine, "get_page", true)({ path: "/a", scope: "staging" });
+    expect(mockEngine.getPage).toHaveBeenCalledWith("/a", undefined);
+
+    await getHandler(mockEngine, "get_related_pages", true)({ path: "/a", scope: "staging" });
+    expect(mockEngine.getRelatedPages).toHaveBeenCalledWith("/a", { topK: undefined, scope: undefined });
+  });
+
+  it("still forwards a scope for a privileged caller", async () => {
+    const mockEngine = {
+      search: vi.fn().mockResolvedValue({ q: "x", scope: "staging", results: [], meta: {} })
+    };
+
+    await getHandler(mockEngine, "search", false)({ query: "x", scope: "staging" });
+    expect(mockEngine.search).toHaveBeenCalledWith(expect.objectContaining({ scope: "staging" }));
+  });
+
+  it("leaves results untouched when redact is not set", async () => {
+    const response = searchResponse();
+    const mockEngine = { search: vi.fn().mockResolvedValue(response) };
+
+    const handler = getHandler(mockEngine, "search", false);
+    const parsed = JSON.parse((await handler({ query: "auth" })).content[0]!.text);
+
+    expect(parsed).toEqual(response);
+  });
+
+  it("keeps the standalone default unredacted when no options are passed", async () => {
+    const response = searchResponse();
+    const mockEngine = { search: vi.fn().mockResolvedValue(response) };
+    const server = createServer(mockEngine as never);
+    const calls = (server.registerTool as ReturnType<typeof vi.fn>).mock.calls;
+    const handler = calls.find((c: unknown[]) => c[0] === "search")![2] as (
+      input: Record<string, unknown>
+    ) => Promise<{ content: Array<{ type: string; text: string }> }>;
+
+    const parsed = JSON.parse((await handler({ query: "auth" })).content[0]!.text);
+    expect(parsed.results[0].routeFile).toBe("src/routes/docs/auth/+page.svelte");
+  });
+
+  it("does not advertise fields a redacted caller will never receive", () => {
+    const mockEngine = { search: vi.fn(), getPage: vi.fn() };
+
+    const publicSearch = getToolConfig(mockEngine, "search", true).description;
+    expect(publicSearch).not.toContain("routeFile");
+    expect(publicSearch).not.toContain("chunkText");
+
+    const publicGetPage = getToolConfig(mockEngine, "get_page", true).description;
+    expect(publicGetPage).not.toContain("routeFile");
+    // The caveats about what the markdown is still apply.
+    expect(publicGetPage).toContain("NOT byte-exact source");
+  });
+
+  it("keeps the editing-oriented descriptions for a privileged caller", () => {
+    const mockEngine = { search: vi.fn(), getPage: vi.fn() };
+
+    expect(getToolConfig(mockEngine, "search", false).description).toContain("routeFile");
+    expect(getToolConfig(mockEngine, "get_page", false).description).toContain("routeFile");
+  });
+});
+
 describe("verifyApiKey", () => {
   it("returns true for matching keys", () => {
     expect(verifyApiKey("test-key-123", "test-key-123")).toBe(true);

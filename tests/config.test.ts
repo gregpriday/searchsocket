@@ -375,6 +375,70 @@ describe("mergeConfig mcp.access", () => {
   });
 });
 
+describe("mergeConfig mcp.handle.access", () => {
+  it("defaults to private so existing deployments keep failing closed", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    const merged = mergeConfig(dir, {});
+    expect(merged.mcp.handle.access).toBe("private");
+  });
+
+  it("does not require a key when public — that is the point of the setting", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    const merged = mergeConfig(dir, {
+      mcp: { handle: { access: "public" } }
+    });
+
+    expect(merged.mcp.handle.access).toBe("public");
+    expect(merged.mcp.handle.apiKey).toBeUndefined();
+  });
+
+  it("keeps the private default when another handle field is supplied", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    const merged = mergeConfig(dir, {
+      mcp: { handle: { path: "/mcp" } }
+    });
+
+    expect(merged.mcp.handle.path).toBe("/mcp");
+    expect(merged.mcp.handle.access).toBe("private");
+  });
+
+  it("rejects a value outside the enum", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    expect(() =>
+      mergeConfig(dir, {
+        mcp: { handle: { access: "open" } }
+      } as never)
+    ).toThrow();
+  });
+
+  it("is independent of the standalone mcp.access guard", async () => {
+    const dir = await makeTempDir();
+    await fs.mkdir(path.join(dir, "build"), { recursive: true });
+
+    // A public handle route must not satisfy the standalone server's key
+    // requirement, and must not be dragged into failing by it either.
+    expect(() =>
+      mergeConfig(dir, {
+        mcp: { access: "public", handle: { access: "public" } }
+      })
+    ).toThrow("mcp.http.apiKey");
+
+    const merged = mergeConfig(dir, {
+      mcp: { handle: { access: "public" } }
+    });
+    expect(merged.mcp.access).toBe("private");
+    expect(merged.mcp.handle.access).toBe("public");
+  });
+});
+
 describe("mergeConfig legacy analytics field", () => {
   it("silently strips removed analytics field from user config", async () => {
     const dir = await makeTempDir();
