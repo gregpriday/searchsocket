@@ -1641,6 +1641,52 @@ describe("MCP endpoint", () => {
       expect(mockedCreateServer).not.toHaveBeenCalled();
     });
 
+    it("does not let the size check pre-empt the auth contract", async () => {
+      // An oversized body must not turn a private deployment's 503 into a 413,
+      // which would also tell an unauthenticated caller the configured limit.
+      const privateNoKey = makeConfig();
+      const withKey = makeConfig();
+      withKey.mcp.handle.apiKey = "test-secret";
+      vi.spyOn(SearchEngine, "create").mockResolvedValue({
+        search: vi.fn()
+      } as unknown as SearchEngine);
+
+      const oversized = () =>
+        makeEvent({
+          pathname: "/api/mcp",
+          method: "POST",
+          body: { jsonrpc: "2.0", method: "initialize", id: 1 },
+          contentLength: 5000
+        });
+      const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+      const noKey = await searchsocketHandle({ config: privateNoKey, maxBodyBytes: 128 })({
+        event: oversized(),
+        resolve
+      });
+      expect(noKey.status).toBe(503);
+
+      const noToken = await searchsocketHandle({ config: withKey, maxBodyBytes: 128 })({
+        event: oversized(),
+        resolve
+      });
+      expect(noToken.status).toBe(401);
+    });
+
+    it("accepts extra spaces after the bearer scheme", async () => {
+      // RFC 7235 grammar is `1*SP` between scheme and credential.
+      const handle = searchsocketHandle({ config: publicConfig("test-secret") });
+      const resolve = vi.fn().mockResolvedValue(new Response("ok"));
+
+      const response = await handle({
+        event: mcpEvent({ authorization: "Bearer   test-secret" }),
+        resolve
+      });
+
+      expect(response.status).toBe(200);
+      expect(redactFlag()).toBe(false);
+    });
+
     it("reaches the same policy through the deferred routing branch", async () => {
       // Three call sites forward `mcpAccess`; the inline-config tests above only
       // exercise one. Warming the config with a non-MCP request first routes the

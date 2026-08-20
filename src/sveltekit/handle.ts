@@ -593,22 +593,6 @@ async function handleMcpRequest(
   // nothing more.
   const isPublic = access === "public";
 
-  // The transport owns the body stream — reading it here to measure it would
-  // leave nothing for `handleRequest` — so this bounds the declared length
-  // only, the same first check `handlePostSearch` makes. A client that omits
-  // content-length is not stopped by it; platform limits are the real backstop.
-  // Worth having anyway: until now every caller here had presented a key.
-  const declaredLength = Number(event.request.headers.get("content-length") ?? 0);
-  if (declaredLength > bodyLimit) {
-    return new Response(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        error: { code: -32600, message: "Request body too large" },
-        id: null
-      }),
-      { status: 413, headers: { "content-type": "application/json" } }
-    );
-  }
 
   if (!apiKey && !isPublic) {
     return new Response(
@@ -653,15 +637,40 @@ async function handleMcpRequest(
     isAnonymous = true;
   } else {
     if (!apiKey) return unauthorized();
-    // The scheme name is case-insensitive per RFC 7235; the credential after it
-    // is not, and is compared byte-exact below.
-    if (!/^Bearer /i.test(authHeader)) return unauthorized();
+    // The scheme name is case-insensitive and may be followed by more than one
+    // space (RFC 7235 grammar is `1*SP`); the credential itself is neither, and
+    // is compared byte-exact below.
+    const bearer = /^Bearer +(.*)$/is.exec(authHeader);
+    if (!bearer) return unauthorized();
 
-    const token = authHeader.slice(7);
+    const token = bearer[1] ?? "";
     // `verifyApiKey` hashes both sides to equal-length digests before
     // comparing, so an attacker cannot learn the key's length from how long a
     // rejection takes — the previous inline length check leaked exactly that.
     if (token.length === 0 || !verifyApiKey(token, apiKey)) return unauthorized();
+  }
+
+  // Only now that the caller is entitled to the endpoint. Placing this before
+  // the checks above turned a private deployment's 503 into a 413 and told an
+  // unauthenticated caller the configured threshold.
+  //
+  // The transport owns the body stream — reading it here to measure it would
+  // leave nothing for `handleRequest` — so this bounds the declared length
+  // only, the same first check `handlePostSearch` makes. A client that omits
+  // content-length is not stopped by it; platform limits are the real backstop.
+  // Worth having anyway: until now every caller here had presented a key.
+  const declaredLength = Number(event.request.headers.get("content-length") ?? 0);
+  if (declaredLength > bodyLimit) {
+    return new Response(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        // Implementation-defined server error, as used by the 405s above. The
+        // request is a structurally valid one, so -32600 would misreport it.
+        error: { code: -32000, message: "Request body too large" },
+        id: null
+      }),
+      { status: 413, headers: { "content-type": "application/json" } }
+    );
   }
 
   const transport = new WebStandardStreamableHTTPServerTransport({
