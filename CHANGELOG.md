@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-20
+
+An MCP release. The SvelteKit handle route can now serve anonymous callers a
+redacted result set instead of refusing them, so a public documentation agent can
+query your site without holding an API key.
+
+**Existing deployments are unaffected.** `mcp.handle.access` defaults to
+`private`, which is exactly the previous behaviour: no `Authorization` header
+means 503, and a wrong or malformed bearer token is still a 401 rather than a
+silent downgrade.
+
+### Added
+
+- **`mcp.handle.access`** (`"public" | "private"`, default `"private"`) — governs
+  the SvelteKit handle route. Setting it to `"public"` serves callers that present
+  no `Authorization` header, with `routeFile`, `chunkText` and `breakdown` stripped
+  from every tool result and a caller-supplied `scope` ignored — the same fields
+  `api.exposeInternalFields` withholds from the browser API. A valid bearer token
+  still returns them, so an editing agent configured with the key keeps source
+  paths while a public agent does not. `mcp.handle.apiKey` / `apiKeyEnv` remain
+  required while `access` is `private`.
+
+### Changed
+
+- `mcp.access` now documents its actual scope: it governs only the standalone MCP
+  server's bind address. The handle route is governed by `mcp.handle.access`.
+- Errors returned to anonymous MCP callers are mapped to a typed code rather than
+  surfaced verbatim, so backend URLs and environment variable names are no longer
+  disclosed. Authenticated callers keep the underlying error.
+
+### Fixed
+
+- The handle route's bearer comparison now runs through the shared `verifyApiKey`
+  helper, which hashes both sides to equal-length digests before comparing. The
+  previous inline check short-circuited on length, leaking the configured key's
+  length to an unauthenticated caller.
+- The MCP request-size check is ordered after authentication, so an oversized
+  anonymous request to a private route answers 503 rather than disclosing the
+  body limit with a 413.
+- `get_related_pages` strips `routeFile` from its results for redacted callers,
+  matching the other tools.
+
 ## [0.9.0] - 2026-08-19
 
 A search UI release. The copy-paste templates behind `searchsocket add` are now a
