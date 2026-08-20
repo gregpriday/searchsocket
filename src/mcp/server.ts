@@ -10,6 +10,7 @@ import { z } from "zod";
 import { SearchEngine } from "../search/engine";
 import { SearchSocketError } from "../errors";
 import { loadConfig } from "../config/load";
+import { toPublicPage, toPublicRelatedPages, toPublicResults } from "../utils/redact";
 import type { ResolvedSearchSocketConfig } from "../types";
 
 /**
@@ -29,7 +30,68 @@ export interface McpServerOptions {
   apiKey?: string;
 }
 
-export function createServer(engine: SearchEngine): McpServer {
+export interface CreateServerOptions {
+  /**
+   * Strip repository paths and indexed section text from every tool result,
+   * and refuse a caller-supplied scope.
+   *
+   * Set by the SvelteKit handle route for an anonymous caller under
+   * `mcp.handle.access: "public"`. Defaults to false so the standalone stdio
+   * and HTTP servers — which are key-gated or loopback-bound — are unaffected.
+   */
+  redact?: boolean;
+}
+
+export function createServer(engine: SearchEngine, opts: CreateServerOptions = {}): McpServer {
+  const redact = opts.redact ?? false;
+
+  // An anonymous caller must not be able to name a scope. `resolveScope` takes
+  // any override it is given, so a guessed "staging" or a branch name would
+  // read content the site has not published — the same hole `api.allowedScopes`
+  // closes for the browser endpoint. The field stays in the input shape so the
+  // tool signature is stable across privilege levels; the value is dropped on
+  // the way to the engine, which is what actually holds the line.
+  const scopeInput = redact
+    ? z
+        .string()
+        .optional()
+        .describe("Ignored here: this endpoint serves the deployment's default scope only.")
+    : z.string().optional();
+  const requestedScope = (input: { scope?: string }): string | undefined =>
+    redact ? undefined : input.scope;
+
+  /**
+   * Keep an engine failure from narrating itself to an anonymous caller.
+   *
+   * The SDK turns a thrown error into an `isError` result carrying
+   * `error.message` verbatim, and those messages name internals — a missing
+   * scope env var reports the variable's name, a backend failure can carry a
+   * URL. That was fine while every caller held a key. A privileged caller still
+   * gets the real error, which its clients rely on for diagnosis.
+   */
+  const guard = async <T>(
+    operation: string,
+    run: () => Promise<T>
+  ): Promise<T | { isError: true; content: Array<{ type: "text"; text: string }> }> => {
+    if (!redact) return run();
+    try {
+      return await run();
+    } catch (error) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text:
+              `Could not complete '${operation}': ` +
+              `${error instanceof SearchSocketError ? error.code : "INTERNAL_ERROR"}. ` +
+              "This is a backend or configuration failure."
+          }
+        ]
+      };
+    }
+  };
+
   const server = new McpServer({
     name: "searchsocket-mcp",
     // Was hardcoded at "0.2.0" and drifted from the package for five releases,
@@ -43,8 +105,9 @@ export function createServer(engine: SearchEngine): McpServer {
   server.registerTool(
     "search",
     {
-      description:
-        "Searches indexed site content using semantic similarity. Returns ranked results with url, title, snippet, chunkText (the matched section's indexed text, capped in length), score, and routeFile (source file path for editing). The highest-ranked results include their best-matching sections; lower-ranked results carry a page summary only. Set groupBy to 'chunk' to search sections directly. Use routeFile, when present, to locate the source file for editing; custom-record results have none. If snippets lack detail, call get_page with the result URL for the page's indexed markdown.",
+      description: redact
+        ? "Searches indexed site content using semantic similarity. Returns ranked results with url, title, snippet and score. The highest-ranked results include their best-matching sections; lower-ranked results carry a page summary only. Set groupBy to 'chunk' to search sections directly. If snippets lack detail, call get_page with the result URL for the page's indexed markdown."
+        : "Searches indexed site content using semantic similarity. Returns ranked results with url, title, snippet, chunkText (the matched section's indexed text, capped in length), score, and routeFile (source file path for editing). The highest-ranked results include their best-matching sections; lower-ranked results carry a page summary only. Set groupBy to 'chunk' to search sections directly. Use routeFile, when present, to locate the source file for editing; custom-record results have none. If snippets lack detail, call get_page with the result URL for the page's indexed markdown.",
       inputSchema: {
         query: z.string().min(1).describe("Search query. Use keywords or natural language, not full sentences."),
         topK: z.number().int().positive().max(100).optional().describe("Number of results to return (default: 10, max: 100)"),
@@ -52,40 +115,45 @@ export function createServer(engine: SearchEngine): McpServer {
         tags: z.array(z.string()).optional().describe("Filter results to pages matching all specified tags"),
         filters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional().describe("Filter by structured page metadata (e.g. {\"version\": 2})"),
         groupBy: z.enum(["page", "chunk"]).optional().describe("'page' (default) groups chunks by page with sub-results; 'chunk' returns individual chunks"),
-        scope: z.string().optional()
+        scope: scopeInput
       }
     },
-    async (input) => {
-      const result = await engine.search({
-        q: input.query,
-        topK: input.topK,
-        scope: input.scope,
-        pathPrefix: input.pathPrefix,
-        tags: input.tags,
-        filters: input.filters,
-        groupBy: input.groupBy
-      });
+    async (input) =>
+      guard("search", async () => {
+        const result = await engine.search({
+          q: input.query,
+          topK: input.topK,
+          scope: requestedScope(input),
+          pathPrefix: input.pathPrefix,
+          tags: input.tags,
+          filters: input.filters,
+          groupBy: input.groupBy
+        });
 
-      if (result.results.length === 0) {
+        if (result.results.length === 0) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `No results found for "${input.query}". Try broader keywords or remove filters.`
+              }
+            ]
+          };
+        }
+
         return {
           content: [
             {
-              type: "text",
-              text: `No results found for "${input.query}". Try broader keywords or remove filters.`
+              type: "text" as const,
+              text: JSON.stringify(
+                { ...result, results: toPublicResults(result.results, redact) },
+                null,
+                2
+              )
             }
           ]
         };
-      }
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result, null, 2)
-          }
-        ]
-      };
-    }
+      })
   );
 
   // ---------------------------------------------------------------------------
@@ -94,62 +162,64 @@ export function createServer(engine: SearchEngine): McpServer {
   server.registerTool(
     "get_page",
     {
-      description:
-        "Retrieves the indexed markdown and metadata for a page by its URL path. Use this after search when snippets lack the detail needed to answer a question. The markdown is reassembled from the indexed chunks: it is complete enough to read and reason about, but is NOT byte-exact source — it can contain section overlap and very long pages may be truncated. Read the file at routeFile when exact content matters. Do NOT use this for discovery — use search first.",
+      description: redact
+        ? "Retrieves the indexed markdown and metadata for a page by its URL path. Use this after search when snippets lack the detail needed to answer a question. The markdown is reassembled from the indexed chunks: it is complete enough to read and reason about, but is NOT byte-exact source — it can contain section overlap and very long pages may be truncated. Do NOT use this for discovery — use search first."
+        : "Retrieves the indexed markdown and metadata for a page by its URL path. Use this after search when snippets lack the detail needed to answer a question. The markdown is reassembled from the indexed chunks: it is complete enough to read and reason about, but is NOT byte-exact source — it can contain section overlap and very long pages may be truncated. Read the file at routeFile when exact content matters. Do NOT use this for discovery — use search first.",
       inputSchema: {
         path: z.string().min(1).describe("URL path of the page (e.g. '/docs/auth'). Use a URL from search results."),
-        scope: z.string().optional()
+        scope: scopeInput
       }
     },
-    async (input) => {
-      try {
-        const page = await engine.getPage(input.path, input.scope);
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(page, null, 2)
-            }
-          ]
-        };
-      } catch (error) {
-        // Only a genuine miss falls back to suggestions. A backend outage or a
-        // rejected scope reported as "page not found" sent the client looking
-        // for a spelling mistake instead of surfacing the real failure.
-        // Suggestions are only meaningful for a genuine miss. Anything else —
-        // a backend outage, a refused scope, an unexpected throw — is reported
-        // as what it is, rather than sending the client hunting for a typo.
-        const isNotFound =
-          error instanceof SearchSocketError && error.code === "INVALID_REQUEST" && error.status === 404;
-        if (!isNotFound) {
+    async (input) =>
+      guard("get_page", async () => {
+        try {
+          const page = await engine.getPage(input.path, requestedScope(input));
           return {
-            isError: true,
             content: [
               {
-                type: "text",
-                text:
-                  `Could not retrieve '${input.path}': ` +
-                  `${error instanceof SearchSocketError ? error.code : "INTERNAL_ERROR"}. ` +
-                  "This is a backend or configuration failure, not a missing page."
+                type: "text" as const,
+                text: JSON.stringify(toPublicPage(page, redact), null, 2)
+              }
+            ]
+          };
+        } catch (error) {
+          // Only a genuine miss falls back to suggestions. A backend outage or a
+          // rejected scope reported as "page not found" sent the client looking
+          // for a spelling mistake instead of surfacing the real failure.
+          // Suggestions are only meaningful for a genuine miss. Anything else —
+          // a backend outage, a refused scope, an unexpected throw — is reported
+          // as what it is, rather than sending the client hunting for a typo.
+          const isNotFound =
+            error instanceof SearchSocketError && error.code === "INVALID_REQUEST" && error.status === 404;
+          if (!isNotFound) {
+            return {
+              isError: true as const,
+              content: [
+                {
+                  type: "text" as const,
+                  text:
+                    `Could not retrieve '${input.path}': ` +
+                    `${error instanceof SearchSocketError ? error.code : "INTERNAL_ERROR"}. ` +
+                    "This is a backend or configuration failure, not a missing page."
+                }
+              ]
+            };
+          }
+
+          const suggestions = await engine.search({ q: input.path, topK: 3, scope: requestedScope(input) });
+          const similar = suggestions.results.map((r) => r.url);
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: similar.length > 0
+                  ? `Page '${input.path}' not found. Similar pages: ${similar.join(", ")}`
+                  : `Page '${input.path}' not found. Use search to find the correct URL.`
               }
             ]
           };
         }
-
-        const suggestions = await engine.search({ q: input.path, topK: 3, scope: input.scope });
-        const similar = suggestions.results.map((r) => r.url);
-        return {
-          content: [
-            {
-              type: "text",
-              text: similar.length > 0
-                ? `Page '${input.path}' not found. Similar pages: ${similar.join(", ")}`
-                : `Page '${input.path}' not found. Use search to find the correct URL.`
-            }
-          ]
-        };
-      }
-    }
+      })
   );
 
   // ---------------------------------------------------------------------------
@@ -163,23 +233,24 @@ export function createServer(engine: SearchEngine): McpServer {
       inputSchema: {
         path: z.string().min(1).describe("URL path of the source page (e.g. '/docs/auth'). Use a URL from search results."),
         topK: z.number().int().positive().max(25).optional().describe("Number of related pages to return (default: 10, max: 25)"),
-        scope: z.string().optional()
+        scope: scopeInput
       }
     },
-    async (input) => {
-      const result = await engine.getRelatedPages(input.path, {
-        topK: input.topK,
-        scope: input.scope
-      });
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result, null, 2)
-          }
-        ]
-      };
-    }
+    async (input) =>
+      guard("get_related_pages", async () => {
+        const result = await engine.getRelatedPages(input.path, {
+          topK: input.topK,
+          scope: requestedScope(input)
+        });
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(toPublicRelatedPages(result, redact), null, 2)
+            }
+          ]
+        };
+      })
   );
 
   return server;

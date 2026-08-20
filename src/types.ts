@@ -144,6 +144,12 @@ export interface SearchSocketConfig {
     };
     handle?: {
       path?: string;
+      /**
+       * Independent of the top-level `mcp.access`, which only governs the
+       * standalone server's bind address. "public" (default "private") serves
+       * anonymous callers a redacted result set instead of refusing them.
+       */
+      access?: "public" | "private";
       apiKey?: string;
       /** Env var holding the key, so it need not be committed. */
       apiKeyEnv?: string;
@@ -287,6 +293,7 @@ export interface ResolvedSearchSocketConfig {
     };
     handle: {
       path: string;
+      access: "public" | "private";
       apiKey?: string;
       apiKeyEnv?: string;
       enableJsonResponse: boolean;

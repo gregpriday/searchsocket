@@ -1,13 +1,13 @@
-import { timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
 import nodePath from "node:path";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { loadConfig, mergeConfig } from "../config/load";
 import { isServerless } from "../core/serverless";
 import { SearchSocketError, toErrorPayload } from "../errors";
-import { createServer as createMcpServer } from "../mcp/server";
+import { createServer as createMcpServer, verifyApiKey } from "../mcp/server";
 import { SearchEngine } from "../search/engine";
-import type { ResolvedSearchSocketConfig, SearchRequest, SearchResult, SearchSocketConfig } from "../types";
+import { toPublicPage, toPublicResults } from "../utils/redact";
+import type { ResolvedSearchSocketConfig, SearchRequest, SearchSocketConfig } from "../types";
 
 interface RateBucket {
   count: number;
@@ -57,6 +57,7 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
   let serveMarkdownVariants = false;
   let mcpPath: string | undefined;
   let mcpApiKey: string | undefined;
+  let mcpAccess: "public" | "private" = "private";
   let mcpEnableJsonResponse = true;
   let rateLimiter: InMemoryRateLimiter | null = null;
   let notConfigured = false;
@@ -86,6 +87,10 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
         mcpApiKey =
           config.mcp.handle.apiKey ??
           (config.mcp.handle.apiKeyEnv ? process.env[config.mcp.handle.apiKeyEnv] : undefined);
+        // `options.config` is handed through unmerged, so a config object built
+        // before this field existed arrives with `access` undefined. Only an
+        // exact "public" opts in; anything else stays private.
+        mcpAccess = config.mcp.handle.access === "public" ? "public" : "private";
         mcpEnableJsonResponse = config.mcp.handle.enableJsonResponse;
 
         if (config.llmsTxt.enable) {
@@ -142,7 +147,7 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
       const isMarkdownVariant = event.request.method === "GET" && event.url.pathname.endsWith(".md");
 
       if (mcpPath && event.url.pathname === mcpPath) {
-        return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
+        return handleMcpRequest(event, mcpAccess, mcpApiKey, mcpEnableJsonResponse, bodyLimit, getEngine);
       }
       if (mcpPath) {
         // Config loaded and path matches neither endpoint
@@ -167,7 +172,7 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
         }
 
         if (mcpPath && event.url.pathname === mcpPath) {
-          return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
+          return handleMcpRequest(event, mcpAccess, mcpApiKey, mcpEnableJsonResponse, bodyLimit, getEngine);
         }
         if (!(serveMarkdownVariants && isMarkdownVariant)) {
           return resolve(event);
@@ -223,7 +228,7 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
 
     // MCP endpoint handling
     if (mcpPath && event.url.pathname === mcpPath) {
-      return handleMcpRequest(event, mcpApiKey, mcpEnableJsonResponse, getEngine);
+      return handleMcpRequest(event, mcpAccess, mcpApiKey, mcpEnableJsonResponse, bodyLimit, getEngine);
     }
     const targetPath = apiPath ?? config.api.path;
 
@@ -341,51 +346,6 @@ function resolveRequestedScope(
   );
 }
 
-/**
- * Strip repository paths from a page-retrieval response.
- *
- * `getPage` returns the page's indexed markdown, which is fine — it is the same
- * content the site already serves publicly. `routeFile` is not: it is a path
- * inside the author's repository, useful to an editing agent and disclosed to
- * nobody else.
- */
-function toPublicPage<T extends { frontmatter?: Record<string, unknown> }>(
-  page: T,
-  config: ResolvedSearchSocketConfig
-): T {
-  if (config.api.exposeInternalFields) return page;
-  if (!page.frontmatter) return page;
-
-  const { routeFile: _routeFile, ...frontmatter } = page.frontmatter;
-  return { ...page, frontmatter };
-}
-
-/**
- * Strip fields a public search response should not carry.
- *
- * `routeFile` is a path inside the author's repository and `chunkText` is the
- * indexed text of a matched section rather than a snippet. Both are useful to an MCP
- * client editing the site and neither belongs in a public search box, so they
- * are opt-in via `api.exposeInternalFields`.
- */
-function toPublicResults(
-  results: SearchResult[],
-  config: ResolvedSearchSocketConfig
-): SearchResult[] {
-  if (config.api.exposeInternalFields) return results;
-
-  return results.map((result) => {
-    const { routeFile: _routeFile, chunkText: _chunkText, breakdown: _breakdown, ...rest } = result;
-    return {
-      ...rest,
-      chunks: result.chunks?.map((chunk) => {
-        const { chunkText: _chunkChunkText, ...chunkRest } = chunk;
-        return chunkRest;
-      })
-    } as SearchResult;
-  });
-}
-
 function isApiPath(pathname: string, apiPath: string): boolean {
   return pathname === apiPath || pathname.startsWith(apiPath + "/");
 }
@@ -443,7 +403,7 @@ async function handleGetSearch(
   const result = await engine.search(searchRequest);
 
   return withCors(
-    new Response(JSON.stringify({ ...result, results: toPublicResults(result.results, config) }), {
+    new Response(JSON.stringify({ ...result, results: toPublicResults(result.results, !config.api.exposeInternalFields) }), {
       status: 200,
       headers: { "content-type": "application/json", "cache-control": "no-store" }
     }),
@@ -489,7 +449,7 @@ async function handleGetPage(
   const result = await engine.getPage(pagePath, scope);
 
   return withCors(
-    new Response(JSON.stringify(toPublicPage(result, config)), {
+    new Response(JSON.stringify(toPublicPage(result, !config.api.exposeInternalFields)), {
       status: 200,
       headers: { "content-type": "application/json", "cache-control": "no-store" }
     }),
@@ -571,7 +531,7 @@ async function handlePostSearch(
   const result = await engine.search(searchRequest);
 
   return withCors(
-    new Response(JSON.stringify({ ...result, results: toPublicResults(result.results, config) }), {
+    new Response(JSON.stringify({ ...result, results: toPublicResults(result.results, !config.api.exposeInternalFields) }), {
       status: 200,
       headers: { "content-type": "application/json", "cache-control": "no-store" }
     }),
@@ -582,8 +542,10 @@ async function handlePostSearch(
 
 async function handleMcpRequest(
   event: any,
+  access: "public" | "private",
   apiKey: string | undefined,
   enableJsonResponse: boolean,
+  bodyLimit: number,
   getEngine: () => Promise<SearchEngine>
 ): Promise<Response> {
   const method = event.request.method;
@@ -620,10 +582,19 @@ async function handleMcpRequest(
 
   // MCP is a privileged surface: its tools return repository paths, a page's
   // indexed markdown, and any scope the caller names — none of which the browser API
-  // discloses. It must therefore fail closed. Previously the auth check was
-  // wrapped in `if (apiKey)`, so a deployment that never configured a key — or
-  // whose `apiKeyEnv` was unset in production — served all of that to anyone.
-  if (!apiKey) {
+  // discloses. It therefore fails closed unless the deployment says otherwise.
+  // Previously the auth check was wrapped in `if (apiKey)`, so a deployment
+  // that never configured a key — or whose `apiKeyEnv` was unset in production
+  // — served all of that to anyone.
+  //
+  // `mcp.handle.access: "public"` is the deliberate opt-out: an anonymous
+  // caller is served, but with the same fields stripped that the browser API
+  // already withholds, so what it can reach is the site's published content and
+  // nothing more.
+  const isPublic = access === "public";
+
+
+  if (!apiKey && !isPublic) {
     return new Response(
       JSON.stringify({
         jsonrpc: "2.0",
@@ -631,7 +602,8 @@ async function handleMcpRequest(
           code: -32001,
           message:
             "MCP endpoint is not configured with an API key. Set mcp.handle.apiKey " +
-            "(or mcp.handle.apiKeyEnv) to enable it, or set mcp.enable: false to disable the route. " +
+            "(or mcp.handle.apiKeyEnv) to enable it, set mcp.handle.access: 'public' to serve " +
+            "anonymous callers a redacted result set, or set mcp.enable: false to disable the route. " +
             "If the key is set and this still fails under `vite dev`: apiKeyEnv reads process.env, " +
             "which a SvelteKit dev server does not populate from .env. Pass it explicitly instead — " +
             "mcp.handle.apiKey: env.YOUR_KEY from $env/dynamic/private."
@@ -642,18 +614,62 @@ async function handleMcpRequest(
     );
   }
 
-  const authHeader = event.request.headers.get("authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  const tokenBuf = Buffer.from(token);
-  const keyBuf = Buffer.from(apiKey);
-  if (tokenBuf.length !== keyBuf.length || !timingSafeEqual(tokenBuf, keyBuf)) {
-    return new Response(
+  const unauthorized = () =>
+    new Response(
       JSON.stringify({
         jsonrpc: "2.0",
         error: { code: -32001, message: "Unauthorized" },
         id: null
       }),
       { status: 401, headers: { "content-type": "application/json" } }
+    );
+
+  // A caller that sent no Authorization header at all is anonymous. One that
+  // sent a header is attempting to authenticate, so a wrong or malformed
+  // credential is a 401 even under public access — a misconfigured editing
+  // agent should be told its key is bad, not quietly downgraded to the public
+  // result set and left wondering where `routeFile` went.
+  const authHeader: string | null = event.request.headers.get("authorization");
+  let isAnonymous = false;
+
+  if (authHeader === null) {
+    if (!isPublic) return unauthorized();
+    isAnonymous = true;
+  } else {
+    if (!apiKey) return unauthorized();
+    // The scheme name is case-insensitive and may be followed by more than one
+    // space (RFC 7235 grammar is `1*SP`); the credential itself is neither, and
+    // is compared byte-exact below.
+    const bearer = /^Bearer +(.*)$/is.exec(authHeader);
+    if (!bearer) return unauthorized();
+
+    const token = bearer[1] ?? "";
+    // `verifyApiKey` hashes both sides to equal-length digests before
+    // comparing, so an attacker cannot learn the key's length from how long a
+    // rejection takes — the previous inline length check leaked exactly that.
+    if (token.length === 0 || !verifyApiKey(token, apiKey)) return unauthorized();
+  }
+
+  // Only now that the caller is entitled to the endpoint. Placing this before
+  // the checks above turned a private deployment's 503 into a 413 and told an
+  // unauthenticated caller the configured threshold.
+  //
+  // The transport owns the body stream — reading it here to measure it would
+  // leave nothing for `handleRequest` — so this bounds the declared length
+  // only, the same first check `handlePostSearch` makes. A client that omits
+  // content-length is not stopped by it; platform limits are the real backstop.
+  // Worth having anyway: until now every caller here had presented a key.
+  const declaredLength = Number(event.request.headers.get("content-length") ?? 0);
+  if (declaredLength > bodyLimit) {
+    return new Response(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        // Implementation-defined server error, as used by the 405s above. The
+        // request is a structurally valid one, so -32600 would misreport it.
+        error: { code: -32000, message: "Request body too large" },
+        id: null
+      }),
+      { status: 413, headers: { "content-type": "application/json" } }
     );
   }
 
@@ -666,7 +682,7 @@ async function handleMcpRequest(
 
   try {
     const engine = await getEngine();
-    server = createMcpServer(engine);
+    server = createMcpServer(engine, { redact: isAnonymous });
 
     await (server as ReturnType<typeof createMcpServer>).connect(transport);
     const response = await transport.handleRequest(event.request);
