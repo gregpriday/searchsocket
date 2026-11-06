@@ -1003,6 +1003,28 @@ describe("searchsocketHandle llms.txt serving", () => {
     expect(resolve).not.toHaveBeenCalled();
   });
 
+  it("serves the configured full export only when enabled", async () => {
+    await fs.mkdir(path.join(tmpDir, "static", "docs"), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, "static", "docs", "export-full.md"), "full content");
+    const config = makeConfig({ llmsTxt: { enable: true, outputPath: "static/docs/export.md", generateFull: true } } as Partial<ResolvedSearchSocketConfig>);
+    const resolve = vi.fn().mockImplementation(async () => new Response("fallback"));
+    const event = makeEvent({ pathname: "/docs/export-full.md", method: "GET" });
+    expect(await (await searchsocketHandle({ config, cwd: tmpDir })({ event, resolve })).text()).toBe("full content");
+    config.llmsTxt.generateFull = false;
+    expect(await (await searchsocketHandle({ config, cwd: tmpDir })({ event, resolve })).text()).toBe("fallback");
+  });
+
+  it("maps native paths under static to URL paths", async () => {
+    await fs.mkdir(path.join(tmpDir, "static", "docs"), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, "static", "docs", "llms.txt"), "index");
+    await fs.writeFile(path.join(tmpDir, "static", "docs", "llms-full.txt"), "full");
+    const config = makeConfig({ llmsTxt: { enable: true, outputPath: path.join("static", "docs", "llms.txt"), generateFull: true } } as Partial<ResolvedSearchSocketConfig>);
+    const handle = searchsocketHandle({ config, cwd: tmpDir });
+    const resolve = vi.fn().mockResolvedValue(new Response("fallback"));
+    expect(await (await handle({ event: makeEvent({ pathname: "/docs/llms.txt", method: "GET" }), resolve })).text()).toBe("index");
+    expect(await (await handle({ event: makeEvent({ pathname: "/docs/llms-full.txt", method: "GET" }), resolve })).text()).toBe("full");
+  });
+
   it("falls through when llms.txt is enabled but file does not exist", async () => {
     const config = makeConfig({
       llmsTxt: {

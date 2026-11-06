@@ -53,6 +53,18 @@ function withMcp(
 }
 
 describe("generateLlmsTxt", () => {
+  it("keeps multiline metadata and bracketed titles within their markdown entries", () => {
+    const config = makeConfig({ title: "My\nSite", description: "First\nsecond" });
+    const pages = [makePage({ title: "Intro [draft]", description: "line one\nline two" })];
+    expect(generateLlmsTxt(pages, config)).toContain("# My Site\n\n> First second");
+    expect(generateLlmsTxt(pages, config)).toContain("- [Intro \\[draft\\]](/docs/intro): line one line two");
+    expect(generateLlmsFullTxt(pages, config)).toContain("## [Intro \\[draft\\]](/docs/intro)");
+  });
+  it("escapes special characters in link destinations", () => {
+    const pages = [makePage({ url: "/docs/a (b)" })];
+    expect(generateLlmsTxt(pages, makeConfig())).toContain("](/docs/a%20%28b%29)");
+    expect(generateLlmsFullTxt(pages, makeConfig())).toContain("](/docs/a%20%28b%29)");
+  });
   it("generates valid llms.txt with title, description, and page entries", () => {
     const config = makeConfig({ title: "My Site", description: "A site about things." });
     const pages = [
@@ -217,6 +229,46 @@ describe("writeLlmsTxt", () => {
 
     const fullContent = await fs.readFile(path.join(tmpDir, "static/llms-full.txt"), "utf8");
     expect(fullContent).toContain("Full content here.");
+  });
+
+  it("copies both current exports to existing adapter outputs under the static-relative path", async () => {
+    const config = makeConfig({ outputPath: "static/docs/llms.txt", generateFull: true });
+    for (const dir of [".vercel/output/static", ".svelte-kit/cloudflare", "build/client"]) {
+      await fs.mkdir(path.join(tmpDir, dir), { recursive: true });
+    }
+    await writeLlmsTxt([makePage()], config, tmpDir, logger);
+    const index = await fs.readFile(path.join(tmpDir, "static/docs/llms.txt"), "utf8");
+    const full = await fs.readFile(path.join(tmpDir, "static/docs/llms-full.txt"), "utf8");
+    for (const dir of [".vercel/output/static", ".svelte-kit/cloudflare", "build/client", "build"]) {
+      expect(await fs.readFile(path.join(tmpDir, dir, "docs/llms.txt"), "utf8")).toBe(index);
+      expect(await fs.readFile(path.join(tmpDir, dir, "docs/llms-full.txt"), "utf8")).toBe(full);
+    }
+  });
+
+  it("does not overwrite node adapter server files", async () => {
+    await fs.mkdir(path.join(tmpDir, "build/client"), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, "build/handler.js"), "server handler");
+    await writeLlmsTxt([], makeConfig({ outputPath: "static/handler.js" }), tmpDir, logger);
+    expect(await fs.readFile(path.join(tmpDir, "build/handler.js"), "utf8")).toBe("server handler");
+    expect(await fs.readFile(path.join(tmpDir, "build/client/handler.js"), "utf8")).toContain("# test-project");
+  });
+
+  it("does not copy non-static exports or create absent build directories", async () => {
+    await writeLlmsTxt([], makeConfig({ outputPath: "exports/llms.txt" }), tmpDir, logger);
+    await expect(fs.access(path.join(tmpDir, "build"))).rejects.toThrow();
+  });
+
+  it("does not publish a full export when it is disabled", async () => {
+    await fs.mkdir(path.join(tmpDir, "build"));
+    await writeLlmsTxt([], makeConfig({ generateFull: false }), tmpDir, logger);
+    await expect(fs.access(path.join(tmpDir, "build/llms.txt"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(tmpDir, "build/llms-full.txt"))).rejects.toThrow();
+  });
+
+  it("propagates errors writing the packaged export", async () => {
+    await fs.mkdir(path.join(tmpDir, "build"));
+    await fs.mkdir(path.join(tmpDir, "build/llms.txt"));
+    await expect(writeLlmsTxt([], makeConfig(), tmpDir, logger)).rejects.toThrow();
   });
 
   it("keeps the two exports apart when outputPath has no .txt extension", async () => {

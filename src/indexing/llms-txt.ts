@@ -3,6 +3,20 @@ import path from "node:path";
 import type { IndexedPage, ResolvedSearchSocketConfig } from "../types";
 import type { Logger } from "../core/logger";
 
+function singleLine(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function linkText(value: string): string {
+  return singleLine(value).replace(/\\/g, "\\\\").replace(/[\[\]]/g, "\\$&");
+}
+
+function linkDestination(value: string): string {
+  return value.replace(/[\s()\\<>]/g, (char) =>
+    char === "(" ? "%28" : char === ")" ? "%29" : encodeURIComponent(char)
+  );
+}
+
 /**
  * Build the absolute URL for a page, given the project's baseUrl.
  * Falls back to the raw page URL (relative path) if baseUrl is not configured.
@@ -126,10 +140,10 @@ export function generateLlmsTxt(
   const description = config.llmsTxt.description;
   const baseUrl = config.project.baseUrl;
 
-  const lines: string[] = [`# ${title}`];
+  const lines: string[] = [`# ${singleLine(title)}`];
 
   if (description) {
-    lines.push("", `> ${description}`);
+    lines.push("", `> ${singleLine(description)}`);
   }
 
   lines.push(...buildRetrievalSection(config));
@@ -148,11 +162,11 @@ export function generateLlmsTxt(
   if (sorted.length > 0) {
     lines.push("", "## Pages", "");
     for (const page of sorted) {
-      const url = resolvePageUrl(page.url, baseUrl);
+      const url = linkDestination(resolvePageUrl(page.url, baseUrl));
       if (page.description) {
-        lines.push(`- [${page.title}](${url}): ${page.description}`);
+        lines.push(`- [${linkText(page.title)}](${url}): ${singleLine(page.description)}`);
       } else {
-        lines.push(`- [${page.title}](${url})`);
+        lines.push(`- [${linkText(page.title)}](${url})`);
       }
     }
   }
@@ -175,10 +189,10 @@ export function generateLlmsFullTxt(
   const description = config.llmsTxt.description;
   const baseUrl = config.project.baseUrl;
 
-  const lines: string[] = [`# ${title}`];
+  const lines: string[] = [`# ${singleLine(title)}`];
 
   if (description) {
-    lines.push("", `> ${description}`);
+    lines.push("", `> ${singleLine(description)}`);
   }
 
   lines.push(...buildRetrievalSection(config));
@@ -193,8 +207,8 @@ export function generateLlmsFullTxt(
   });
 
   for (const page of sorted) {
-    const url = resolvePageUrl(page.url, baseUrl);
-    lines.push("", "---", "", `## [${page.title}](${url})`, "");
+    const url = linkDestination(resolvePageUrl(page.url, baseUrl));
+    lines.push("", "---", "", `## [${linkText(page.title)}](${url})`, "");
     lines.push(page.markdown.trim());
   }
 
@@ -240,5 +254,31 @@ export async function writeLlmsTxt(
     await fs.writeFile(fullPath, fullContent, "utf8");
     const relativeFull = path.relative(cwd, fullPath);
     logger.info(`Generated llms-full.txt at ${relativeFull}`);
+  }
+
+  const relativeStaticPath = path.relative(path.resolve(cwd, "static"), outputPath);
+  if (!relativeStaticPath || relativeStaticPath === ".." || relativeStaticPath.startsWith(`..${path.sep}`) || path.isAbsolute(relativeStaticPath)) return;
+
+  let nodeAdapter = false;
+  try {
+    nodeAdapter = (await fs.stat(path.resolve(cwd, "build/handler.js"))).isFile();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  for (const outputDir of [".vercel/output/static", ".svelte-kit/cloudflare", "build/client", "build"]) {
+    if (outputDir === "build" && nodeAdapter) continue;
+    const targetDir = path.resolve(cwd, outputDir);
+    try {
+      if (!(await fs.stat(targetDir)).isDirectory()) continue;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    const target = path.join(targetDir, relativeStaticPath);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.copyFile(outputPath, target);
+    if (config.llmsTxt.generateFull) {
+      await fs.copyFile(deriveFullOutputPath(outputPath), deriveFullOutputPath(target));
+    }
   }
 }
