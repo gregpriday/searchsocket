@@ -912,7 +912,7 @@ The advertised URLs come from `api.path` and `mcp.handle.path` in your config, r
 index time. If you override the served path with `searchsocketHandle({ path })`, set
 `api.path` to the same value or the file will advertise a URL your site does not serve.
 
-After indexing, `llms.txt` (page index with links) and `llms-full.txt` (full content) are written to your static directory. `searchsocketHandle()` serves the file at `llmsTxt.outputPath` directly; `llms-full.txt` has no handler of its own and is served as a static asset, so it has to be in the deployed output. If your adapter copies `static/` before indexing runs, generate these ahead of the adapter step or serve them from your own route.
+After indexing, `llms.txt` (page index with links) and, when enabled, `llms-full.txt` (full content) are written to your static directory and existing adapter output directories. `searchsocketHandle()` serves both files directly when enabled.
 
 These are published artifacts with no second copy to recover from, so they are only
 replaced by a run that held the **complete** page list. A truncated crawl, a failed

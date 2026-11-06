@@ -7,6 +7,7 @@ import { loadConfig, mergeConfig } from "../config/load";
 import { Logger } from "../core/logger";
 import { isServerless } from "../core/serverless";
 import { SearchSocketError, toErrorPayload } from "../errors";
+import { deriveFullOutputPath } from "../indexing/llms-txt";
 import { createServer as createMcpServer, verifyApiKey } from "../mcp/server";
 import { SearchEngine } from "../search/engine";
 import { toPublicPage, toPublicResults } from "../utils/redact";
@@ -163,6 +164,7 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
   // `options.path` so the hook can claim it even when the config is broken.
   let apiPath = options.path ?? options.config?.api.path ?? options.rawConfig?.api?.path;
   let llmsServePath: string | null = null;
+  let llmsFullServePath: string | null = null;
   let serveMarkdownVariants = false;
   let mcpPath: string | undefined;
   let mcpApiKey: string | undefined;
@@ -205,7 +207,10 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
         mcpEnableJsonResponse = config.mcp.handle.enableJsonResponse;
 
         if (config.llmsTxt.enable) {
-          llmsServePath = "/" + config.llmsTxt.outputPath.replace(/^static\//, "");
+          llmsServePath = "/" + config.llmsTxt.outputPath.replace(/\\/g, "/").replace(/^static\//, "");
+          llmsFullServePath = config.llmsTxt.generateFull
+            ? "/" + deriveFullOutputPath(config.llmsTxt.outputPath).replace(/\\/g, "/").replace(/^static\//, "")
+            : null;
           serveMarkdownVariants = config.llmsTxt.serveMarkdownVariants;
         }
 
@@ -306,9 +311,12 @@ export function searchsocketHandle(options: SearchSocketHandleOptions = {}) {
     }
 
     // Serve llms.txt if enabled and the file exists
-    if (llmsServePath && method === "GET" && pathname === llmsServePath) {
+    if (method === "GET" && (pathname === llmsServePath || pathname === llmsFullServePath)) {
       const cwd = options.cwd ?? process.cwd();
-      const filePath = nodePath.resolve(cwd, config.llmsTxt.outputPath);
+      const outputPath = pathname === llmsFullServePath
+        ? deriveFullOutputPath(config.llmsTxt.outputPath)
+        : config.llmsTxt.outputPath;
+      const filePath = nodePath.resolve(cwd, outputPath);
       try {
         const content = await fs.readFile(filePath, "utf8");
         return new Response(content, {
